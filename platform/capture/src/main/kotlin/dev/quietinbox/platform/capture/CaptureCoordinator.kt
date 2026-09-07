@@ -991,7 +991,6 @@ class CaptureCoordinator @Inject constructor(
                     _status.update { it.copy(acceptedCount = it.acceptedCount + 1) }
                     bitmapHandedOver = processJournaled(snapshot, item.generation, item.captured.bitmap)
                 } catch (e: VaultUnavailableException) {
-                    _status.update { it.copy(vaultLocked = true, listenerState = ListenerState.DEGRADED) }
                     // The vault went away before the commit (an event journaled first is replayed later;
                     // one not journaled is lost): record an observable gap once per lock-out.
                     if (!vaultGapOpen) {
@@ -1004,6 +1003,11 @@ class CaptureCoordinator @Inject constructor(
                         // The gap table is behind the same lock: remembered, written when the vault opens.
                         if (!written) vaultGapSince = snapshot.observedAtEpochMs
                     }
+                    // Published last: whoever reacts to the lock-out (the vault collector on the next
+                    // Ready, a test synchronising on it) must find the gap already open, or a vault that
+                    // reopens at once closes nothing and the lock-out leaves no record (round 39, agy M1:
+                    // the one-in-six flake of the lock-out test was this order, not the waiting gate).
+                    _status.update { it.copy(vaultLocked = true, listenerState = ListenerState.DEGRADED) }
                 } catch (e: Exception) {
                     if (e is CancellationException) throw e
                     if (journaled) {

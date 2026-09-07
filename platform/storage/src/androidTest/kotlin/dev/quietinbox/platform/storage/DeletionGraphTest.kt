@@ -125,7 +125,7 @@ class DeletionGraphTest {
         // A retry keeps the payload: the event is not finished yet.
         val retried = bigText("Alice", "retry text", "j3", "t3")
         ingest.journal(retried, "gen", 60_000) shouldBe true
-        ingest.markJournalRetryable("j3", "boom")
+        ingest.markJournalRetryable("j3", "boom") {}
         db.journalDao().state("j3") shouldBe "PENDING"
         db.journalDao().payload("j3")!!.contains("retry text") shouldBe true
         Unit

@@ -216,6 +216,7 @@
     <string name="gap_reason_source_paused">you paused this source</string>
     <string name="gap_reason_messages_dropped">the notification held more messages than could be read</string>
     <string name="gap_reason_unknown">unknown</string>
+    <string name="gap_reason_commit_failed">could not be saved after repeated attempts</string>
     <string name="health_diagnostics_title">Local diagnostics (last 7 days)</string>
     <string name="health_diagnostics_empty">No diagnostic events. Nothing is ever uploaded.</string>
     <string name="diag_parse_warnings">The parser had to cut something short</string>

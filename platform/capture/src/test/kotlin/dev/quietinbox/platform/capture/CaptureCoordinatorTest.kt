@@ -21,6 +21,7 @@ import dev.quietinbox.platform.storage.db.GapIntervalEntity
 import dev.quietinbox.platform.storage.repo.CommitOutcome
 import dev.quietinbox.platform.storage.repo.HealthRepository
 import dev.quietinbox.platform.storage.repo.IngestRepository
+import dev.quietinbox.platform.storage.repo.JournalRetry
 import dev.quietinbox.platform.storage.repo.JournalCursor
 import dev.quietinbox.platform.storage.repo.LossClaim
 import dev.quietinbox.platform.storage.repo.JournalPage
@@ -165,6 +166,7 @@ class CaptureCoordinatorTest : FunSpec({
             journalAnswers { true }
             installGapStore()
             installLossClaim()
+            installRetry()
         }
 
         /**
@@ -291,6 +293,47 @@ class CaptureCoordinatorTest : FunSpec({
             }
             installPendingJournal()
             installPendingReplay()
+        }
+
+        /** Attempts charged per event id, as the journal's `attempts` column holds them. */
+        val attempts: MutableMap<String, Int> = Collections.synchronizedMap(HashMap())
+
+        /** Rows filed FAILED with the loss of the whole event recorded first (issue #28). */
+        val exhausted: MutableSet<String> = Collections.synchronizedSet(HashSet())
+
+        /**
+         * A failed commit charged to the row, as the repository does it: within the budget the row
+         * stays; at the threshold the loss callback runs first and the row is filed only if it
+         * succeeded, else the row is parked — or, when the vault refuses that write too, left where
+         * it was. The transaction that makes the record and the filing one thing is SQL, decided in
+         * `JournalLossTransactionTest`; what these tests decide is that the coordinator hands the
+         * record in at both entrances and what it does with the answer.
+         */
+        private fun installRetry() {
+            coEvery { ingest.markJournalRetryable(any(), any(), any()) } coAnswers {
+                val id = firstArg<String>()
+                val loss = thirdArg<suspend () -> Unit>()
+                val n = synchronized(attempts) { (attempts[id] ?: 0) + 1 }.also { attempts[id] = it }
+                if (n < IngestRepository.MAX_ATTEMPTS) {
+                    JournalRetry.RETRYABLE
+                } else {
+                    try {
+                        loss()
+                        attempts.remove(id)
+                        exhausted += id
+                        synchronized(pendingReplay) { pendingReplay.removeAll { it.second.eventId == id } }
+                        JournalRetry.FAILED_RECORDED
+                    } catch (e: Throwable) {
+                        attempts[id] = n - 1
+                        if (!deferralsFail) {
+                            lossDeferred += id
+                            JournalRetry.FAILED_DEFERRED
+                        } else {
+                            JournalRetry.RETRYABLE
+                        }
+                    }
+                }
+            }
         }
 
         /**
@@ -599,7 +642,7 @@ class CaptureCoordinatorTest : FunSpec({
         coordinator.offerCaptured(captured("evt-ok"))
 
         awaitUntil { h.journaled shouldBe listOf("evt-boom", "evt-ok") }
-        coVerify(timeout = 5_000, exactly = 1) { h.ingest.markJournalRetryable("evt-boom", "IllegalStateException") }
+        coVerify(timeout = 5_000, exactly = 1) { h.ingest.markJournalRetryable("evt-boom", "IllegalStateException", any()) }
         awaitUntil { coordinator.status.value.acceptedCount shouldBe 2L }
     }
 
@@ -616,7 +659,7 @@ class CaptureCoordinatorTest : FunSpec({
         // failure was never swallowed into the journal's retry bookkeeping.
         coordinator.offerCaptured(captured("evt-after-cancel"))
         stillHolds { h.journaled shouldBe listOf("evt-cancelled") }
-        coVerify(exactly = 0) { h.ingest.markJournalRetryable(any(), any()) }
+        coVerify(exactly = 0) { h.ingest.markJournalRetryable(any(), any(), any()) }
     }
 
     test("disconnecting clears the generation, ends the session and opens a gap") {
@@ -877,7 +920,7 @@ class CaptureCoordinatorTest : FunSpec({
         // somewhere" was never a useful thing to tell a bug report.
         coVerify(timeout = 5_000, exactly = 1) { h.health.recordGap(any(), any(), GapReason.UNKNOWN, GapPrecision.EXACT, any(), ENABLED_PKG) }
         coVerify(timeout = 5_000, exactly = 1) { h.ingest.diagnostic("JOURNAL_FAILED", "IllegalStateException", ENABLED_PKG, any()) }
-        coVerify(exactly = 0) { h.ingest.markJournalRetryable("evt-busy", any()) }
+        coVerify(exactly = 0) { h.ingest.markJournalRetryable("evt-busy", any(), any()) }
     }
 
     test("when the vault does not open, held notifications are dropped unread and a bounded gap is recorded") {
@@ -1666,7 +1709,7 @@ class CaptureCoordinatorTest : FunSpec({
             // what they were missing went missing with them, and it writes COMMITTED itself, so
             // `markJournal` never sees it: asserting only on `markJournal` asserts nothing here.
             coVerify(exactly = 0) { h.ingest.commit(any(), any(), any(), any(), any(), any(), any(), any()) }
-            coVerify(exactly = 0) { h.ingest.markJournalRetryable(any(), any()) }
+            coVerify(exactly = 0) { h.ingest.markJournalRetryable(any(), any(), any()) }
             coVerify(exactly = 0) { h.ingest.markJournal("evt-claim-fails", any(), any()) }
             h.gaps.isEmpty() shouldBe true
         }
@@ -1708,7 +1751,7 @@ class CaptureCoordinatorTest : FunSpec({
         // And the blocked rows paid for it with their place on the page, not with their evidence:
         // no attempt was charged to any of them, and none was given up on.
         stillHolds {
-            coVerify(exactly = 0) { h.ingest.markJournalRetryable(any(), any()) }
+            coVerify(exactly = 0) { h.ingest.markJournalRetryable(any(), any(), any()) }
             h.lossDeferred.size shouldBe 200
             h.gaps.isEmpty() shouldBe true
         }
@@ -1768,6 +1811,10 @@ class CaptureCoordinatorTest : FunSpec({
         val coordinator = h.coordinator()
         coordinator.onConnected(h.service)
         h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
+        // The pass defers the row, drains, resumes it once and defers it again before it ends: wait
+        // for the second claim, or the flip below lands while the pass is still trying and the
+        // resumed claim simply succeeds — a race in the test, not a retry by the code.
+        awaitUntil { coVerify(exactly = 2) { h.ingest.claimEventLoss("evt-stuck-2", any()) } }
         awaitUntil { h.lossDeferred shouldBe setOf("evt-stuck-2") }
 
         h.gapWritesFail = false
@@ -1861,7 +1908,7 @@ class CaptureCoordinatorTest : FunSpec({
         coVerify(timeout = 10_000, atLeast = 1) { h.ingest.commit(any(), any(), any(), any(), any(), any(), any(), any()) }
         stillHolds {
             h.lossDeferred.size shouldBe 200
-            coVerify(exactly = 0) { h.ingest.markJournalRetryable(any(), any()) }
+            coVerify(exactly = 0) { h.ingest.markJournalRetryable(any(), any(), any()) }
         }
     }
 
@@ -2084,5 +2131,133 @@ class CaptureCoordinatorTest : FunSpec({
 
         withTimeout(5_000) { committed.await() }
         stillHolds { coVerify(exactly = 0) { h.health.recordGap(any(), any(), GapReason.MESSAGES_DROPPED, any(), any(), any()) } }
+    }
+    // ---- Issue #28: a row whose commit attempts run out is given up on with its loss recorded ----
+
+    /** A row with content, so the parser yields a candidate and the replay reaches the commit. */
+    fun pendingWithContent(eventId: String, observedAt: Long, pkg: String = ENABLED_PKG) =
+        "gen-old" to Fixtures.snapshot(Fixtures.base(title = "A", text = "hi $eventId"), packageName = pkg, eventId = eventId, observedAt = observedAt)
+
+    test("a row whose commit attempts run out is given up on with the loss of the whole event recorded, once") {
+        val h = Harness()
+        h.pendingReplay += pendingWithContent("evt-doomed", 1_000L)
+        coEvery { h.ingest.isJournalPending(any()) } answers { firstArg<String>() !in h.exhausted }
+        coEvery { h.ingest.commit(any(), any(), any(), any(), any(), any(), any(), any()) } throws IllegalStateException("disk")
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+
+        // One attempt per pass: the row is charged and left, the pass finds no progress and ends.
+        h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
+        awaitUntil { h.attempts["evt-doomed"] shouldBe 1 }
+        coordinator.setPaused(true); coordinator.setPaused(false)
+        awaitUntil { h.attempts["evt-doomed"] shouldBe 2 }
+        stillHolds { h.gaps.none { it.reason == GapReason.COMMIT_FAILED.name } shouldBe true }
+
+        // The third failure is the threshold: the record goes in with the filing.
+        coordinator.setPaused(true); coordinator.setPaused(false)
+        awaitUntil { h.exhausted shouldBe setOf("evt-doomed") }
+        val record = h.gaps.single { it.reason == GapReason.COMMIT_FAILED.name }
+        record.reason shouldBe GapReason.COMMIT_FAILED.name
+        record.precision shouldBe GapPrecision.BOUNDED.name
+        record.packageName shouldBe ENABLED_PKG
+        record.startEpochMs shouldBe 950L
+        record.endEpochMs shouldBe 1_000L
+
+        // Given up on means given up on: no fourth attempt, no second record.
+        coordinator.setPaused(true); coordinator.setPaused(false)
+        stillHolds {
+            coVerify(exactly = 3) { h.ingest.commit(any(), any(), any(), any(), any(), any(), any(), any()) }
+            h.gaps.count { it.reason == GapReason.COMMIT_FAILED.name } shouldBe 1
+        }
+    }
+
+    test("a record that cannot be written parks the row, and the rows behind it are still reached") {
+        val h = Harness()
+        // Round 36 Codex I1's shape, one path further along: the row at the head of the page cannot
+        // be committed *and* the record of giving up on it cannot be written. Left where it is, it
+        // would hold the page and the clean row behind it would never be read.
+        h.pendingReplay += pendingWithContent("evt-doomed", 1_000L)
+        h.pendingReplay += pendingWithContent("evt-fine", 2_000L)
+        h.attempts["evt-doomed"] = 2
+        val committed = Collections.synchronizedSet(HashSet<String>())
+        coEvery { h.ingest.isJournalPending(any()) } answers { val id = firstArg<String>(); id !in h.exhausted && id !in committed }
+        coEvery { h.ingest.commit(any(), any(), any(), any(), any(), any(), any(), any()) } coAnswers {
+            val id = firstArg<NotificationSnapshot>().eventId
+            if (id == "evt-doomed") throw IllegalStateException("disk")
+            committed += id
+            // A committed row has left PENDING, so the page no longer returns it — which is what
+            // lets the pass drain and put the parked row back.
+            synchronized(h.pendingReplay) { h.pendingReplay.removeAll { it.second.eventId == id } }
+            CommitOutcome(1L, listOf(1L), emptyList(), emptyList(), 0, false)
+        }
+        h.gapWritesFail = true
+        val coordinator = h.coordinator()
+        coordinator.replayPageSize = 1
+        coordinator.onConnected(h.service)
+
+        h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
+
+        awaitUntil { h.lossDeferred shouldBe setOf("evt-doomed") }
+        awaitUntil { committed shouldBe setOf("evt-fine") }
+        stillHolds { h.gaps.isEmpty() shouldBe true }
+        h.attempts["evt-doomed"] shouldBe 2
+
+        // A gap write is next seen to succeed: the parked row is resumed and the commit tried once
+        // more — still failing here, so this time it is given up on with its record.
+        h.gapWritesFail = false
+        coordinator.offerCaptured(capturedWithTruncation("evt-live", setOf(TruncationFlag.MESSAGES_DROPPED)))
+        awaitUntil { h.exhausted shouldBe setOf("evt-doomed") }
+        h.gaps.count { it.reason == GapReason.COMMIT_FAILED.name && it.packageName == ENABLED_PKG } shouldBe 1
+    }
+
+    test("a row that can neither be recorded nor parked is not counted as progress") {
+        val h = Harness()
+        // The negative control for the test above: the vault refuses the deferral too. The row is
+        // still a candidate, and a pass that claimed progress anyway would re-read the same page
+        // until its round limit (the shape of round 37 subagent C2-b).
+        h.pendingReplay += pendingWithContent("evt-doomed", 1_000L)
+        h.pendingReplay += pendingWithContent("evt-fine", 2_000L)
+        h.attempts["evt-doomed"] = 2
+        coEvery { h.ingest.isJournalPending(any()) } answers { firstArg<String>() !in h.exhausted }
+        coEvery { h.ingest.commit(any(), any(), any(), any(), any(), any(), any(), any()) } throws IllegalStateException("disk")
+        h.gapWritesFail = true
+        h.deferralsFail = true
+        val coordinator = h.coordinator()
+        coordinator.replayPageSize = 1
+        coordinator.onConnected(h.service)
+
+        h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
+
+        // Charged once, not parked, and the pass ends there rather than spinning on the same page.
+        awaitUntil { coVerify(exactly = 1) { h.ingest.markJournalRetryable("evt-doomed", any(), any()) } }
+        stillHolds {
+            h.lossDeferred.isEmpty() shouldBe true
+            coVerify(exactly = 1) { h.ingest.commit(any(), any(), any(), any(), any(), any(), any(), any()) }
+        }
+    }
+
+    test("the live entrance hands in the same record as the replay") {
+        val h = Harness()
+        // A live event's first failure is never the threshold, so the record is not written here —
+        // but the callback the coordinator hands in is the one the repository would run, and it
+        // must say COMMIT_FAILED for this source.
+        val handedIn = CompletableDeferred<suspend () -> Unit>()
+        coEvery { h.ingest.markJournalRetryable("evt-live-fail", any(), any()) } coAnswers {
+            handedIn.complete(thirdArg())
+            JournalRetry.RETRYABLE
+        }
+        coEvery { h.ingest.commit(any(), any(), any(), any(), any(), any(), any(), any()) } throws IllegalStateException("disk")
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+
+        coordinator.offerCaptured(CapturedNotification(Fixtures.snapshot(Fixtures.base(title = "A", text = "hi"), packageName = ENABLED_PKG, eventId = "evt-live-fail"), null))
+
+        val loss = withTimeout(5_000) { handedIn.await() }
+        h.gaps.isEmpty() shouldBe true
+        loss()
+        val record = h.gaps.single()
+        record.reason shouldBe GapReason.COMMIT_FAILED.name
+        record.precision shouldBe GapPrecision.BOUNDED.name
+        record.packageName shouldBe ENABLED_PKG
     }
 })

@@ -44,11 +44,22 @@ data class GapIntervalEntity(
 )
 
 /**
- * `event_journal.lossRecorded`: whether the loss the event arrived with has reached the gap table.
+ * `event_journal.lossRecorded`: whether the loss the event arrived with has reached the gap table,
+ * and whether the row is currently out of the replay's reach because a gap write for it failed.
  *
- * Three values rather than a flag because a settlement that *cannot* be written is neither of the
- * other two: calling it unsettled leaves it at the head of every replay page for ever, and calling
- * it settled throws away the only evidence of what was lost.
+ * Two bits, because the two questions are independent. Bit 1 is *settled*: the event's own loss
+ * — the one it arrived with, or the one a release before this carried in unrecorded — is on disk,
+ * and no later pass may write it again. Bit 2 is *deferred*: a gap write the row needed was refused,
+ * and the row is out of every pending read until a pass puts it back. A settlement that cannot be
+ * written is neither settled nor merely unsettled (round 36): calling it unsettled leaves it at the
+ * head of every replay page for ever, and calling it settled throws away the only evidence of what
+ * was lost. And a row whose *commit* attempts ran out needs the same parking place whether its own
+ * loss was settled or not (issue #28), which is why the deferral is a bit on top of the settled
+ * value rather than a third value beside it: a resume gives a row back exactly the settled state
+ * it had, so a settled row cannot be claimed twice on the way back.
+ *
+ * The four values are 0 (unsettled), 1 (settled), 2 (unsettled, deferred), 3 (settled, deferred);
+ * deferral adds 2 and a resume subtracts it, and the replay's candidate reads take `< 2`.
  */
 const val LOSS_UNSETTLED = 0
 
@@ -57,6 +68,12 @@ const val LOSS_SETTLED = 1
 
 /** The gap write failed; retried when one is next seen to succeed, evidence untouched meanwhile. */
 const val LOSS_DEFERRED = 2
+
+/** [LOSS_DEFERRED] on a row whose own loss was already settled: a resume takes it back to [LOSS_SETTLED]. */
+const val LOSS_DEFERRED_SETTLED = 3
+
+/** The deferred bit; values at or above it are out of the replay's candidate set. */
+const val LOSS_DEFERRED_BIT = 2
 
 /** Durable, short-TTL copy of accepted input. Committed rows are pruned by retention. */
 @Entity(
@@ -97,12 +114,15 @@ data class EventJournalEntity(
      *   release accepts with a loss, and claimed exactly once for a carried-over row. It is the
      *   idempotency boundary: the claim is a conditional update, so a replayed row cannot record
      *   the same loss a second time.
-     * - [LOSS_DEFERRED]: the gap write failed, and the row is out of the replay's candidate set
-     *   until a gap write is seen to succeed. Without a state of its own such a row is either
-     *   charged for the failure (three tries file it FAILED and clear the payload — round 35) or
-     *   left at the head of every page for ever, starving the rows behind it (round 36 Codex I1).
-     *   The transition back to [LOSS_UNSETTLED] is what makes it a deferral rather than a verdict:
-     *   the payload and the evidence are untouched throughout.
+     * - [LOSS_DEFERRED] and [LOSS_DEFERRED_SETTLED]: a gap write the row needed failed, and the row
+     *   is out of the replay's candidate set until a gap write is seen to succeed. Without a state
+     *   of its own such a row is either charged for the failure (three tries file it FAILED and
+     *   clear the payload — round 35) or left at the head of every page for ever, starving the rows
+     *   behind it (round 36 Codex I1). The transition back — to whichever of the first two it came
+     *   from — is what makes it a deferral rather than a verdict: the payload, the evidence and the
+     *   settled bit are untouched throughout. Two gap writes can put a row here: its own loss
+     *   (only from [LOSS_UNSETTLED]), and the record of its commit attempts running out (from
+     *   either, issue #28).
      */
     val lossRecorded: Int = LOSS_UNSETTLED,
 )

@@ -16,6 +16,11 @@ import dev.quietinbox.platform.storage.repo.IngestRepository
 import dev.quietinbox.platform.storage.db.PENDING_FOR_PACKAGE_AFTER
 import dev.quietinbox.platform.storage.repo.JournalCursor
 import dev.quietinbox.platform.storage.repo.LossClaim
+import dev.quietinbox.platform.storage.db.LOSS_UNSETTLED
+import dev.quietinbox.platform.storage.db.LOSS_SETTLED
+import dev.quietinbox.platform.storage.db.LOSS_DEFERRED_SETTLED
+import dev.quietinbox.platform.storage.db.LOSS_DEFERRED
+import dev.quietinbox.platform.storage.repo.JournalRetry
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
@@ -247,20 +252,6 @@ class JournalLossTransactionTest {
      * what it lost. That hole is older than this release and is issue #28; what this release
      * guarantees is only that a *settlement* failure can no longer be what drives a row into it.
      */
-    @Test
-    fun aRowWhoseCommitAttemptsRunOutLosesItsEvidenceAndSaysNothing() = runBlocking {
-        ready()
-        ingest.journal(snapshot("evt-exhausted"), "gen", 60_000) shouldBe true
-
-        repeat(3) { ingest.markJournalRetryable("evt-exhausted", "REPLAY_IllegalStateException") }
-
-        ingest.isJournalPending("evt-exhausted") shouldBe false
-        // The payload is gone, so the claim can no longer be taken and no gap can ever be written.
-        ingest.pendingJournalForPackage(pkg).snapshots.isEmpty() shouldBe true
-        ingest.claimEventLoss("evt-exhausted") { recordLoss() } shouldBe LossClaim.NOT_PENDING
-        allGaps().isEmpty() shouldBe true
-        Unit
-    }
 
     /**
      * Round 36, subagent C1: the walk itself, not the loop that drives it.
@@ -630,6 +621,214 @@ class JournalLossTransactionTest {
 
         withClue("the batch must not be stored without its record") { messageCount() shouldBe 0 }
         withClue("the row is the replay's to retry") { ingest.isJournalPending("evt-cut-refused") shouldBe true }
+        allGaps().isEmpty() shouldBe true
+        Unit
+    }
+    // ---- Issue #28: a row whose commit attempts run out is given up on with its loss recorded ----
+
+    private suspend fun commitFailure() {
+        health.recordGap(1_000, 2_000, GapReason.COMMIT_FAILED, GapPrecision.BOUNDED, 2_000, pkg)
+    }
+
+    private suspend fun failCommit(eventId: String, loss: suspend () -> Unit = { commitFailure() }) =
+        ingest.markJournalRetryable(eventId, "REPLAY_IllegalStateException", loss)
+
+    private suspend fun lossState(eventId: String) = holder.db().journalDao().pendingLossState(eventId)
+    private suspend fun attempts(eventId: String) = holder.db().journalDao().attempts(eventId)
+    private suspend fun pendingIds() = ingest.pendingJournal().map { it.second.eventId }
+    private suspend fun sql(statement: String) = holder.db().openHelper.writableDatabase.execSQL(statement)
+
+    @Test
+    fun anExhaustedRowRecordsTheWholeEventWithItsFilingAndOnlyOnce() = runBlocking {
+        ready()
+        ingest.journal(snapshot("evt-exhausted"), "gen", 60_000) shouldBe true
+
+        failCommit("evt-exhausted") shouldBe JournalRetry.RETRYABLE
+        failCommit("evt-exhausted") shouldBe JournalRetry.RETRYABLE
+        allGaps().isEmpty() shouldBe true
+        failCommit("evt-exhausted") shouldBe JournalRetry.FAILED_RECORDED
+
+        ingest.isJournalPending("evt-exhausted") shouldBe false
+        pendingIds() shouldBe emptyList()
+        val record = allGaps().single()
+        record.reason shouldBe GapReason.COMMIT_FAILED.name
+        record.packageName shouldBe pkg
+        // Given up on is terminal: a later charge finds nothing to charge and writes nothing.
+        failCommit("evt-exhausted") shouldBe JournalRetry.NOT_PENDING
+        allGaps().size shouldBe 1
+        Unit
+    }
+
+    @Test
+    fun aRecordThatCannotBeWrittenLeavesTheRowPendingAndParksItUntilAPassResumesIt() = runBlocking {
+        ready()
+        ingest.journal(snapshot("evt-parked"), "gen", 60_000) shouldBe true
+        failCommit("evt-parked"); failCommit("evt-parked")
+
+        failCommit("evt-parked") { error("the gap write failed") } shouldBe JournalRetry.FAILED_DEFERRED
+
+        withClue("the rollback kept the row, its attempts and its payload") {
+            ingest.isJournalPending("evt-parked") shouldBe true
+            attempts("evt-parked") shouldBe 2
+            lossState("evt-parked") shouldBe LOSS_DEFERRED
+        }
+        withClue("parked means out of the page, not out of the vault") {
+            pendingIds() shouldBe emptyList()
+            ingest.isReplayCandidate("evt-parked") shouldBe false
+        }
+        allGaps().isEmpty() shouldBe true
+
+        ingest.resumeDeferredSettlements() shouldBe 1
+        lossState("evt-parked") shouldBe LOSS_UNSETTLED
+        pendingIds() shouldBe listOf("evt-parked")
+        // The commit is tried once more; still failing, the record goes in this time.
+        failCommit("evt-parked") shouldBe JournalRetry.FAILED_RECORDED
+        allGaps().single().reason shouldBe GapReason.COMMIT_FAILED.name
+        Unit
+    }
+
+    @Test
+    fun aRowWhoseArrivalLossIsSettledIsParkedAndResumedWithItStillSettled() = runBlocking {
+        ready()
+        ingest.journal(snapshot("evt-settled"), "gen", 60_000) { recordLoss() } shouldBe true
+        lossState("evt-settled") shouldBe LOSS_SETTLED
+        failCommit("evt-settled"); failCommit("evt-settled")
+
+        failCommit("evt-settled") { error("the gap write failed") } shouldBe JournalRetry.FAILED_DEFERRED
+
+        lossState("evt-settled") shouldBe LOSS_DEFERRED_SETTLED
+        // Parked is parked, whatever the settled bit says: a caller that read 3 as "already
+        // recorded, safe to commit" would be round 37's Critical again.
+        ingest.claimEventLoss("evt-settled") { recordLoss() } shouldBe LossClaim.DEFERRED
+        ingest.isReplayCandidate("evt-settled") shouldBe false
+
+        ingest.resumeDeferredSettlements() shouldBe 1
+        lossState("evt-settled") shouldBe LOSS_SETTLED
+        ingest.claimEventLoss("evt-settled") { recordLoss() } shouldBe LossClaim.ALREADY_RECORDED
+        allGaps().count { it.reason == GapReason.MESSAGES_DROPPED.name } shouldBe 1
+        Unit
+    }
+
+    @Test
+    fun aCarriedOverClaimSpentBeforeAParkIsStillSpentAfterIt() = runBlocking {
+        ready()
+        ingest.journal(snapshot("evt-claimed"), "gen", 60_000) shouldBe true
+        ingest.claimEventLoss("evt-claimed") { recordLoss() } shouldBe LossClaim.RECORDED
+        failCommit("evt-claimed"); failCommit("evt-claimed")
+
+        failCommit("evt-claimed") { error("the gap write failed") } shouldBe JournalRetry.FAILED_DEFERRED
+        ingest.resumeDeferredSettlements(pkg) shouldBe 1
+
+        // The resume gave the row back exactly the state it had; writing 0 here would let the
+        // next pass record the same loss a second time.
+        lossState("evt-claimed") shouldBe LOSS_SETTLED
+        ingest.claimEventLoss("evt-claimed") { recordLoss() } shouldBe LossClaim.ALREADY_RECORDED
+        allGaps().count { it.reason == GapReason.MESSAGES_DROPPED.name } shouldBe 1
+        Unit
+    }
+
+    @Test
+    fun theCandidateReadsAgreeOnAllFourValues() = runBlocking {
+        ready()
+        ingest.journal(snapshotAt("evt-0", 100L), "gen", 60_000) shouldBe true
+        ingest.journal(snapshotAt("evt-1", 200L), "gen", 60_000) { recordLoss() } shouldBe true
+        ingest.journal(snapshotAt("evt-2", 300L), "gen", 60_000) shouldBe true
+        ingest.journal(snapshotAt("evt-3", 400L), "gen", 60_000) { recordLoss() } shouldBe true
+        for (id in listOf("evt-2", "evt-3")) {
+            failCommit(id); failCommit(id)
+            failCommit(id) { error("the gap write failed") } shouldBe JournalRetry.FAILED_DEFERRED
+        }
+        listOf("evt-0", "evt-1", "evt-2", "evt-3").map { lossState(it) } shouldBe listOf(LOSS_UNSETTLED, LOSS_SETTLED, LOSS_DEFERRED, LOSS_DEFERRED_SETTLED)
+
+        withClue("the replay reads 0 and 1, never a parked row") { pendingIds() shouldBe listOf("evt-0", "evt-1") }
+        listOf("evt-0", "evt-1", "evt-2", "evt-3").map { ingest.isReplayCandidate(it) } shouldBe listOf(true, true, false, false)
+        withClue("the settle walk reads only rows with something to settle") {
+            ingest.pendingJournalForPackage(pkg).snapshots.map { it.eventId } shouldBe listOf("evt-0")
+        }
+        ingest.claimEventLoss("evt-3") { recordLoss() } shouldBe LossClaim.DEFERRED
+        ingest.claimEventLoss("evt-2") { recordLoss() } shouldBe LossClaim.DEFERRED
+        Unit
+    }
+
+    /** The record went in and the filing was refused: the two must go together, so the record goes too. */
+    @Test
+    fun aRecordWhoseFilingFailsIsRolledBackWithIt() = runBlocking {
+        ready()
+        ingest.journal(snapshot("evt-half"), "gen", 60_000) shouldBe true
+        failCommit("evt-half"); failCommit("evt-half")
+        sql("CREATE TRIGGER refuse_filing BEFORE UPDATE OF state ON event_journal WHEN NEW.state = 'FAILED' BEGIN SELECT RAISE(ABORT, 'refused'); END")
+        try {
+            failCommit("evt-half") shouldBe JournalRetry.FAILED_DEFERRED
+            withClue("a record standing for a filing that never happened") { allGaps().isEmpty() shouldBe true }
+            ingest.isJournalPending("evt-half") shouldBe true
+            lossState("evt-half") shouldBe LOSS_DEFERRED
+        } finally {
+            sql("DROP TRIGGER refuse_filing")
+        }
+        Unit
+    }
+
+    @Test
+    fun aParkedRowResumedAndCommittedLosesNothing() = runBlocking {
+        ready()
+        val s = groupBody("evt-lucky")
+        ingest.journal(s, "gen", 60_000) shouldBe true
+        failCommit("evt-lucky"); failCommit("evt-lucky")
+        failCommit("evt-lucky") { error("the gap write failed") } shouldBe JournalRetry.FAILED_DEFERRED
+        ingest.resumeDeferredSettlements() shouldBe 1
+
+        // The fourth try is a real commit and it works: the threshold was for recording the loss,
+        // not a ceiling on trying.
+        commitWithLoss(s, withIdentity = true) { }
+
+        ingest.isJournalPending("evt-lucky") shouldBe false
+        messageCount() shouldBe 1
+        allGaps().none { it.reason == GapReason.COMMIT_FAILED.name } shouldBe true
+        Unit
+    }
+
+    @Test
+    fun aRowParkedBeforeItsClaimAnswersDeferredAndTakesNoGap() = runBlocking {
+        ready()
+        ingest.journal(snapshot("evt-park-first"), "gen", 60_000) shouldBe true
+        failCommit("evt-park-first"); failCommit("evt-park-first")
+        failCommit("evt-park-first") { error("the gap write failed") } shouldBe JournalRetry.FAILED_DEFERRED
+
+        ingest.claimEventLoss("evt-park-first") { recordLoss() } shouldBe LossClaim.DEFERRED
+        allGaps().isEmpty() shouldBe true
+        lossState("evt-park-first") shouldBe LOSS_DEFERRED
+        Unit
+    }
+
+    /** The vault refuses the park as well: the row is left exactly where it was, and nothing claims otherwise. */
+    @Test
+    fun aParkThatFailsTooLeavesTheRowWhereItWas() = runBlocking {
+        ready()
+        ingest.journal(snapshot("evt-stuck"), "gen", 60_000) shouldBe true
+        failCommit("evt-stuck"); failCommit("evt-stuck")
+        sql("CREATE TRIGGER refuse_park BEFORE UPDATE OF lossRecorded ON event_journal WHEN NEW.lossRecorded >= 2 BEGIN SELECT RAISE(ABORT, 'refused'); END")
+        try {
+            failCommit("evt-stuck") { error("the gap write failed") } shouldBe JournalRetry.RETRYABLE
+            attempts("evt-stuck") shouldBe 2
+            lossState("evt-stuck") shouldBe LOSS_UNSETTLED
+            ingest.isReplayCandidate("evt-stuck") shouldBe true
+            pendingIds() shouldBe listOf("evt-stuck")
+            allGaps().isEmpty() shouldBe true
+        } finally {
+            sql("DROP TRIGGER refuse_park")
+        }
+        Unit
+    }
+
+    @Test
+    fun aRowThatAlreadyLeftPendingIsNeitherChargedNorRecorded() = runBlocking {
+        ready()
+        val s = groupBody("evt-gone")
+        ingest.journal(s, "gen", 60_000) shouldBe true
+        commitWithLoss(s, withIdentity = true) { }
+        ingest.isJournalPending("evt-gone") shouldBe false
+
+        failCommit("evt-gone") shouldBe JournalRetry.NOT_PENDING
         allGaps().isEmpty() shouldBe true
         Unit
     }

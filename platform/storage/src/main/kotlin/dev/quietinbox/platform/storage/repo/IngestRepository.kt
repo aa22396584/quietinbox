@@ -71,6 +71,11 @@ class IngestRepository @Inject constructor(
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     companion object {
+        /**
+         * The failed commit at which an event is given up on and its loss recorded. Not a ceiling
+         * on physical attempts: a row whose loss could not be recorded at this point is deferred
+         * with its attempts unchanged and tried once more when a pass resumes it (issue #28).
+         */
         const val MAX_ATTEMPTS = 3
 
         /** Same unit as `substr(body, 1, 200)` in `rebuildProjection`: code points, so emoji are never cut in half. */
@@ -231,16 +236,55 @@ class IngestRepository @Inject constructor(
     }
 
     /**
-     * A failed commit stays PENDING (so replay retries it) until [MAX_ATTEMPTS] is reached; only
-     * then is it marked FAILED — which clears the payload and leaves no gap, so an error that
-     * lasts *does* lose an accepted event (issue #28). Transient errors within that budget do not.
+     * Charges a failed commit to the event. Within [MAX_ATTEMPTS] the row stays PENDING and the
+     * replay retries it. At the threshold the event is given up on — filed FAILED, payload cleared —
+     * and because that is the moment the last evidence of it goes, [lossOnExhaust] records the
+     * loss first, in the same transaction: the row leaves PENDING with its record or not at all.
+     * Before this, a lasting error lost an accepted event and said nothing (issue #28).
+     *
+     * When the record cannot be written the transaction rolls back — attempts untouched, payload
+     * and settled state intact — and the row is then *deferred* by a separate write, so it leaves
+     * the page the way a refused settlement does and the rows behind it are reached; a pass puts
+     * it back once it has drained, and the commit gets another go. Which is why [MAX_ATTEMPTS] is
+     * the threshold at which the loss must be recorded, not a ceiling on how many times a commit
+     * is physically tried: a resumed row tries again, and if that succeeds nothing was lost.
+     *
+     * The record is not gated on the row's own loss being settled: `lossRecorded = 1` says the
+     * event's *arrival* loss is on disk, and nothing about its commit failing. What keeps a second
+     * exhaustion from writing a second record is the state check at the head of the transaction.
+     *
      * Settling a carried-over loss deliberately does not go through here: bookkeeping must not
      * spend the event's attempts.
      */
-    suspend fun markJournalRetryable(eventId: String, failure: String) {
+    suspend fun markJournalRetryable(eventId: String, failure: String, lossOnExhaust: suspend () -> Unit): JournalRetry {
         val db = holder.db()
-        val attempts = (db.journalDao().attempts(eventId) ?: 0) + 1
-        db.journalDao().setState(eventId, if (attempts >= MAX_ATTEMPTS) "FAILED" else "PENDING", failure)
+        var exhausting = false
+        try {
+            return db.withTransaction {
+                if (db.journalDao().state(eventId) != "PENDING") return@withTransaction JournalRetry.NOT_PENDING
+                val attempts = (db.journalDao().attempts(eventId) ?: 0) + 1
+                if (attempts < MAX_ATTEMPTS) {
+                    db.journalDao().setState(eventId, "PENDING", failure)
+                    JournalRetry.RETRYABLE
+                } else {
+                    exhausting = true
+                    lossOnExhaust()
+                    // The gap is written; the row must go with it or the gap must go with the row.
+                    check(db.journalDao().fileFailed(eventId, failure) == 1) { "journal row $eventId left PENDING under the exhaustion transaction" }
+                    JournalRetry.FAILED_RECORDED
+                }
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            if (!exhausting) throw e
+            // The rollback is complete: this is a write of its own, and it can fail too. A row it
+            // cannot park stays a candidate — attempts unchanged, payload intact — and holds its
+            // place on the page until a pass can park it; nothing here says otherwise.
+            val parked = runCatching { db.journalDao().deferLoss(eventId) }
+                .onFailure { if (it is CancellationException) throw it }
+                .getOrDefault(0)
+            return if (parked == 1) JournalRetry.FAILED_DEFERRED else JournalRetry.RETRYABLE
+        }
     }
 
     suspend fun checkpoint(streamKey: String): MessageWindow? {
@@ -553,6 +597,20 @@ class IngestRepository @Inject constructor(
  * Only [RECORDED] and [ALREADY_RECORDED] mean the gap is on disk. The other two mean it is not,
  * and a caller that treats them as success destroys the payload that was the only evidence of it.
  */
+/**
+ * What became of a row after a failed commit was charged to it (issue #28).
+ *
+ * - [RETRYABLE]: still PENDING and still a replay candidate — within the attempt budget, or at the
+ *   threshold but with neither the loss record nor the deferral writable, in which case it holds its
+ *   place on the page with its attempts unchanged.
+ * - [FAILED_RECORDED]: filed FAILED, payload cleared, and the loss of the whole event on disk in the
+ *   same transaction.
+ * - [FAILED_DEFERRED]: the loss could not be recorded; the row stays PENDING with its payload and is
+ *   parked out of the candidate set until a pass resumes it, when the commit is tried once more.
+ * - [NOT_PENDING]: the row had already left PENDING; nothing written.
+ */
+enum class JournalRetry { RETRYABLE, FAILED_RECORDED, FAILED_DEFERRED, NOT_PENDING }
+
 enum class LossClaim {
     /** This call wrote the gap, in the claim's own transaction. */
     RECORDED,

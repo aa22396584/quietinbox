@@ -214,6 +214,7 @@
     <string name="gap_reason_source_paused">你暂停了这个来源</string>
     <string name="gap_reason_messages_dropped">该条通知带的消息多到读不完</string>
     <string name="gap_reason_unknown">原因不明</string>
+    <string name="gap_reason_commit_failed">多次尝试后仍无法保存</string>
     <string name="health_diagnostics_title">本机诊断（最近 7 天）</string>
     <string name="health_diagnostics_empty">没有诊断事件。任何内容都不会被上传。</string>
     <string name="diag_parse_warnings">解析时有内容被迫截断</string>

@@ -1007,7 +1007,7 @@ class CaptureCoordinator @Inject constructor(
                 } catch (e: Exception) {
                     if (e is CancellationException) throw e
                     if (journaled) {
-                        guarded { ingest.markJournalRetryable(snapshot.eventId, e::class.java.simpleName) }
+                        guarded { ingest.markJournalRetryable(snapshot.eventId, e::class.java.simpleName, commitFailureLoss(snapshot)) }
                     } else {
                         // The journal insert itself failed (e.g. the vault was busy): there is no row to
                         // retry, so the loss is recorded as a gap instead of vanishing (round-11 finding).
@@ -1267,10 +1267,20 @@ class CaptureCoordinator @Inject constructor(
                                     processJournaled(replay, generation, null)
                                 } catch (e: Exception) {
                                     if (e is CancellationException) throw e
-                                    ingest.markJournalRetryable(snapshot.eventId, "REPLAY_${e::class.java.simpleName}")
+                                    ingest.markJournalRetryable(snapshot.eventId, "REPLAY_${e::class.java.simpleName}", commitFailureLoss(replay))
                                 }
                                 // A row left PENDING on purpose (paused source, maintenance) must not spin the loop.
-                                if (!ingest.isJournalPending(snapshot.eventId)) progressed = true
+                                if (!ingest.isJournalPending(snapshot.eventId)) {
+                                    progressed = true
+                                } else if (!ingest.isReplayCandidate(snapshot.eventId)) {
+                                    // Its commit attempts ran out and the record of that could not be
+                                    // written, so the repository parked it (issue #28). Same accounting
+                                    // as a deferred settlement, and the same retry: a *commit* failure
+                                    // waits on a *gap* write succeeding because the gap table is what
+                                    // refused — the commit itself is tried again when the row is back.
+                                    deferredSettlements = true
+                                    progressed = true
+                                }
                             }
                         }
                     }
@@ -1287,10 +1297,10 @@ class CaptureCoordinator @Inject constructor(
      * paths that carry a readable payload — the replay, and the discard that follows disabling or
      * removing the source — cannot both record it. Whichever gets there first writes it.
      *
-     * Two other exits from PENDING never settle anything: an undecodable payload has nothing to
-     * settle, and a row whose commit attempts run out is filed `FAILED` with its payload cleared
-     * and no gap at all (issue #28). This release only stops a settlement failure from being what
-     * drives a row into the second — see the comment at the replay site.
+     * Two other exits from PENDING do not settle *this* loss: an undecodable payload has nothing to
+     * settle, and a row whose commit attempts run out records a loss of its own — the whole event,
+     * `COMMIT_FAILED`, written by [commitFailureLoss] in the transaction that files it (issue #28).
+     * That record is not gated on this claim: a settled arrival loss says nothing about the commit.
      *
      * Returns whether the row may now go on to a terminal state — true when there was nothing to
      * settle, and when the gap is on disk. It is false when another pass deferred the row between
@@ -1298,6 +1308,25 @@ class CaptureCoordinator @Inject constructor(
      * does not exist. Committing on that is round 37's Critical, and the reason the repository
      * answers with four cases rather than a Boolean.
      */
+    /**
+     * The record of an accepted event being given up on: its commit failed on every attempt it
+     * had, and the row is about to be filed FAILED with its payload cleared. Bounded by the
+     * notification's post and the observation, scoped to the source, and written by the
+     * repository *inside* the transaction that files the row — the last moment the event exists
+     * (issue #28). Reason `COMMIT_FAILED`, so the health page says what actually happened rather
+     * than "unknown".
+     */
+    private fun commitFailureLoss(snapshot: NotificationSnapshot): suspend () -> Unit = {
+        health.recordGap(
+            snapshot.postedAtEpochMs ?: snapshot.observedAtEpochMs,
+            snapshot.observedAtEpochMs,
+            GapReason.COMMIT_FAILED,
+            GapPrecision.BOUNDED,
+            snapshot.observedAtEpochMs,
+            snapshot.source.packageName,
+        )
+    }
+
     private suspend fun recordCarriedOverLoss(snapshot: NotificationSnapshot): Boolean {
         if (!carriesUnrecordedLoss(snapshot.shape)) return true
         return ingest.claimEventLoss(snapshot.eventId) {

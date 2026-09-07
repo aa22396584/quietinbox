@@ -214,6 +214,7 @@
     <string name="gap_reason_source_paused">이 소스를 일시중지했습니다</string>
     <string name="gap_reason_messages_dropped">알림에 다 읽을 수 없는 수의 메시지가 있었습니다</string>
     <string name="gap_reason_unknown">알 수 없음</string>
+    <string name="gap_reason_commit_failed">여러 번 시도했지만 저장하지 못했습니다</string>
     <string name="health_diagnostics_title">로컬 진단(최근 7일)</string>
     <string name="health_diagnostics_empty">진단 이벤트가 없습니다. 어떤 것도 업로드되지 않습니다.</string>
     <string name="diag_parse_warnings">파싱 중 내용이 잘렸습니다</string>

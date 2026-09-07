@@ -31,6 +31,13 @@ enum class GapReason {
     SOURCE_PAUSED_BY_USER,
 
     /**
+     * An accepted event whose commit failed on every attempt it had. Its journal row is filed
+     * `FAILED` and its payload cleared, so this bounded interval is the only record that the
+     * event existed (issue #28). Written in the same transaction that files the row.
+     */
+    COMMIT_FAILED,
+
+    /**
      * A notification carried more messages than [Limits.MAX_MESSAGES] and the oldest were discarded
      * before anything was parsed. The ingest that followed succeeded, so nothing else would ever
      * have said that content was lost — a gap hidden inside a success.

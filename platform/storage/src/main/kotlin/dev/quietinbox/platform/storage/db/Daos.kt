@@ -62,7 +62,7 @@ interface JournalDao {
      * PENDING with its payload intact, but it may not hold a place on the page, or 200 of them
      * starve row 201 for ever (round 36 Codex I1). [resumeDeferredLosses] puts them back.
      */
-    @Query("SELECT * FROM event_journal WHERE state = 'PENDING' AND lossRecorded != 2 ORDER BY receivedAtEpochMs LIMIT :limit")
+    @Query("SELECT * FROM event_journal WHERE state = 'PENDING' AND lossRecorded < 2 ORDER BY receivedAtEpochMs LIMIT :limit")
     suspend fun pending(limit: Int): List<EventJournalEntity>
 
     /**
@@ -70,7 +70,7 @@ interface JournalDao {
      * the whole page and starve every other source, QI-SEC-001 round-10). Rows without a package
      * (pre-v3) are included and decided by the commit fence.
      */
-    @Query("SELECT * FROM event_journal WHERE state = 'PENDING' AND lossRecorded != 2 AND (packageName IS NULL OR packageName NOT IN (:excludedPackages)) ORDER BY receivedAtEpochMs LIMIT :limit")
+    @Query("SELECT * FROM event_journal WHERE state = 'PENDING' AND lossRecorded < 2 AND (packageName IS NULL OR packageName NOT IN (:excludedPackages)) ORDER BY receivedAtEpochMs LIMIT :limit")
     suspend fun pendingExcluding(limit: Int, excludedPackages: List<String>): List<EventJournalEntity>
 
     /** A terminal state (anything but PENDING) also clears the payload: the text must not outlive its commit. */
@@ -117,23 +117,26 @@ interface JournalDao {
      * keeps a stale snapshot from claiming a row that has already been committed or discarded.
      *
      * Two exits never reach here at all, both on purpose: a payload that will not decode (filed
-     * `FAILED` / `DECODE`, with nothing readable to settle) and a row whose commit attempts run out
-     * (filed `FAILED`, payload cleared, no gap — a hole older than this release, issue #28).
+     * `FAILED` / `DECODE`, with nothing readable to settle) and a row whose commit attempts run out —
+     * that one records a loss of its own, the whole event, in the transaction that files it
+     * (`setFailedWithLoss`'s caller, issue #28), and this claim is not the gate for it: a settled
+     * row's own loss being on disk says nothing about whether its commit failure is.
      */
     @Query("UPDATE event_journal SET lossRecorded = 1 WHERE eventId = :eventId AND lossRecorded = 0 AND state = 'PENDING'")
     suspend fun claimLoss(eventId: String): Int
 
     /**
      * Takes a row whose gap write failed out of the replay's candidate set, without spending the
-     * claim and without touching the payload.
+     * claim, without touching the payload, and without forgetting whether its own loss is settled.
      *
-     * `lossRecorded = 0` in the predicate keeps this from overwriting a settled row, and
-     * `state = 'PENDING'` from deferring one that has since been committed or discarded. Returns 1
-     * only when the row really left the candidate set — the caller may not treat a failed deferral
-     * (a vault that refuses this write too) as progress, or the replay loop would re-read the same
-     * page until its round limit.
+     * Adds the deferred bit rather than writing a value: a row at 0 goes to 2 and a row at 1 to 3,
+     * so a resume can give each back exactly the settled state it had. `lossRecorded < 2` keeps a
+     * row from being deferred twice, and `state = 'PENDING'` from deferring one that has since
+     * been committed or discarded. Returns 1 only when the row really left the candidate set — the
+     * caller may not treat a failed deferral (a vault that refuses this write too) as progress, or
+     * the replay loop would re-read the same page until its round limit.
      */
-    @Query("UPDATE event_journal SET lossRecorded = 2 WHERE eventId = :eventId AND lossRecorded = 0 AND state = 'PENDING'")
+    @Query("UPDATE event_journal SET lossRecorded = lossRecorded + 2 WHERE eventId = :eventId AND lossRecorded < 2 AND state = 'PENDING'")
     suspend fun deferLoss(eventId: String): Int
 
     /**
@@ -147,8 +150,12 @@ interface JournalDao {
      * `state = 'PENDING'` because a row that has left it is owed nothing: a discard can strip a
      * deferred row's payload without touching this column, and resuming that row would count it in
      * the number returned and say a pass had work to do when it has none (round 37 agy).
+     *
+     * Subtracts the deferred bit rather than writing 0: a row deferred from 1 comes back as 1, and
+     * a carried-over claim that was spent stays spent — the resume must never be what lets one loss
+     * be written twice.
      */
-    @Query("UPDATE event_journal SET lossRecorded = 0 WHERE lossRecorded = 2 AND state = 'PENDING'")
+    @Query("UPDATE event_journal SET lossRecorded = lossRecorded - 2 WHERE lossRecorded >= 2 AND state = 'PENDING'")
     suspend fun resumeDeferredLosses(): Int
 
     /**
@@ -157,7 +164,7 @@ interface JournalDao {
      * rows back — nor taking them away again when it rolls back (round 37, Codex and the subagent
      * independently).
      */
-    @Query("UPDATE event_journal SET lossRecorded = 0 WHERE lossRecorded = 2 AND state = 'PENDING' AND packageName = :packageName")
+    @Query("UPDATE event_journal SET lossRecorded = lossRecorded - 2 WHERE lossRecorded >= 2 AND state = 'PENDING' AND packageName = :packageName")
     suspend fun resumeDeferredLossesForPackage(packageName: String): Int
 
     /**
@@ -165,14 +172,25 @@ interface JournalDao {
      *
      * Read inside the claim's own transaction when the claim finds nothing to take, because a
      * conditional update that changed no row does not say *why*. The two reasons are opposite: the
-     * gap is already on disk, or it is not written at all and the row is waiting to try again.
+     * gap is already on disk, or it is not written at all and the row is waiting to try again. A 3
+     * is read as deferred, not as settled: the row is out of the replay's reach either way, and a
+     * caller that took "settled" for "safe to commit" is round 37's Critical.
      */
     @Query("SELECT lossRecorded FROM event_journal WHERE eventId = :eventId AND state = 'PENDING'")
     suspend fun pendingLossState(eventId: String): Int?
 
     /** Whether the replay would pick this row up: exactly [pending]'s predicate, for one row. */
-    @Query("SELECT COUNT(*) FROM event_journal WHERE eventId = :eventId AND state = 'PENDING' AND lossRecorded != 2")
+    @Query("SELECT COUNT(*) FROM event_journal WHERE eventId = :eventId AND state = 'PENDING' AND lossRecorded < 2")
     suspend fun isReplayCandidate(eventId: String): Int
+
+    /**
+     * Files a row FAILED with its payload cleared, exactly once. The caller writes the record of
+     * the loss — the whole event, [dev.quietinbox.core.model.GapReason.COMMIT_FAILED] — in the same
+     * transaction, before this; `state = 'PENDING'` is what keeps a second exhaustion from writing
+     * a second record for a row already filed. Returns the rows changed.
+     */
+    @Query("UPDATE event_journal SET state = 'FAILED', attempts = attempts + 1, failureCode = :failure, payload = '' WHERE eventId = :eventId AND state = 'PENDING'")
+    suspend fun fileFailed(eventId: String, failure: String?): Int
 
     /** Pending rows of a source that was disabled or removed are discarded for good (QI-SEC-001). */
     @Query("UPDATE event_journal SET state = 'DISCARDED', failureCode = 'SOURCE_DISABLED', payload = '' WHERE state = 'PENDING' AND packageName = :packageName")

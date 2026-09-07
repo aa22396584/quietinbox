@@ -214,6 +214,7 @@
     <string name="gap_reason_source_paused">このソースを一時停止しました</string>
     <string name="gap_reason_messages_dropped">通知に読み切れない数のメッセージが入っていました</string>
     <string name="gap_reason_unknown">不明</string>
+    <string name="gap_reason_commit_failed">繰り返し試みても保存できませんでした</string>
     <string name="health_diagnostics_title">ローカル診断（過去 7 日間）</string>
     <string name="health_diagnostics_empty">診断イベントはありません。何もアップロードされることはありません。</string>
     <string name="diag_parse_warnings">解析時に内容を切り詰めました</string>

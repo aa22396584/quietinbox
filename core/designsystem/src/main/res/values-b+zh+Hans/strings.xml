@@ -193,6 +193,9 @@
     <string name="health_remove_body">停止捕获与删除已保存的副本是两个不同的决定。</string>
     <string name="health_remove_keep_data">停止并保留副本</string>
     <string name="health_remove_delete_data">停止并删除副本</string>
+    <string name="health_policy_failed_title">无法更改 %1$s</string>
+    <string name="health_policy_failed_body_settle">没有任何更改，捕获仍在进行。停止捕获这个 App 之前，必须先记录它待处理通知所带的丢失，而这次写入失败了。请再试一次；若持续失败，请检查设备的可用存储空间。</string>
+    <string name="health_policy_failed_body">没有任何更改。写入失败；请再试一次，若持续失败，请检查设备的可用存储空间。</string>
     <string name="health_adapter">适配器：%1$s</string>
     <string name="health_adapter_standard">通用解析器</string>
     <string name="health_gaps_title">可能的中断</string>

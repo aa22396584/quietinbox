@@ -193,6 +193,9 @@
     <string name="health_remove_body">캡처 중지와 저장된 사본 삭제는 별개의 선택입니다.</string>
     <string name="health_remove_keep_data">중지하고 사본 유지</string>
     <string name="health_remove_delete_data">중지하고 사본 삭제</string>
+    <string name="health_policy_failed_title">%1$s을(를) 변경하지 못했습니다</string>
+    <string name="health_policy_failed_body_settle">아무것도 변경되지 않아 캡처는 계속됩니다. 이 앱의 캡처를 중지하기 전에 대기 중인 알림이 가진 손실을 먼저 기록해야 하는데, 그 쓰기가 실패했습니다. 다시 시도하세요. 계속 실패하면 이 기기의 남은 저장 공간을 확인하세요.</string>
+    <string name="health_policy_failed_body">아무것도 변경되지 않았습니다. 쓰기가 실패했습니다. 다시 시도하고, 계속 실패하면 이 기기의 남은 저장 공간을 확인하세요.</string>
     <string name="health_adapter">어댑터: %1$s</string>
     <string name="health_adapter_standard">범용 파서</string>
     <string name="health_gaps_title">누락 가능성</string>

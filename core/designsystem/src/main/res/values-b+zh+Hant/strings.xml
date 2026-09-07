@@ -193,6 +193,9 @@
     <string name="health_remove_body">停止擷取與刪除已保存副本是兩個不同的決定。</string>
     <string name="health_remove_keep_data">停止並保留副本</string>
     <string name="health_remove_delete_data">停止並刪除副本</string>
+    <string name="health_policy_failed_title">無法變更 %1$s</string>
+    <string name="health_policy_failed_body_settle">沒有任何變更，擷取仍在進行。停止擷取這個 App 之前，必須先記錄它待處理通知所帶的遺失，而這次寫入失敗了。請再試一次；若持續失敗，請檢查裝置的可用儲存空間。</string>
+    <string name="health_policy_failed_body">沒有任何變更。寫入失敗；請再試一次，若持續失敗，請檢查裝置的可用儲存空間。</string>
     <string name="health_adapter">adapter：%1$s</string>
     <string name="health_adapter_standard">通用解析器</string>
     <string name="health_gaps_title">可能中斷</string>

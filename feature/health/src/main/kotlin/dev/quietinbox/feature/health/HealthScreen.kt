@@ -240,8 +240,8 @@ fun HealthScreen(
             items(state.sources, key = { it.packageName }) { s ->
                 SourceRow(
                     source = s,
-                    onEnabled = { viewModel.setSourceEnabled(s.packageName, it) },
-                    onPaused = { viewModel.setSourcePaused(s.packageName, it) },
+                    onEnabled = { viewModel.setSourceEnabled(s.packageName, s.displayName, it) },
+                    onPaused = { viewModel.setSourcePaused(s.packageName, s.displayName, it) },
                     onRemove = { removeTarget = s },
                 )
             }
@@ -323,13 +323,14 @@ fun HealthScreen(
             text = { Text(stringResource(R.string.health_remove_body)) },
             confirmButton = {
                 Column(horizontalAlignment = Alignment.End) {
-                    TextButton(onClick = { viewModel.removeSource(s.packageName, deleteData = false); removeTarget = null }) { Text(stringResource(R.string.health_remove_keep_data)) }
-                    TextButton(onClick = { viewModel.removeSource(s.packageName, deleteData = true); removeTarget = null }) { Text(stringResource(R.string.health_remove_delete_data), color = MaterialTheme.colorScheme.error) }
+                    TextButton(onClick = { viewModel.removeSource(s.packageName, s.displayName, deleteData = false); removeTarget = null }) { Text(stringResource(R.string.health_remove_keep_data)) }
+                    TextButton(onClick = { viewModel.removeSource(s.packageName, s.displayName, deleteData = true); removeTarget = null }) { Text(stringResource(R.string.health_remove_delete_data), color = MaterialTheme.colorScheme.error) }
                 }
             },
             dismissButton = { TextButton(onClick = { removeTarget = null }) { Text(stringResource(R.string.action_cancel)) } },
         )
     }
+    state.policyFailure?.let { PolicyFailureDialog(it, onDismiss = viewModel::dismissPolicyFailure) }
     if (resetDialog) {
         AlertDialog(
             onDismissRequest = { resetDialog = false },

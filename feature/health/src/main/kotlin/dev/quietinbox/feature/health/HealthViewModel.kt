@@ -26,6 +26,7 @@ import dev.quietinbox.platform.storage.repo.VaultRepository
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -48,6 +49,8 @@ data class HealthUiState(
     val pendingJournal: Int = 0,
     val diagnostics: ImmutableList<DiagnosticCount> = persistentListOf(),
     val testSentAt: Long? = null,
+    /** A source change the coordinator refused, until the user dismisses it. */
+    val policyFailure: PolicyFailure? = null,
 )
 
 @HiltViewModel
@@ -63,14 +66,15 @@ class HealthViewModel @Inject constructor(
     private val registry = ParserRegistry(AppParsers.all())
     private val diagnostics = MutableStateFlow<List<DiagnosticCount>>(emptyList())
     private val testSentAt = MutableStateFlow<Long?>(null)
+    private val policyFailure = MutableStateFlow<PolicyFailure?>(null)
 
     val state: StateFlow<HealthUiState> = combine(
         coordinator.status,
         vault.state,
         sourceRepo.observeSources().catch { emit(emptyList()) },
         combine(health.observeGaps(30).catch { emit(emptyList()) }, health.observePendingJournal().catch { emit(0) }) { g, p -> g to p },
-        combine(diagnostics, testSentAt) { d, t -> d to t },
-    ) { capture, vaultState, sources, (gaps, pending), (diag, sent) ->
+        combine(diagnostics, testSentAt, policyFailure) { d, t, f -> Triple(d, t, f) },
+    ) { capture, vaultState, sources, (gaps, pending), (diag, sent, failure) ->
         HealthUiState(
             capture = capture,
             listenerGranted = listenerAccess.isGranted(),
@@ -80,6 +84,7 @@ class HealthViewModel @Inject constructor(
             pendingJournal = pending,
             diagnostics = diag.toImmutableList(),
             testSentAt = sent,
+            policyFailure = failure,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HealthUiState())
 
@@ -104,15 +109,35 @@ class HealthViewModel @Inject constructor(
 
     // Source policy goes through the coordinator so the change lands under the pipeline lock
     // and no event that was waiting for it is committed against the old policy (QI-SEC-001).
-    fun setSourceEnabled(packageName: String, enabled: Boolean) = viewModelScope.launch { runCatching { coordinator.setSourceEnabled(packageName, enabled) } }
-    fun setSourcePaused(packageName: String, paused: Boolean) = viewModelScope.launch { runCatching { coordinator.setSourcePaused(packageName, paused) } }
+    // Switching a source off and removing it first settle the losses its pending rows carry,
+    // inside the policy transaction; when that write fails the whole change rolls back and the
+    // switch springs back on its own. The failure is surfaced, not swallowed: "stop capturing
+    // this app" doing nothing in silence is the one outcome this page must never produce.
+    fun setSourceEnabled(packageName: String, displayName: String, enabled: Boolean) = policyChange(packageName, displayName, settle = !enabled) { coordinator.setSourceEnabled(packageName, enabled) }
+    fun setSourcePaused(packageName: String, displayName: String, paused: Boolean) = policyChange(packageName, displayName) { coordinator.setSourcePaused(packageName, paused) }
 
-    fun addSource(app: InstalledApp) = viewModelScope.launch {
-        runCatching { coordinator.addSource(app.packageName, app.label, registry.adapterFor(app.packageName)?.id, System.currentTimeMillis()) }
+    fun addSource(app: InstalledApp) = policyChange(app.packageName, displayName = app.label) {
+        coordinator.addSource(app.packageName, app.label, registry.adapterFor(app.packageName)?.id, System.currentTimeMillis())
     }
 
-    fun removeSource(packageName: String, deleteData: Boolean) = viewModelScope.launch {
-        runCatching { coordinator.removeSource(packageName, deleteData) }
+    fun removeSource(packageName: String, displayName: String, deleteData: Boolean) = policyChange(packageName, displayName, settle = true) {
+        coordinator.removeSource(packageName, deleteData)
+    }
+
+    fun dismissPolicyFailure() {
+        policyFailure.value = null
+    }
+
+    // The screen passes the name it shows, so the dialog names the app the user tapped rather than
+    // whatever the state flow held at that moment.
+    private fun policyChange(packageName: String, displayName: String, settle: Boolean = false, change: suspend () -> Unit) = viewModelScope.launch {
+        try {
+            change()
+        } catch (e: Exception) {
+            // A cancellation is the scope going away, never a refused change (working rule).
+            if (e is CancellationException) throw e
+            policyFailure.value = PolicyFailure(packageName, displayName, settle)
+        }
     }
 
     fun canPostNotifications(): Boolean = synthetic.canPost()

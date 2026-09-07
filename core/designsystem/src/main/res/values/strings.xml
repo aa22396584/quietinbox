@@ -195,6 +195,9 @@
     <string name="health_remove_body">Stopping capture and deleting saved copies are separate choices.</string>
     <string name="health_remove_keep_data">Stop, keep copies</string>
     <string name="health_remove_delete_data">Stop and delete copies</string>
+    <string name="health_policy_failed_title">Could not change %1$s</string>
+    <string name="health_policy_failed_body_settle">Nothing was changed, so capture continues. Before capture for this app stops, a loss its pending notifications carry has to be recorded, and that write failed. Try again; if it keeps failing, check the free storage on this device.</string>
+    <string name="health_policy_failed_body">Nothing was changed. The write failed; try again, and if it keeps failing, check the free storage on this device.</string>
     <string name="health_adapter">adapter: %1$s</string>
     <string name="health_adapter_standard">generic parser</string>
     <string name="health_gaps_title">Possible gaps</string>

@@ -193,6 +193,9 @@
     <string name="health_remove_body">キャプチャの停止と保存済みコピーの削除は別々の選択です。</string>
     <string name="health_remove_keep_data">停止してコピーは残す</string>
     <string name="health_remove_delete_data">停止してコピーも削除</string>
+    <string name="health_policy_failed_title">%1$s を変更できませんでした</string>
+    <string name="health_policy_failed_body_settle">何も変更されていないため、キャプチャは続いています。このアプリのキャプチャを止める前に、保留中の通知が抱える欠落を記録する必要があり、その書き込みに失敗しました。もう一度お試しください。繰り返し失敗する場合は、この端末の空き容量を確認してください。</string>
+    <string name="health_policy_failed_body">何も変更されていません。書き込みに失敗しました。もう一度お試しください。繰り返し失敗する場合は、この端末の空き容量を確認してください。</string>
     <string name="health_adapter">アダプター: %1$s</string>
     <string name="health_adapter_standard">汎用パーサー</string>
     <string name="health_gaps_title">欠落の可能性</string>

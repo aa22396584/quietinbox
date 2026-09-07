@@ -14,6 +14,7 @@ import dev.quietinbox.core.model.Limits
 import dev.quietinbox.core.model.ListenerState
 import dev.quietinbox.core.model.MediaState
 import dev.quietinbox.core.model.TruncationFlag
+import dev.quietinbox.core.model.NotificationShape
 import dev.quietinbox.core.model.NotificationSnapshot
 import dev.quietinbox.core.model.SourceScope
 import dev.quietinbox.core.parser.ParserRegistry
@@ -188,6 +189,14 @@ class CaptureCoordinator @Inject constructor(
     /** Same for the pipeline's own lock-out gap: the time `openGap` could not be written. */
     @Volatile
     private var vaultGapSince: Long? = null
+
+    /**
+     * Same again for an event the journal would not take and whose fallback gap would not write
+     * either. A failure that lasts — a full disk — hits both statements, and "less precise, never
+     * absent" has to survive that, not only a single transient one (round 34 I3).
+     */
+    @Volatile
+    private var journalLossSince: Long? = null
 
     @Volatile
     private var paused: Boolean = false
@@ -493,6 +502,22 @@ class CaptureCoordinator @Inject constructor(
         // Forgotten only once the loss is on disk; a write that fails (the vault locked again, a
         // reset in between) leaves it for the next policy load (round-13 finding).
         if (written && since != null) coldStartLossSince = null
+        settleUnrecordedJournalLoss(now)
+    }
+
+    /**
+     * Writes the loss of an event that neither the journal nor its fallback gap could record, once
+     * the vault will take it. Bounded by the time it happened and the time it was written, and
+     * forgotten only then — the same rule as the two losses above (round 34 I3).
+     */
+    private suspend fun settleUnrecordedJournalLoss(now: Long) {
+        val since = journalLossSince ?: return
+        var written = false
+        guarded {
+            health.recordGap(since, now, GapReason.UNKNOWN, GapPrecision.BOUNDED, now)
+            written = true
+        }
+        if (written) journalLossSince = null
     }
 
     // ---- cold start (QI-CAPTURE-013) ---------------------------------------------------------
@@ -652,14 +677,18 @@ class CaptureCoordinator @Inject constructor(
             // instead, as they were, two rapid flips could commit their settings in one order and
             // their gaps in the other, leaving the source enabled with an open "disabled" gap; a
             // process death between the halves left the same contradiction (round 33).
-            val changed = sources.setEnabled(packageName, enabled) {
+            sources.setEnabled(packageName, enabled) {
                 if (enabled) {
                     health.closeOpenGapsForSource(now, packageName, GapReason.SOURCE_DISABLED_BY_USER)
                 } else {
                     health.openGap(now, GapReason.SOURCE_DISABLED_BY_USER, GapPrecision.EXACT, now, packageName)
+                    // Both in this transaction, and in this order: the discard clears the payloads,
+                    // so whatever those events arrived already shortened by is settled while it can
+                    // still be read. Discarding first, or afterwards as a second write, loses it.
+                    settleCarriedOverLosses(packageName)
+                    ingest.discardPendingJournal(packageName)
                 }
             }
-            if (changed && !enabled) ingest.discardPendingJournal(packageName)
         }
     }
 
@@ -687,6 +716,8 @@ class CaptureCoordinator @Inject constructor(
         val now = System.currentTimeMillis()
         changeSourcePolicy {
             sources.remove(packageName, deleteData) {
+                // Runs before `remove` discards this source's pending rows, in its transaction.
+                settleCarriedOverLosses(packageName)
                 health.closeOpenGapsForSource(
                     now,
                     packageName,
@@ -908,10 +939,17 @@ class CaptureCoordinator @Inject constructor(
                         // The journal insert itself failed (e.g. the vault was busy): there is no row to
                         // retry, so the loss is recorded as a gap instead of vanishing (round-11 finding).
                         lastError = e::class.java.simpleName
+                        var recorded = false
                         guarded {
                             ingest.diagnostic("JOURNAL_FAILED", e::class.java.simpleName, snapshot.source.packageName, snapshot.observedAtEpochMs)
                             health.recordGap(snapshot.observedAtEpochMs, snapshot.observedAtEpochMs, GapReason.UNKNOWN, GapPrecision.EXACT, snapshot.observedAtEpochMs, snapshot.source.packageName)
+                            recorded = true
                         }
+                        // Whatever stopped the acceptance write does not stop at one statement, so
+                        // this fallback can fail too — and then nothing anywhere says the event
+                        // existed. Kept until a later policy load can write it, the same contract
+                        // the cold-start and lock-out losses already have (round 34 I3).
+                        if (!recorded && journalLossSince == null) journalLossSince = snapshot.observedAtEpochMs
                     }
                 }
             }
@@ -1062,6 +1100,9 @@ class CaptureCoordinator @Inject constructor(
                                 }
                                 val replay = snapshot.copy(origin = if (snapshot.origin == CaptureOrigin.SYNTHETIC) snapshot.origin else CaptureOrigin.REPLAY)
                                 try {
+                                    // Before the fence: a row discarded for a disabled source keeps
+                                    // its record, exactly as a live event's does (round 33).
+                                    recordCarriedOverLoss(replay)
                                     processJournaled(replay, generation, null)
                                 } catch (e: Exception) {
                                     if (e is CancellationException) throw e
@@ -1075,6 +1116,37 @@ class CaptureCoordinator @Inject constructor(
                 }
             }
         }
+    }
+
+    /**
+     * Settles a loss carried in from a release that recorded it nowhere, once.
+     *
+     * The claim and the gap are one transaction inside the repository, so the row can never be
+     * marked settled without the record appearing; and because the claim is conditional, the two
+     * ways a pending row leaves PENDING — replayed, or discarded with its source — cannot both
+     * record it. Whichever gets there first writes it, and the payload is still readable at both.
+     */
+    private suspend fun recordCarriedOverLoss(snapshot: NotificationSnapshot) {
+        if (!carriesUnrecordedLoss(snapshot.shape)) return
+        ingest.claimEventLoss(snapshot.eventId) {
+            health.recordGap(
+                snapshot.postedAtEpochMs ?: snapshot.observedAtEpochMs,
+                snapshot.observedAtEpochMs,
+                GapReason.MESSAGES_DROPPED,
+                GapPrecision.BOUNDED,
+                snapshot.observedAtEpochMs,
+                snapshot.source.packageName,
+            )
+        }
+    }
+
+    /**
+     * The same, for rows about to be discarded outright because their source was disabled or
+     * removed. They are never replayed, and the discard clears the payload, so this is the only
+     * moment the evidence exists — which is why it runs inside the policy transaction.
+     */
+    private suspend fun settleCarriedOverLosses(packageName: String) {
+        for (snapshot in ingest.pendingJournalForPackage(packageName)) recordCarriedOverLoss(snapshot)
     }
 
     /** Best-effort bookkeeping: failures are swallowed, a coroutine cancellation never is. */
@@ -1095,15 +1167,47 @@ class CaptureCoordinator @Inject constructor(
         /** Truncation that means content was discarded, not merely shortened. */
         /**
          * Flags that mean content existed and was discarded before the parser saw it — a gap.
-         * `LINES` belongs here for the same reason the other two do: an InboxStyle notification
-         * with more lines than the snapshot may hold loses the oldest ones outright. It is not a
-         * shortened body; each surviving line carries its own truncation separately.
+         * `LINES_DROPPED` belongs here for the same reason the other two do: an InboxStyle
+         * notification with more lines than the snapshot may hold loses the oldest ones outright.
+         * It is not a shortened body; each surviving line carries its own truncation separately.
          */
         private val DROPPED_MESSAGES = setOf(
             TruncationFlag.MESSAGES_DROPPED,
             TruncationFlag.HISTORIC_MESSAGES_DROPPED,
-            TruncationFlag.LINES,
+            TruncationFlag.LINES_DROPPED,
         )
+
+        /**
+         * True when a payload carries a whole-content loss that the release which wrote it recorded
+         * nowhere, and that the payload alone still settles.
+         *
+         * Releases up to 0.1.3 wrote no gap for content the framework had already dropped, and used
+         * one flag for two different losses. Two shapes are nonetheless decidable:
+         *
+         *  - `LINES`, which those releases raised only when the line array exceeded the limit — an
+         *    over-long single line was shortened silently and never raised it.
+         *  - `MESSAGES` (or `HISTORIC_MESSAGES`) with no surviving message whose own text was
+         *    shortened. That flag had exactly two causes; with the second ruled out by the payload,
+         *    only whole messages dropped for exceeding the limit remains.
+         *
+         * `MESSAGES` alongside a shortened survivor stays undecidable — the batch may also have
+         * been over the limit — and is deliberately left alone rather than guessed at either way.
+         *
+         * Nothing this release writes can match: a loss it saw became a `*_DROPPED` flag and a gap
+         * at acceptance, and its `MESSAGES` is raised only by a shortened survivor. The column is
+         * what makes that structural rather than a reading of the flags.
+         */
+        private fun carriesUnrecordedLoss(shape: NotificationShape): Boolean {
+            if (shape.truncated.any { it in DROPPED_MESSAGES }) return false
+            if (TruncationFlag.LINES in shape.truncated) return true
+            if (TruncationFlag.MESSAGES in shape.truncated &&
+                shape.messages.none { it.text?.truncated == true }
+            ) {
+                return true
+            }
+            return TruncationFlag.HISTORIC_MESSAGES in shape.truncated &&
+                shape.historicMessages.none { it.text?.truncated == true }
+        }
 
         /** In-flight media copies. Bitmaps are bounded by their bytes; URI copies by their jobs. */
         private const val MAX_QUEUED_MEDIA_COPIES = 32

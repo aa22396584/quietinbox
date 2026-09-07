@@ -109,6 +109,9 @@ class IngestRepository @Inject constructor(
             failureCode = null,
             payload = json.encodeToString(NotificationSnapshot.serializer(), snapshot),
             packageName = snapshot.source.packageName,
+            // Set with the insert, so the upgrade path can tell a row this release already
+            // accounted for from one carried over from a release that did not.
+            lossRecorded = lossOnAccept != null,
         )
         return db.withTransaction {
             val accepted = db.journalDao().insert(row) != -1L
@@ -119,6 +122,35 @@ class IngestRepository @Inject constructor(
 
     /** Pending rows of a source the user disabled or removed: discarded, payload cleared (QI-SEC-001). */
     suspend fun discardPendingJournal(packageName: String): Int = holder.db().journalDao().discardPending(packageName)
+
+    /**
+     * Records a loss an event carried in from a release that recorded it nowhere, exactly once.
+     *
+     * [writeGap] runs only for the caller that wins the claim, and in the same transaction as the
+     * claim, so the two cannot come apart: a row whose gap write fails keeps its claim unspent and
+     * is tried again by the next pass. Returns whether this call was the one that recorded it.
+     */
+    suspend fun claimEventLoss(eventId: String, writeGap: suspend () -> Unit): Boolean {
+        val db = holder.db()
+        return db.withTransaction {
+            val won = db.journalDao().claimLoss(eventId) == 1
+            if (won) writeGap()
+            won
+        }
+    }
+
+    /**
+     * Pending rows of one source, decoded. Used before those rows are discarded outright: whatever
+     * loss they arrived with is settled while the payload still says what it was.
+     *
+     * A row that cannot be decoded is left alone rather than failed: this runs inside a source
+     * policy transaction that is about to discard it anyway, and the replay path is what owns the
+     * decision to mark a payload unreadable.
+     */
+    suspend fun pendingJournalForPackage(packageName: String): List<NotificationSnapshot> =
+        holder.db().journalDao().pendingForPackage(packageName).mapNotNull { row ->
+            runCatching { json.decodeFromString(NotificationSnapshot.serializer(), row.payload) }.getOrNull()
+        }
 
     suspend fun isJournalPending(eventId: String): Boolean = holder.db().journalDao().state(eventId) == "PENDING"
 
@@ -353,9 +385,17 @@ class IngestRepository @Inject constructor(
                         // FK violation here would roll back the whole batch, so verify first.
                         val id = decision.existingMessageId?.takeIf { db.messageDao().get(it) != null }
                         storedIds[index] = id
-                        if (id != null && decision.kind != KnownKind.REPOST) {
-                            db.observationLinkDao().insert(ObservationLinkEntity(messageId = id, eventId = snapshot.eventId, kind = decision.kind.name, observedAtEpochMs = now))
-                            db.messageDao().incrementObservation(id)
+                        if (id != null) {
+                            // A repost of the same text can still carry evidence the first
+                            // observation did not have: the body is unchanged, and this time the
+                            // snapshot says it was cut. The fingerprint does not include that —
+                            // adding it would split one message into two rows — so it is applied
+                            // here instead of being dropped with the decision (round 34 I2).
+                            truncationColumn(c.textTruncated)?.let { db.messageDao().markTruncated(id, it) }
+                            if (decision.kind != KnownKind.REPOST) {
+                                db.observationLinkDao().insert(ObservationLinkEntity(messageId = id, eventId = snapshot.eventId, kind = decision.kind.name, observedAtEpochMs = now))
+                                db.messageDao().incrementObservation(id)
+                            }
                         }
                     }
                     is Decision.Revision -> {

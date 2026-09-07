@@ -24,7 +24,6 @@ import dev.quietinbox.core.model.GapReason
 import dev.quietinbox.core.model.IdentityConfidence
 import dev.quietinbox.core.model.ListenerState
 import dev.quietinbox.core.model.MediaState
-import dev.quietinbox.core.model.TruncationFlag
 
 data class Labelled(val text: String, val icon: ImageVector, val tint: Color)
 

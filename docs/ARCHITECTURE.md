@@ -29,7 +29,8 @@ StatusBarNotification
   → Channel(MAX_QUEUE_DEPTH)             (overflow ⇒ counted, DEGRADED, gap recorded — never DROP_OLDEST silently)
   → admission fence, twice               (before waiting for the pipeline lock and again inside it: pause, maintenance,
                                           generation, source policy — whatever changed while the event waited wins)
-  → IngestRepository.journal             (durable accepted; JSON payload in the encrypted vault, cleared on leaving PENDING)
+  → IngestRepository.journal             (durable accepted; JSON payload in the encrypted vault, cleared on leaving PENDING;
+                                          a loss the event arrived with is written in this transaction and marked lossRecorded)
   → ParserRegistry.parse                 (adapter by package, else StandardParser)
   → IdentityResolver.resolve             (chat id > shortcut > notification stream > title; never cross-stream)
   → Reconciler.reconcile                 (suffix/prefix window alignment, ids, AMBIGUOUS_REPEAT, stale windows)
@@ -42,6 +43,13 @@ StatusBarNotification
 Process death before `journal` loses the event (documented as platform-unobservable); after
 `journal` the row is replayed on next vault open, on resume and after maintenance with
 `CaptureOrigin.REPLAY` — never while capture is paused, and never for a source disabled since.
+
+A row a release up to 0.1.3 left pending carries a loss that release recorded nowhere. Both ways
+out of `PENDING` — replay, and the discard that follows disabling or removing the source — settle
+it first, while the payload still says what it was. `event_journal.lossRecorded` (schema v4) is
+claimed by a conditional update that writes the gap in the same transaction, so whichever path
+reaches the row first records it and no later pass records it again. Only what the payload settles
+is claimed: `LINES`, and `MESSAGES` with no surviving message of its own shortened.
 
 Source policy (add / enable / pause / remove) goes through `CaptureCoordinator`: the vault write
 and the in-memory allow-list change under the pipeline lock, so an event waiting for the lock is

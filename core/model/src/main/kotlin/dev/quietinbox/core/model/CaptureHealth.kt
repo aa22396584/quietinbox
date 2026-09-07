@@ -54,8 +54,9 @@ data class GapInterval(
     /**
      * The source the gap belongs to, when one is known. Most gaps are process-wide — a disconnect,
      * a restart, a maintenance run — and for those it is null and must stay null. It can never
-     * carry a conversation: identity is resolved during ingest, which is exactly what did not
-     * happen for an event that was dropped.
+     * carry a conversation: every site that names a source writes before identity is resolved, so
+     * there is no conversation to name yet — including the one whose event is then ingested
+     * normally, its survivors committed.
      */
     val packageName: String? = null,
 )

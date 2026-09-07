@@ -151,6 +151,7 @@ class CaptureCoordinatorTest : FunSpec({
             )
             journalAnswers { true }
             installGapStore()
+            installLossClaim()
         }
 
         /**
@@ -220,6 +221,34 @@ class CaptureCoordinatorTest : FunSpec({
                 }
                 Unit
             }
+        }
+
+        /**
+         * The journal's claim, behaving as the repository's conditional update does: the first
+         * caller for an event id wins and writes the gap inside the claim, every later one loses,
+         * and a gap write that throws leaves the claim unspent for the next pass.
+         *
+         * That exactly-once is SQL, and SQL is decided on a real vault in
+         * `JournalLossTransactionTest`. What these tests decide is the other half: whether the
+         * coordinator asks for the claim at all, and at which of the two ways out of PENDING.
+         */
+        val lossClaimed: MutableSet<String> = Collections.synchronizedSet(HashSet())
+
+        private fun installLossClaim() {
+            coEvery { ingest.claimEventLoss(any(), any()) } coAnswers {
+                val eventId = firstArg<String>()
+                val won = lossClaimed.add(eventId)
+                if (won) {
+                    try {
+                        arg<suspend () -> Unit>(1).invoke()
+                    } catch (e: Throwable) {
+                        lossClaimed.remove(eventId)
+                        throw e
+                    }
+                }
+                won
+            }
+            coEvery { ingest.pendingJournalForPackage(any()) } returns emptyList()
         }
 
         /** Replaces the journal stub; [answer] runs on the consumer coroutine. */
@@ -1252,7 +1281,7 @@ class CaptureCoordinatorTest : FunSpec({
         // outright. That is content that existed and is gone — the same loss as a dropped message,
         // and nothing else would ever have said so. Each surviving line still carries its own
         // truncation separately, which is a different thing entirely.
-        coordinator.offerCaptured(capturedWithTruncation("evt-lines", setOf(TruncationFlag.LINES)))
+        coordinator.offerCaptured(capturedWithTruncation("evt-lines", setOf(TruncationFlag.LINES_DROPPED)))
 
         coVerify(timeout = 5_000, exactly = 1) {
             h.health.recordGap(any(), any(), GapReason.MESSAGES_DROPPED, GapPrecision.BOUNDED, any(), ENABLED_PKG)
@@ -1270,5 +1299,144 @@ class CaptureCoordinatorTest : FunSpec({
 
         awaitUntil { coordinator.status.value.acceptedCount shouldBe 1L }
         stillHolds { coVerify(exactly = 0) { h.health.recordGap(any(), any(), GapReason.MESSAGES_DROPPED, any(), any(), any()) } }
+    }
+
+    test("a row left pending by 0.1.3 has its dropped lines settled once, however often it is replayed") {
+        val h = Harness()
+        // Codex round 34 C2. Releases up to 0.1.3 wrote no gap for content the framework had
+        // already dropped, and such a row can still be PENDING when this release starts. It never
+        // goes through `journal()` — replay hands it straight to processJournaled — so the
+        // acceptance transaction that now writes the loss never runs for it, and the terminal
+        // transition afterwards clears the payload that was the only evidence it happened.
+        //
+        // `LINES` settles the case by itself: those releases raised it only when the line array
+        // was longer than the snapshot may hold. A single over-long line was shortened silently.
+        val legacy = Fixtures.snapshot(
+            shape = Fixtures.base(title = null, text = null).copy(truncated = setOf(TruncationFlag.LINES)),
+            packageName = ENABLED_PKG,
+            eventId = "evt-v013-lines",
+        )
+        var served = 0
+        coEvery { h.ingest.pendingJournal(any(), any()) } coAnswers {
+            if (served++ < 2) listOf("gen-old" to legacy) else emptyList()
+        }
+        // Pending when it is picked up, no longer pending the moment after — then picked up again,
+        // which is what a row that keeps failing to commit does.
+        var checks = 0
+        coEvery { h.ingest.isJournalPending(any()) } answers { checks++ % 2 == 0 }
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+
+        h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
+
+        // It really was replayed twice, so anything recording the loss per pass rather than per
+        // event would have written the second gap by now.
+        coVerify(timeout = 5_000, exactly = 2) { h.ingest.markJournal("evt-v013-lines", "SKIPPED", any()) }
+        h.gaps.count { it.reason == GapReason.MESSAGES_DROPPED.name } shouldBe 1
+    }
+
+    test("a 0.1.3 flag that can only mean whole messages were dropped is settled") {
+        val h = Harness()
+        // The second decidable shape. `MESSAGES` had two causes in those releases — a kept message
+        // whose text was shortened, and whole messages over the limit — but the payload rules the
+        // first out: every message it still carries is complete.
+        val legacy = Fixtures.snapshot(
+            shape = Fixtures.messaging(conversationTitle = "Group") { message("Ana", "on my way") }
+                .copy(truncated = setOf(TruncationFlag.MESSAGES)),
+            packageName = ENABLED_PKG,
+            eventId = "evt-v013-messages",
+        )
+        var served = false
+        coEvery { h.ingest.pendingJournal(any(), any()) } coAnswers {
+            if (served) emptyList() else { served = true; listOf("gen-old" to legacy) }
+        }
+        coEvery { h.ingest.isJournalPending(any()) } returns true
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+
+        h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
+
+        awaitUntil { h.gaps.count { it.reason == GapReason.MESSAGES_DROPPED.name } shouldBe 1 }
+    }
+
+    test("a 0.1.3 flag that could equally be one shortened message is left alone") {
+        val h = Harness()
+        // The negative control, and the boundary of the claim above: with a surviving message that
+        // was itself shortened, the flag is explained without any message having been dropped, and
+        // the payload cannot say whether one also was. A gap here would be a loss invented from
+        // evidence that does not support it — the mirror of the defect this all exists to fix.
+        val ambiguous = Fixtures.snapshot(
+            shape = Fixtures.messaging(conversationTitle = "Group") {
+                message("Ana", "on my way", truncated = true)
+            }.copy(truncated = setOf(TruncationFlag.MESSAGES)),
+            packageName = ENABLED_PKG,
+            eventId = "evt-v013-ambiguous",
+        )
+        var served = false
+        coEvery { h.ingest.pendingJournal(any(), any()) } coAnswers {
+            if (served) emptyList() else { served = true; listOf("gen-old" to ambiguous) }
+        }
+        coEvery { h.ingest.isJournalPending(any()) } returns true
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+
+        h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
+
+        coVerify(timeout = 5_000, atLeast = 1) { h.ingest.pendingJournal(any(), any()) }
+        stillHolds { h.gaps.none { it.reason == GapReason.MESSAGES_DROPPED.name } shouldBe true }
+    }
+
+    test("pending rows discarded with their source are settled while their payload can still be read") {
+        val h = Harness()
+        // The other way out of PENDING. These rows are never replayed: disabling the source
+        // discards them and empties the payload in one statement, so if the loss is not taken here
+        // there is no later moment at which it could be.
+        val legacy = Fixtures.snapshot(
+            shape = Fixtures.base(title = null, text = null).copy(truncated = setOf(TruncationFlag.LINES)),
+            packageName = ENABLED_PKG,
+            eventId = "evt-v013-discarded",
+        )
+        coEvery { h.ingest.pendingJournalForPackage(ENABLED_PKG) } returns listOf(legacy)
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+        h.awaitConnected()
+
+        coordinator.setSourceEnabled(ENABLED_PKG, false)
+        // Re-enabled and switched off again with the same row still on offer: the claim, not the
+        // caller, is what makes this once. A path that wrote the gap whenever it saw the flag
+        // would list one loss on the health page twice.
+        coordinator.setSourceEnabled(ENABLED_PKG, true)
+        coordinator.setSourceEnabled(ENABLED_PKG, false)
+
+        h.gaps.count { it.reason == GapReason.MESSAGES_DROPPED.name && it.packageName == ENABLED_PKG } shouldBe 1
+        coVerify(exactly = 2) { h.ingest.discardPendingJournal(ENABLED_PKG) }
+    }
+
+    test("a loss neither the journal nor its fallback could record is written on the next policy load") {
+        val h = Harness()
+        // Codex round 34 I3. Whatever stopped the acceptance write — a full disk is the case that
+        // matters — does not stop at one statement, so the fallback gap fails too. "Less precise,
+        // never absent" then said more than the code did: nothing anywhere recorded the event.
+        val full = IllegalStateException("no space left on device")
+        h.journalAnswers { throw full }
+        coEvery {
+            h.health.recordGap(any(), any(), GapReason.UNKNOWN, GapPrecision.EXACT, any(), any())
+        } throws full
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+        h.awaitConnected()
+
+        coordinator.offerCaptured(capturedWithTruncation("evt-nospace", emptySet()))
+        awaitUntil { coordinator.lastError shouldBe "IllegalStateException" }
+        stillHolds { h.gaps.isEmpty() shouldBe true }
+
+        // Writable again: the next policy load records it, bounded by when it happened and when
+        // it could finally be written.
+        h.observedSources.emit(listOf(sourceConfig(ENABLED_PKG)))
+        awaitUntil { h.gaps.count { it.reason == GapReason.UNKNOWN.name } shouldBe 1 }
+        h.gaps.single { it.reason == GapReason.UNKNOWN.name }.endEpochMs shouldNotBe null
+        // And forgotten only then: a later load does not write the same loss again.
+        h.observedSources.emit(listOf(sourceConfig(ENABLED_PKG), sourceConfig(UNLISTED_PKG)))
+        stillHolds { h.gaps.count { it.reason == GapReason.UNKNOWN.name } shouldBe 1 }
     }
 })

@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 4,
-    "identityHash": "0ccd485ff125d560c5c524cd1fc65202",
+    "identityHash": "485f8d770a42385710a7adda5f3a9ab4",
     "entities": [
       {
         "tableName": "source_configuration",
@@ -172,7 +172,7 @@
       },
       {
         "tableName": "event_journal",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`eventId` TEXT NOT NULL, `generation` TEXT NOT NULL, `receivedAtEpochMs` INTEGER NOT NULL, `expiresAtEpochMs` INTEGER NOT NULL, `state` TEXT NOT NULL, `attempts` INTEGER NOT NULL, `failureCode` TEXT, `payload` TEXT NOT NULL, `packageName` TEXT, PRIMARY KEY(`eventId`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`eventId` TEXT NOT NULL, `generation` TEXT NOT NULL, `receivedAtEpochMs` INTEGER NOT NULL, `expiresAtEpochMs` INTEGER NOT NULL, `state` TEXT NOT NULL, `attempts` INTEGER NOT NULL, `failureCode` TEXT, `payload` TEXT NOT NULL, `packageName` TEXT, `lossRecorded` INTEGER NOT NULL, PRIMARY KEY(`eventId`))",
         "fields": [
           {
             "fieldPath": "eventId",
@@ -225,6 +225,12 @@
             "fieldPath": "packageName",
             "columnName": "packageName",
             "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lossRecorded",
+            "columnName": "lossRecorded",
+            "affinity": "INTEGER",
+            "notNull": true
           }
         ],
         "primaryKey": {
@@ -1136,7 +1142,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '0ccd485ff125d560c5c524cd1fc65202')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '485f8d770a42385710a7adda5f3a9ab4')"
     ]
   }
 }

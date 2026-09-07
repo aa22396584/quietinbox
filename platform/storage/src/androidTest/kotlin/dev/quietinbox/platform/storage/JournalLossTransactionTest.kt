@@ -28,6 +28,11 @@ import java.io.File
  * stub is a fake that invokes the callback itself, so the `if (accepted)` guard and the transaction
  * around it are the fake's behaviour there, not the code's (round 34 I1). Both are decided here, on
  * a real vault.
+ *
+ * The second half of the file is the same question for an event that arrived before any of this
+ * existed (round 34 C2). A row a release up to 0.1.3 left pending never goes through `journal()` at
+ * all, so nothing wrote its loss; the claim is what lets exactly one of the two ways out of PENDING
+ * write it now. That claim is a conditional UPDATE, so it too is only really decided here.
  */
 @RunWith(AndroidJUnit4::class)
 class JournalLossTransactionTest {
@@ -94,6 +99,71 @@ class JournalLossTransactionTest {
         ingest.journal(snapshot("evt-2"), "gen", 60_000) { recordLoss() } shouldBe false
 
         allGaps().count { it.reason == GapReason.MESSAGES_DROPPED.name } shouldBe 1
+        Unit
+    }
+
+    @Test
+    fun aLossCarriedInFromAnOlderReleaseIsRecordedByExactlyOneClaim() = runBlocking {
+        ready()
+        // A row as an older release left it: journalled with no loss recorded, because that
+        // release recorded none.
+        ingest.journal(snapshot("evt-legacy"), "gen", 60_000) shouldBe true
+
+        ingest.claimEventLoss("evt-legacy") { recordLoss() } shouldBe true
+        // Every later pass — a replay that comes round again, or the discard that follows a
+        // disabled source — finds the claim spent. This is the whole idempotency boundary: without
+        // it a row replayed n times lists one loss n times on the health page.
+        ingest.claimEventLoss("evt-legacy") { recordLoss() } shouldBe false
+        ingest.claimEventLoss("evt-legacy") { recordLoss() } shouldBe false
+
+        allGaps().count { it.reason == GapReason.MESSAGES_DROPPED.name } shouldBe 1
+        Unit
+    }
+
+    @Test
+    fun aClaimWhoseGapCannotBeWrittenIsNotSpent() = runBlocking {
+        ready()
+        ingest.journal(snapshot("evt-legacy-2"), "gen", 60_000) shouldBe true
+
+        runCatching {
+            ingest.claimEventLoss("evt-legacy-2") { error("the gap write failed") }
+        }.isFailure shouldBe true
+
+        // The claim and the gap are one transaction, so a failed write leaves the row exactly as
+        // it was and the next pass can still record what it lost. Marking it settled here would
+        // lose the loss for good — there is no second copy of the evidence.
+        allGaps().isEmpty() shouldBe true
+        ingest.claimEventLoss("evt-legacy-2") { recordLoss() } shouldBe true
+        allGaps().count { it.reason == GapReason.MESSAGES_DROPPED.name } shouldBe 1
+        Unit
+    }
+
+    @Test
+    fun anEventThisReleaseAcceptedIsAlreadySettled() = runBlocking {
+        ready()
+        // Accepted with its loss, the way this release does it.
+        ingest.journal(snapshot("evt-modern"), "gen", 60_000) { recordLoss() } shouldBe true
+
+        // The upgrade path must not touch it. The insert set the column, so this cannot depend on
+        // reading the payload's flags right — which is what makes a new row and an old one carrying
+        // the same flags distinguishable at all.
+        ingest.claimEventLoss("evt-modern") { recordLoss() } shouldBe false
+
+        allGaps().count { it.reason == GapReason.MESSAGES_DROPPED.name } shouldBe 1
+        Unit
+    }
+
+    @Test
+    fun aRowThatHasAlreadyLeftPendingCannotBeClaimed() = runBlocking {
+        ready()
+        ingest.journal(snapshot("evt-settled"), "gen", 60_000) shouldBe true
+        ingest.markJournal("evt-settled", "COMMITTED")
+
+        // Its payload was cleared when it left PENDING, so anything claiming it now is working
+        // from a snapshot decoded before that — too late to be recording anything about it.
+        ingest.claimEventLoss("evt-settled") { recordLoss() } shouldBe false
+
+        allGaps().isEmpty() shouldBe true
         Unit
     }
 

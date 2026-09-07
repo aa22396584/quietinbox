@@ -67,15 +67,52 @@ were wrong in a way that changed the fix.
   and recorded here; deduplicating across snapshots is a change to the resync, not to this path.
   Making that possible needed a flag split first. `TruncationFlag.MESSAGES` was raised by two
   different losses in the same function — whole messages discarded, and a kept message whose text
-  was shortened — so a gap keyed on it would have manufactured gaps that never happened. The split
-  describes the capture side; nothing downstream decides anything from it any more, which is what
-  makes an upgrade safe. The flag set is persisted — the journal holds the whole snapshot — so a
-  row still pending when 0.1.3 becomes 0.1.4 carries the old, ambiguous `MESSAGES`. Reading it
-  under the narrower new meaning would have told the user a discarded message was merely a
-  shortened one. It is not read: whether a body was cut is answered per message, from evidence the
-  same payload already carries, and the dropped half of an old row is simply not claimed. Recording
-  nothing for a case the evidence cannot settle is the honest outcome; inventing a label for it is
-  not.
+  was shortened — so a gap keyed on it would have manufactured gaps that never happened. `LINES`
+  was split the same way and for the same reason: it always meant whole lines were dropped, while
+  the flags either side of it meant text had been shortened, so reading it correctly depended on
+  knowing which function had raised it. The split describes the capture side; whether a body was
+  cut is answered per message downstream, from evidence the same payload already carries. The
+  snapshot's flag set is still read for one thing — a non-empty set raises the `TRUNCATED_INPUT`
+  parse warning, which is filed as a diagnostic — but nothing keyed on which flag it holds.
+- **Content already lost when 0.1.3 journalled it is no longer lost again by the upgrade.** The flag
+  set is persisted — the journal holds the whole snapshot — so a row still pending when 0.1.3
+  becomes 0.1.4 carries the old vocabulary, and it never goes through the acceptance path that now
+  writes the loss: replay hands it straight to the commit, and the terminal transition then clears
+  the payload that was the only evidence. Two of those payloads still settle themselves. `LINES`
+  was raised only when the line array was longer than the snapshot may hold, so it can mean nothing
+  but dropped lines; an over-long single line was shortened without it. `MESSAGES` had the two
+  causes above, and a payload whose every surviving message is complete rules the second one out,
+  leaving the first. Both are recorded now — once, at whichever of the two ways out of `PENDING`
+  reaches the row first, replayed or discarded along with a source the user switched off, and in
+  both cases before the payload can be cleared.
+  What makes it once is a column rather than a reading of the flags. `event_journal.lossRecorded`
+  is set with the insert for everything this release accepts, defaults to 0 on rows carried over —
+  which is the truth about them, since nothing was written for them — and is taken
+  by a conditional update that writes the gap in the same transaction. A row replayed twenty times
+  therefore lists one loss, and a claim whose gap cannot be written stays unspent for the next
+  attempt rather than marking a record that does not exist.
+  Three cases deliberately record nothing. `MESSAGES` beside a message that was itself shortened
+  is undecidable — the batch may also have been over the limit — and a loss invented from evidence
+  that does not support it is the same defect facing the other way. A carried-over payload that no
+  longer decodes cannot be read at all. A paused source's rows are settled when it is resumed or
+  switched off, not while it is paused.
+  The column joins the unreleased schema 4 rather than adding a fifth version: 0.1.3 shipped
+  schema 3, so no device has ever run 4, and this is the same call round 33 made for the two
+  columns already in that migration.
+- **An event the vault would not take at all is remembered until it can be recorded.** A journal
+  insert that fails is recorded as a gap instead — but whatever stopped the insert does not stop at
+  one statement, and a disk with no space left fails that gap too. Both writes failing left nothing
+  anywhere saying the event had existed, while the release claimed "less precise, never absent".
+  The loss is now kept and written as a bounded gap by the next source-policy load, and forgotten
+  only once it is on disk — the same contract the cold-start and vault-lock-out losses already had.
+  One interval covers the outage rather than one per event: it opens at the first event that could
+  not be recorded and closes when the write finally lands. A locked vault is a different path,
+  caught by exception type before this one, and already had its own remembered obligation.
+- A loss that arrives *with* an event is committed with it or not at all, which means a gap write
+  that fails now rejects the event: the surviving messages are not stored either. That is a
+  deliberate change of behaviour and the honest side of the trade — a batch stored while the record
+  of what was missing from it silently vanished is the defect this release exists to remove — and
+  the caller records the whole event as a less precise loss instead.
 - **A message whose body was shortened was shown as if it were complete.** The truncation was
   computed at capture and thrown away at the parser boundary: each message's own `BoundedText`
   knows whether it was cut, and only its text was carried forward. It is stored per message now and
@@ -85,8 +122,16 @@ were wrong in a way that changed the fix.
   all three, and a notification whose *title* was too long marked messages that had lost nothing at
   all. A row now records what its own body lost, and nothing else. Where several rows are split out
   of one body — the WhatsApp group heuristic — only the last can be the one that lost text, because
-  truncation takes the tail. A revision recomputes it: replacing a body without replacing what that
-  body lost left a shortened label on text that was now complete.
+  truncation takes the tail; and only when the cut fell inside it. A cut landing on a line
+  separator leaves the last surviving row complete: what was lost there is a whole row, and calling
+  the surviving one shortened is wrong about text that is all present. A revision recomputes it:
+  replacing a body without replacing what that body lost left a shortened label on text that was
+  now complete.
+  A repost is evidence too. The same text arriving again, this time from a notification that says
+  it was cut, has the same fingerprint — the flag is deliberately not part of it, or one message
+  would become two rows — so the reconciler calls it a repost and nothing was written. The row now
+  takes the new evidence: the flag is set, never cleared, because a repost whose identical text
+  happened not to be cut does not unmake the observation that once it was.
 - **Switching a source off, or pausing it, recorded nothing.** Events dropped for it landed in
   `droppedAfterRevoke`, one counter that also holds a revoked permission, a rotated generation and a
   maintenance run — so the one cause the user chose looked exactly like three they did not, and the
@@ -102,13 +147,15 @@ were wrong in a way that changed the fix.
   the health page saying so. Rows an earlier version left contradicting their own policy are closed
   when the policy loads.
   Removing a source closes the gap it left open, in the removal's own transaction: nothing could
-  ever close it afterwards, since re-adding goes through a path that opens and closes nothing, and
-  the health page renders an interval with no end as capture still being missing. "Remove and
+  ever close it afterwards: re-adding neither opens nor closes a gap in its own write, and the
+  health page renders an interval with no end as capture still being missing. The policy load that
+  follows any such change does close a row that contradicts the configuration — but outside the
+  upsert's transaction, so it is a repair, not the boundary the removal itself provides. "Remove and
   delete this source's data" additionally drops the source's name from its gaps — the intervals
   stay, because deleting them would hide a loss the user had already been shown, but they stop
   naming an app that was asked to be forgotten.
-- Gaps can say which source they belong to. Most cannot and must not: of the seven places that
-  record one, five are process-wide. None can name a conversation, so there is deliberately no
+- Gaps can say which source they belong to. Most cannot and must not: of the fifteen places that
+  record one, nine are process-wide. None can name a conversation, so there is deliberately no
   conversation column. The first version of this argument was wrong about one site: a batch that
   lost messages *is* ingested — the survivors are committed and their conversation resolved — so
   "the ingest that did not happen" was not true of it. The gap for that loss is now written when
@@ -197,8 +244,10 @@ were wrong in a way that changed the fix.
 - Database schema 3 → 4: two additive nullable columns, `gap_interval.packageName` and
   `message.truncationFlags`, with `MIGRATION_3_4`, an exported `schemas/4.json` and a migration test
   that asserts existing rows survive with both columns null. The backup format gained the same field,
-  appended and defaulted so an older reader ignores it and a newer reader restoring an older file
-  gets null — and the one place that built a backup record positionally now names its arguments,
+  appended and defaulted so a newer reader restoring an older file gets null. It does not make the
+  archive readable by an older build: `BackupStager` rejects a manifest whose schema is newer than
+  its own before it decodes a single record, so 0.1.3 answers a schema-4 archive with
+  `UNSUPPORTED_VERSION` regardless of what the record looks like — and the one place that built a backup record positionally now names its arguments,
   because a field inserted anywhere but the end would have shifted every argument after it with no
   compile error.
 - CI's instrumented lane and every documented device-test command now include

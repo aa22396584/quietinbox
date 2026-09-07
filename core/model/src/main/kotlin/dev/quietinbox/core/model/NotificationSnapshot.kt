@@ -46,12 +46,28 @@ enum class NotificationTemplate { MESSAGING, BIG_TEXT, INBOX, BIG_PICTURE, MEDIA
  * whose text was shortened, and whole messages discarded because the batch exceeded
  * [Limits.MAX_MESSAGES]. Only the second is content the vault never sees, so only the second may
  * become a gap; conflating them would have manufactured gaps that never happened.
+ *
+ * [LINES] and [LINES_DROPPED] were split for the same reason, one release later: the single flag
+ * meant "lines were dropped" while its neighbours meant "text was shortened", so reading it right
+ * depended on knowing which function had raised it.
  */
 enum class TruncationFlag {
     TITLE,
     TEXT,
     BIG_TEXT,
+
+    /**
+     * Legacy only. Releases up to 0.1.3 raised this when an InboxStyle notification carried more
+     * lines than the snapshot may hold — a whole-line loss, despite the name reading like the
+     * shortening flags above it. This release never writes it; [LINES_DROPPED] says the same thing
+     * in the same vocabulary as the message flags. In a stored payload it therefore identifies a
+     * journal row written before the split, which is how the upgrade path recognises a loss those
+     * releases recorded nowhere else.
+     */
     LINES,
+
+    /** Whole lines were discarded from an InboxStyle notification: content the vault never sees. */
+    LINES_DROPPED,
 
     /** A message was kept, but its text was shortened. */
     MESSAGES,

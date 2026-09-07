@@ -101,9 +101,12 @@ class MigrationTest {
     }
 
     /**
-     * v4 adds `gap_interval.packageName` and `message.truncationFlags`. Both are additive and
-     * nullable: an existing gap stays a gap and an existing message stays readable, with the new
-     * columns null rather than a fabricated value.
+     * v4 adds `gap_interval.packageName`, `message.truncationFlags` and
+     * `event_journal.lossRecorded`. All three are additive: an existing gap stays a gap and an
+     * existing message stays readable, with the new columns null rather than a fabricated value,
+     * and a pending journal row keeps its payload and comes back unsettled — which is the truth
+     * about it, since 0.1.3 recorded the loss such a row arrived with nowhere. A 1 here would tell
+     * the upgrade path the record already exists and lose it for good.
      */
     @Test
     fun migrate3To4AddsNullableColumnsAndKeepsRows() {
@@ -123,6 +126,10 @@ class MigrationTest {
                     "revisionCount, observationCount, mediaState, fingerprint, eventId, sortKey) " +
                     "VALUES (1, 0, 'body', 'TEXT', 'OBSERVED_ONLY', 5, 'LIVE', 'FULL_STRUCTURED', 'CANDIDATE', 0, 1, 'NONE', 'fp', 'e1', 5)",
             )
+            db.execSQL(
+                "INSERT INTO event_journal (eventId, generation, receivedAtEpochMs, expiresAtEpochMs, state, attempts, failureCode, payload, packageName) " +
+                    "VALUES ('e-old', 'g', 1, 2, 'PENDING', 0, NULL, '{\"truncated\":[\"LINES\"]}', 'pkg')",
+            )
         }
         val migrated = helper.runMigrationsAndValidate(name, 4, true, QuietInboxDatabase.MIGRATION_3_4)
         migrated.query("SELECT reason, startEpochMs, packageName FROM gap_interval").use { c ->
@@ -138,7 +145,20 @@ class MigrationTest {
             c.getString(1) shouldBe "fp"
             c.isNull(2) shouldBe true
         }
+        migrated.query("SELECT eventId, state, payload, lossRecorded FROM event_journal").use { c ->
+            c.moveToFirst() shouldBe true
+            c.getString(0) shouldBe "e-old"
+            // Still pending, and still carrying the only evidence of what it lost.
+            c.getString(1) shouldBe "PENDING"
+            c.getString(2) shouldBe "{\"truncated\":[\"LINES\"]}"
+            c.getInt(3) shouldBe 0
+        }
         migrated.execSQL("INSERT INTO gap_interval (startEpochMs, endEpochMs, reason, precision, createdAtEpochMs, packageName) VALUES (40, NULL, 'SOURCE_PAUSED_BY_USER', 'EXACT', 40, 'pkg')")
+        migrated.execSQL(
+            "INSERT INTO event_journal (eventId, generation, receivedAtEpochMs, expiresAtEpochMs, state, attempts, failureCode, payload, packageName, lossRecorded) " +
+                "VALUES ('e-new', 'g', 1, 2, 'PENDING', 0, NULL, '{}', 'pkg', 1)",
+        )
         migrated.close()
     }
+
 }

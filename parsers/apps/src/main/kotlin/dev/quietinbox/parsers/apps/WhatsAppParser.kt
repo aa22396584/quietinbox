@@ -66,6 +66,14 @@ class WhatsAppParser : AppParser() {
             (senders.distinct().size >= 2 && senders.none { it == title })
         if (!looksLikeGroup) return super.appSingleCandidates(snapshot, warnings)
 
+        // Truncation takes the tail, so only the last of these rows can be the one that lost
+        // text — but only when the cut fell inside it. A cut landing on a line separator leaves
+        // the last surviving row complete: what was lost is a whole row, and marking this one
+        // would say the wrong thing about text that is all there (round 34 I1 / M4). What
+        // remains after the final separator decides it; a cut in the middle of that segment is
+        // still only an upper bound, which is the honest one to keep.
+        val cutInsideLastRow = truncatedBody && body.substringAfterLast('\n').isNotBlank()
+
         warnings += ParseWarning.SENDER_SPLIT_HEURISTIC
         val (timestamp, quality) = timestamp(null, snapshot)
         if (quality == TimestampQuality.OBSERVED_ONLY) warnings += ParseWarning.NO_TIMESTAMP
@@ -77,10 +85,7 @@ class WhatsAppParser : AppParser() {
                 sourceTimestampEpochMs = timestamp,
                 timestampQuality = quality,
                 contentStatus = ContentStatus.NOTIFICATION_TEXT,
-                // Several rows are split out of one bounded body. Truncation takes the tail, so
-                // only the last of them can be the one that lost text; saying it of all of them
-                // would be the same over-reporting this release exists to remove.
-                textTruncated = truncatedBody && index == pairs.lastIndex,
+                textTruncated = cutInsideLastRow && index == pairs.lastIndex,
             )
         }
     }

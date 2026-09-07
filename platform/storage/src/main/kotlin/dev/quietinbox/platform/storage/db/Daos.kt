@@ -65,6 +65,21 @@ interface JournalDao {
     )
     suspend fun setState(eventId: String, state: String, failure: String?)
 
+    /** Pending rows of one source, so the upgrade path can settle them before they are discarded. */
+    @Query("SELECT * FROM event_journal WHERE state = 'PENDING' AND packageName = :packageName")
+    suspend fun pendingForPackage(packageName: String): List<EventJournalEntity>
+
+    /**
+     * Claims the right to record this event's own loss, returning 1 only for the caller that won.
+     *
+     * The conditional update is the whole guarantee: however often a pending row is replayed, and
+     * whichever of the two paths out of PENDING reaches it first, exactly one caller sees a 1 and
+     * writes the gap. `state = 'PENDING'` keeps a stale snapshot from claiming a row that has
+     * already been committed or discarded.
+     */
+    @Query("UPDATE event_journal SET lossRecorded = 1 WHERE eventId = :eventId AND lossRecorded = 0 AND state = 'PENDING'")
+    suspend fun claimLoss(eventId: String): Int
+
     /** Pending rows of a source that was disabled or removed are discarded for good (QI-SEC-001). */
     @Query("UPDATE event_journal SET state = 'DISCARDED', failureCode = 'SOURCE_DISABLED', payload = '' WHERE state = 'PENDING' AND packageName = :packageName")
     suspend fun discardPending(packageName: String): Int
@@ -262,6 +277,15 @@ interface MessageDao {
     /** A revision replaces the body, so it replaces what that body lost as well. */
     @Query("UPDATE message SET body = :body, revisionCount = revisionCount + 1, eventId = :eventId, truncationFlags = :truncationFlags WHERE id = :id")
     suspend fun applyRevision(id: Long, body: String, eventId: String, truncationFlags: String?)
+
+    /**
+     * Records that a stored body was shortened, when a later observation of the same text proves
+     * it. Only ever sets the flag, never clears it: the label is about the body on disk, and a
+     * repost whose identical text happened not to be cut does not unmake the observation that it
+     * once was — a message cannot become less lost than it already was (round 34 I2).
+     */
+    @Query("UPDATE message SET truncationFlags = :truncationFlags WHERE id = :id AND truncationFlags IS NULL")
+    suspend fun markTruncated(id: Long, truncationFlags: String)
 
     @Query("UPDATE message SET mediaState = :state, mediaBlobId = :blobId WHERE id = :id")
     suspend fun setMedia(id: Long, state: String, blobId: Long?)

@@ -91,4 +91,28 @@ class WhatsAppParserTest : FunSpec({
         val shape = Fixtures.base("Alice", "hi").copy(template = NotificationTemplate.UNKNOWN)
         parser.parse(waSnapshot(shape)).warnings shouldContain ParseWarning.ADAPTER_FALLBACK_TO_STANDARD
     }
+
+    test("a cut that landed on a line separator leaves the last surviving row complete") {
+        // Codex round 34 I1. The rule is that truncation takes the tail, so only the last row can
+        // have lost text — but this cut fell exactly on the newline after Bob, so the row that
+        // vanished is Carol's and both surviving rows are whole. Marking Bob would say a body was
+        // shortened when every character of it is there.
+        val prefix = "Alice: " + "a".repeat(2037) + "\n" + "Bob: " + "b".repeat(2045) + "\n"
+        prefix.length shouldBe 4096
+        val raw = prefix + "Carol: gone"
+        val batch = parser.parse(waSnapshot(Fixtures.bigText("Family", raw, bigText = raw)))
+
+        batch.messages.map { it.body } shouldBe listOf("a".repeat(2037), "b".repeat(2045))
+        batch.messages.map { it.textTruncated } shouldBe listOf(false, false)
+    }
+
+    test("a cut that landed inside the last row still marks it") {
+        // The negative control: the same body cut in the middle of Bob's text. Here the last row
+        // really did lose its end, and not saying so is the defect the flag exists to prevent.
+        val raw = "Alice: " + "a".repeat(2037) + "\n" + "Bob: " + "b".repeat(3000)
+        val batch = parser.parse(waSnapshot(Fixtures.bigText("Family", raw, bigText = raw)))
+
+        batch.messages shouldHaveSize 2
+        batch.messages.map { it.textTruncated } shouldBe listOf(false, true)
+    }
 })

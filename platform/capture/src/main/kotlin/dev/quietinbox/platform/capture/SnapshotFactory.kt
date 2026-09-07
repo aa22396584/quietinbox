@@ -53,7 +53,7 @@ class SnapshotFactory(
 
         val lines: List<BoundedText> = runCatching { extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES) }.getOrNull()
             ?.let { arr ->
-                if (arr.size > Limits.MAX_TEXT_LINES) truncated += TruncationFlag.LINES
+                if (arr.size > Limits.MAX_TEXT_LINES) truncated += TruncationFlag.LINES_DROPPED
                 arr.takeLast(Limits.MAX_TEXT_LINES).mapNotNull { BoundedText.of(it) }
             }.orEmpty()
 

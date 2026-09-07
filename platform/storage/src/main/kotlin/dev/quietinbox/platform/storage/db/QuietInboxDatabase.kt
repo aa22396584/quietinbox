@@ -100,17 +100,28 @@ abstract class QuietInboxDatabase : RoomDatabase() {
          *
          * `gap_interval.packageName` lets a gap say which source it belongs to — the disable and
          * pause gaps this release adds, and the two drop sites that know a package. It deliberately
-         * has no conversation column: of the seven places that record a gap, five are process-wide,
-         * and none can know a conversation, because identity is resolved during the ingest that did
-         * not happen.
+         * has no conversation column: of the fifteen places that record a gap, nine are
+         * process-wide, and none of the rest can know a conversation either. The six that name a
+         * source are written before identity is resolved — at the queue, at acceptance, or from a
+         * policy change — so there is no conversation to name at the moment of writing, whether or
+         * not an ingest follows.
          *
          * `message.truncationFlags` records what the snapshot had to cut, so a body that was
          * shortened is no longer displayed as if it were complete.
+         *
+         * `event_journal.lossRecorded` says whether the loss an event arrived with has reached the
+         * gap table. A row carried over from 0.1.3 defaults to 0, which is the truth about it:
+         * that release recorded such a loss nowhere, so nothing has been written for it yet, and
+         * the upgrade path claims each one exactly once by moving this column with the gap in one
+         * transaction. Schema 4 is unreleased — 0.1.3 shipped 3 — so the column joins this
+         * migration rather than adding one nobody would ever run from, as round 33 decided for the
+         * two columns above. No user content is touched.
          */
         val MIGRATION_3_4: Migration = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE gap_interval ADD COLUMN packageName TEXT")
                 db.execSQL("ALTER TABLE message ADD COLUMN truncationFlags TEXT")
+                db.execSQL("ALTER TABLE event_journal ADD COLUMN lossRecorded INTEGER NOT NULL DEFAULT 0")
             }
         }
 

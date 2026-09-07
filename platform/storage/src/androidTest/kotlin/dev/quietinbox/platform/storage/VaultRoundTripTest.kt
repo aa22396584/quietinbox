@@ -6,6 +6,7 @@ import dev.quietinbox.core.identity.IdentityResolver
 import dev.quietinbox.core.model.DedupState
 import dev.quietinbox.core.model.KnownSources
 import dev.quietinbox.core.parser.StandardParser
+import dev.quietinbox.core.reconcile.Decision
 import dev.quietinbox.core.reconcile.Reconciler
 import dev.quietinbox.core.testing.Fixtures
 import dev.quietinbox.platform.crypto.KeyMaterial
@@ -177,6 +178,45 @@ class VaultRoundTripTest {
         again.newMessageIds shouldBe emptyList()
         ingest.findConversationId(id) shouldBe null
         holder.db().conversationDao().observeCount().first() shouldBe 0
+        Unit
+    }
+
+    /**
+     * A repost of the same text can carry evidence the first observation did not have (round 34
+     * I2). The body is byte-identical, so the fingerprint matches and the reconciler calls it a
+     * repost — but this snapshot says the text was cut, and the row still claims to be complete.
+     */
+    @Test
+    fun aRepostThatKnowsTheBodyWasCutMarksARowThatSaidItWasWhole() = runBlocking {
+        ready()
+        val parser = StandardParser()
+        val identity = IdentityResolver()
+        val reconciler = Reconciler()
+        fun shape(cut: Boolean) = Fixtures.messaging(conversationTitle = "Repost", isGroup = true, shortcutId = "sc-rp") {
+            message("Alice", "the text that fitted the first time", 1_000, truncated = cut)
+        }
+
+        val s1 = Fixtures.snapshot(shape(cut = false), packageName = KnownSources.LINE, eventId = "rp1", notificationKey = "krp")
+        val b1 = parser.parse(s1)
+        val id1 = identity.resolve(s1, b1)
+        val r1 = reconciler.reconcile(s1.notificationKey, b1.messages, ingest.checkpoint(id1.streamKey), lookupById = { null })
+        val out1 = ingest.commit(s1, b1, id1, r1, "gen", null, mediaAllowed = false)
+        out1.newMessageIds shouldHaveSize 1
+        val conversationId = out1.conversationId!!
+        inbox.observeMessages(conversationId).first().single().bodyTruncated shouldBe false
+
+        val s2 = Fixtures.snapshot(shape(cut = true), packageName = KnownSources.LINE, eventId = "rp2", notificationKey = "krp")
+        val b2 = parser.parse(s2)
+        val id2 = identity.resolve(s2, b2)
+        val r2 = reconciler.reconcile(s2.notificationKey, b2.messages, ingest.checkpoint(id2.streamKey), lookupById = { null })
+        // The decision really is Known, so this is not a second row quietly doing the work.
+        r2.decisions.single().shouldBeInstanceOf<Decision.Known>()
+        val out2 = ingest.commit(s2, b2, id2, r2, "gen", null, mediaAllowed = false)
+        out2.newMessageIds shouldHaveSize 0
+
+        val messages = inbox.observeMessages(conversationId).first()
+        messages shouldHaveSize 1
+        messages.single().bodyTruncated shouldBe true
         Unit
     }
 }

@@ -28,7 +28,8 @@ StatusBarNotification
   → Channel(MAX_QUEUE_DEPTH)             (overflow ⇒ counted, DEGRADED, gap recorded — never DROP_OLDEST silently)
   → admission fence, twice               (before waiting for the pipeline lock and again inside it: pause, maintenance,
                                           generation, source policy — whatever changed while the event waited wins)
-  → IngestRepository.journal             (durable accepted; JSON payload in the encrypted vault, cleared on leaving PENDING)
+  → IngestRepository.journal             (durable accepted; JSON payload in the encrypted vault, cleared on leaving PENDING;
+                                          a loss the event arrived with is written in this transaction and marked lossRecorded)
   → ParserRegistry.parse                 (adapter by package, else StandardParser)
   → IdentityResolver.resolve             (chat id > shortcut > notification stream > title; never cross-stream)
   → Reconciler.reconcile                 (suffix/prefix window alignment, ids, AMBIGUOUS_REPEAT, stale windows)
@@ -40,6 +41,11 @@ StatusBarNotification
 
 在 `journal` 之前發生 process 死亡會遺失該事件（已記載為平台層面不可觀測）；在 `journal` 之後，該資料列
 會在下次開啟金庫、恢復擷取或維護結束後以 `CaptureOrigin.REPLAY` 重播——暫停期間絕不重播，來源在此期間被停用者一律丟棄。
+
+0.1.3 以前的版本留下的 PENDING 資料列，帶著那些版本從未記錄的損失。離開 `PENDING` 的兩條路——重播，以及
+停用或移除來源後隨之而來的丟棄——都會先結清它，趁 payload 還說得出它是什麼。`event_journal.lossRecorded`
+（schema v4）由一道條件式 UPDATE 認領，缺口寫在同一個 transaction 內，因此先到的那條路記錄它、之後任何一次
+都不會再記一次。只認領 payload 足以判定的情況：`LINES`，以及沒有任何倖存訊息自身被截短的 `MESSAGES`。
 
 來源 policy（新增／啟用／暫停／移除）一律經由 `CaptureCoordinator`：金庫寫入與記憶體內的允許清單在 pipeline 鎖內
 一起更新，因此正在等鎖的事件會以新 policy 被圍籬，不會用舊的。停用或移除來源會把該來源的 PENDING journal 全部標為丟棄。

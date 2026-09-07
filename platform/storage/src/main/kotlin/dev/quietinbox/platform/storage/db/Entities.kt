@@ -62,6 +62,15 @@ data class EventJournalEntity(
     val payload: String,
     /** Source package, so a disabled or removed source can discard its pending rows (schema v3). */
     val packageName: String? = null,
+    /**
+     * True once this event's own loss — content the framework had already dropped when the
+     * notification reached us — has been written to the gap table (schema v4). Set in the same
+     * transaction as the insert for events accepted by this release, and claimed exactly once by
+     * the upgrade path for rows carried over from a release that recorded the loss nowhere. It is
+     * the idempotency boundary: the claim is a conditional update, so a replayed row cannot record
+     * the same loss a second time.
+     */
+    val lossRecorded: Boolean = false,
 )
 
 /** Last visible window per notification stream (plan section 8: NotificationCheckpoint). */
@@ -151,8 +160,12 @@ data class MessageEntity(
     val eventId: String,
     val sortKey: Long,
     val expiresAtEpochMs: Long?,
-    /** `TruncationFlag` names joined by ',', or null. A name, not a boolean: "the text was cut" and
-     *  "whole messages were dropped" are different losses and must stay distinguishable. */
+    /**
+     * `TruncationFlag.TEXT` when this row's own body was shortened, otherwise null. It is a column
+     * of names rather than a boolean because "the text was cut" and "whole messages were dropped"
+     * are different losses that must stay distinguishable — but only the first is ever a property
+     * of one message, so only the first is ever stored here. The second is a gap.
+     */
     val truncationFlags: String? = null,
 )
 

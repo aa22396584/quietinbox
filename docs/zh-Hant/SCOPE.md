@@ -14,8 +14,8 @@
 | 多訊息 parser（MessagingStyle / Inbox / BigText / summary） | 完成 | `core:parser` 13 個 JVM 測試 |
 | 不跨串流合併的身分判定 | 完成 | `core:identity` 5 個 JVM 測試 |
 | 去重（`AMBIGUOUS_REPEAT`、revision、過期視窗處理、resync 視為重貼） | 完成 | `core:reconcile` 22 個 JVM 測試，含兩個 1,000 次迭代的 property test（§7.2 的六個例子加上關閉視窗的歧義重複都是字面測試案例） |
-| 加密金庫（Room + SQLCipher、每次安裝隨機金鑰、Keystore 包裝） | 完成 | 真機測試 `VaultRoundTripTest` + `MigrationTest`（1→2、2→3）+ `KeystoreWrapperTest`（序列化的 KEK 建立）；`KeystoreWrapper` 設定 `setUserAuthenticationRequired(false)` |
-| Journal-first commit；撤權／暫停／來源變更／維護時的 commit 圍籬 | 完成 | `CaptureCoordinator`：等鎖前與鎖內各一次 admission 圍籬、寫入前的 commit 圍籬；來源政策變更在鎖內；`CaptureCoordinatorTest`（32） |
+| 加密金庫（Room + SQLCipher、每次安裝隨機金鑰、Keystore 包裝） | 完成 | 真機測試 `VaultRoundTripTest` + `MigrationTest`（1→2、2→3、3→4）+ `KeystoreWrapperTest`（序列化的 KEK 建立）；`KeystoreWrapper` 設定 `setUserAuthenticationRequired(false)` |
+| Journal-first commit；撤權／暫停／來源變更／維護時的 commit 圍籬 | 完成 | `CaptureCoordinator`：等鎖前與鎖內各一次 admission 圍籬、寫入前的 commit 圍籬；來源政策變更在鎖內；`CaptureCoordinatorTest`（50） |
 | 「刪除全部」是經驗證的獨佔維護執行；cipher 快取綁定金鑰 epoch | 完成 | `VaultMaintenance`、`VaultRepository.deleteEverything` → `ResetResult`；`VaultMaintenanceTest`（5）、真機 `DeletionGraphTest`；AVD 上實際走過重設 |
 | 刪除圖與讀取時到期（journal payload 清空、媒體列／檔案隨訊息刪除、投影重算、到期副本隱藏） | 完成 | `DeletionGraphTest`（5，真機） |
 | 帶品質標籤的收件匣／對話 UI | 完成 | 實機截圖 |

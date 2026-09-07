@@ -1,3 +1,8 @@
+# Dependabot *alerts* are enabled for this repository, but automatic security-update PRs are not
+# (`automated-security-fixes` is off, deliberately). A bot cannot regenerate
+# `gradle/verification-metadata.xml` from a cold cache, which every Gradle dependency change
+# requires (docs/RELEASE.md), so a security PR for a Gradle artifact would only ever arrive red.
+# The alert is the part worth having: it says what to fix, and the fix stays a human's job.
 version: 2
 updates:
   # Actions only: every Gradle dependency change needs the verification metadata regenerated from
@@ -7,3 +12,12 @@ updates:
     schedule:
       interval: monthly
     labels: [ci]
+    # One PR for all of them, for two reasons found the hard way in September 2026:
+    # separate PRs that touch adjacent lines of ci.yml conflict with each other (the checkout and
+    # setup-java bumps did), and the fifth PR of the batch was never created at all — Dependabot
+    # logged "Submitting actions/download-artifact pull request for creation" and a 204, but no PR
+    # and no branch ever appeared, and nothing surfaced that. A group also closes the window in
+    # which upload-artifact and download-artifact could sit on different majors.
+    groups:
+      actions:
+        patterns: ["*"]

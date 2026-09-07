@@ -26,7 +26,7 @@
 
 | 管道 | 價格 | 說明 |
 | --- | --- | --- |
-| [Google Play](https://play.google.com/store/apps/details?id=dev.quietinbox.app) | 付費（一次性） | 自動更新、支持開發；功能與開源版完全相同。商店提供的是 0.1.3（2026-09-07 上架，172 個國家／地區） |
+| [Google Play](https://play.google.com/store/apps/details?id=dev.quietinbox.app) | 付費（一次性） | 自動更新、支持開發；功能與開源版完全相同。0.1.4 已於 2026-09-08 上傳 production（[workflow_dispatch](https://github.com/ImL1s/quietinbox/actions/runs/34159710460)）；0.1.3 於 2026-09-07 上架，172 個國家／地區 |
 | [GitHub Releases](https://github.com/ImL1s/quietinbox/releases) | 免費（GPL-3.0-or-later） | 直接安裝 APK，附 SHA-256。目前是 [v0.1.4](https://github.com/ImL1s/quietinbox/releases/tag/v0.1.4)（2026-09-08） |
 
 兩邊套件名相同但簽章不同（Play 由 Google Play App Signing 重新簽章），因此無法互相覆蓋安裝，請擇一使用。沒有訂閱、沒有內購、沒有廣告、沒有功能鎖，理由見 [ADR-0006](docs/adr/0006-distribution-and-monetisation.md)。
@@ -133,7 +133,7 @@ adb shell cmd notification post -S messaging -t "Alice" tag "hello from shell"
 
 | Channel | Price | Notes |
 | --- | --- | --- |
-| [Google Play](https://play.google.com/store/apps/details?id=dev.quietinbox.app) | paid, one-time | auto-updates and supports development; identical features. The store serves 0.1.3, published on 2026-09-07 in 172 countries |
+| [Google Play](https://play.google.com/store/apps/details?id=dev.quietinbox.app) | paid, one-time | auto-updates and supports development; identical features. 0.1.4 was uploaded to production on 2026-09-08 ([workflow_dispatch](https://github.com/ImL1s/quietinbox/actions/runs/34159710460)); 0.1.3 was published on 2026-09-07 in 172 countries |
 | [GitHub Releases](https://github.com/ImL1s/quietinbox/releases) | free (GPL-3.0-or-later) | install the APK directly; SHA-256 checksums attached. Current is [v0.1.4](https://github.com/ImL1s/quietinbox/releases/tag/v0.1.4) (2026-09-08) |
 
 Both use the same package name but different signatures (Play re-signs with Google Play App Signing), so one cannot update over the other: pick one. No subscription, no in-app purchases, no ads, no locked features; the reasoning is in [ADR-0006](docs/adr/0006-distribution-and-monetisation.md).

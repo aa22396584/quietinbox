@@ -100,8 +100,9 @@ abstract class QuietInboxDatabase : RoomDatabase() {
          *
          * `gap_interval.packageName` lets a gap say which source it belongs to — the disable and
          * pause gaps this release adds, and the two drop sites that know a package. It deliberately
-         * has no conversation column: of the fifteen places that record a gap, nine are
-         * process-wide, and none of the rest can know a conversation either. The six that name a
+         * has no conversation column: of the sixteen places that record a gap — fifteen in the
+         * coordinator and one in `HealthRepository`, for a session the last process never closed —
+         * ten are process-wide, and none of the rest can know a conversation either. The six that name a
          * source are written before identity is resolved — at the queue, at acceptance, or from a
          * policy change — so there is no conversation to name at the moment of writing, whether or
          * not an ingest follows.

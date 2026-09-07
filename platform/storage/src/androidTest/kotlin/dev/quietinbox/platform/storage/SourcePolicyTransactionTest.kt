@@ -149,13 +149,13 @@ class SourcePolicyTransactionTest {
         // leaves capture stopped with nothing saying what was already gone.
         val changed = sources.setEnabled(pkg, false) {
             health.openGap(2_000, GapReason.SOURCE_DISABLED_BY_USER, GapPrecision.EXACT, 2_000, pkg)
-            for (s in ingest.pendingJournalForPackage(pkg)) ingest.claimEventLoss(s.eventId) { recordLoss() }
+            for (s in ingest.pendingJournalForPackage(pkg).snapshots) ingest.claimEventLoss(s.eventId) { recordLoss() }
             ingest.discardPendingJournal(pkg)
         }
 
         changed shouldBe true
         ingest.isJournalPending("evt-carried") shouldBe false
-        ingest.pendingJournalForPackage(pkg).isEmpty() shouldBe true
+        ingest.pendingJournalForPackage(pkg).snapshots.isEmpty() shouldBe true
         allGaps().count { it.reason == GapReason.MESSAGES_DROPPED.name } shouldBe 1
         Unit
     }
@@ -168,7 +168,7 @@ class SourcePolicyTransactionTest {
 
         runCatching {
             sources.setEnabled(pkg, false) {
-                for (s in ingest.pendingJournalForPackage(pkg)) ingest.claimEventLoss(s.eventId) { error("the gap write failed") }
+                for (s in ingest.pendingJournalForPackage(pkg).snapshots) ingest.claimEventLoss(s.eventId) { error("the gap write failed") }
                 ingest.discardPendingJournal(pkg)
             }
         }.isFailure shouldBe true
@@ -266,6 +266,56 @@ class SourcePolicyTransactionTest {
         all.count { it.packageName == null && it.endEpochMs != null } shouldBe 1
         // The other source is untouched: still named, still open.
         all.count { it.packageName == "com.example.other" && it.endEpochMs == null } shouldBe 1
+        Unit
+    }
+
+    /**
+     * Both remove branches only ever had happy-path tests, so a callback quietly moved outside the
+     * transaction would still have passed all of them (round 35 Codex I6). These are the controls:
+     * a failure anywhere inside the removal leaves every part of it where it was.
+     */
+    @Test
+    fun aRemoveWithoutDataWhoseCallbackFailsChangesNothing() = runBlocking {
+        ready()
+        addSource()
+        journalCarriedOver("evt-remove-1")
+        sources.setEnabled(pkg, false) {
+            health.openGap(2_000, GapReason.SOURCE_DISABLED_BY_USER, GapPrecision.EXACT, 2_000, pkg)
+        } shouldBe true
+
+        runCatching { sources.remove(pkg, deleteData = false) { error("the gap close failed") } }.isFailure shouldBe true
+
+        // The source is still there, its pending row still pending with its payload, and its gap
+        // still open — a half-removed source with a closed gap would say capture had resumed.
+        sources.get(pkg)!!.enabled shouldBe false
+        ingest.isJournalPending("evt-remove-1") shouldBe true
+        ingest.pendingJournalForPackage(pkg).snapshots.size shouldBe 1
+        openGaps().count { it.packageName == pkg } shouldBe 1
+        Unit
+    }
+
+    @Test
+    fun aRemoveWithDataWhoseCallbackFailsLeavesTheWholeGraphInPlace() = runBlocking {
+        ready()
+        addSource()
+        journalCarriedOver("evt-remove-2")
+        sources.setEnabled(pkg, false) {
+            health.openGap(2_000, GapReason.SOURCE_DISABLED_BY_USER, GapPrecision.EXACT, 2_000, pkg)
+        } shouldBe true
+
+        runCatching {
+            sources.remove(pkg, deleteData = true) {
+                health.closeOpenGapsForSource(4_000, pkg, GapReason.SOURCE_DISABLED_BY_USER)
+                error("forgetting the source failed")
+            }
+        }.isFailure shouldBe true
+
+        sources.get(pkg)!!.packageName shouldBe pkg
+        ingest.isJournalPending("evt-remove-2") shouldBe true
+        // The close that ran before the failure is rolled back with it: the gap is open and named.
+        val open = openGaps().filter { it.packageName == pkg }
+        open.size shouldBe 1
+        open.single().endEpochMs shouldBe null
         Unit
     }
 }

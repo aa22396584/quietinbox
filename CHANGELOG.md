@@ -72,8 +72,10 @@ were wrong in a way that changed the fix.
   the flags either side of it meant text had been shortened, so reading it correctly depended on
   knowing which function had raised it. The split describes the capture side; whether a body was
   cut is answered per message downstream, from evidence the same payload already carries. The
-  snapshot's flag set is still read for one thing — a non-empty set raises the `TRUNCATED_INPUT`
-  parse warning, which is filed as a diagnostic — but nothing keyed on which flag it holds.
+  snapshot's flag set is still read, and for more than one thing: acceptance turns the three
+  `*_DROPPED` flags into a gap, the upgrade path below reads the old vocabulary, and a non-empty
+  set of any kind raises the `TRUNCATED_INPUT` parse warning. What no longer happens is a *message
+  row* taking its label from it.
 - **Content already lost when 0.1.3 journalled it is no longer lost again by the upgrade.** The flag
   set is persisted — the journal holds the whole snapshot — so a row still pending when 0.1.3
   becomes 0.1.4 carries the old vocabulary, and it never goes through the acceptance path that now
@@ -82,11 +84,16 @@ were wrong in a way that changed the fix.
   was raised only when the line array was longer than the snapshot may hold, so it can mean nothing
   but dropped lines; an over-long single line was shortened without it. `MESSAGES` had the two
   causes above, and a payload whose every surviving message is complete rules the second one out,
-  leaving the first. Both are recorded now — once, at whichever of the two ways out of `PENDING`
-  reaches the row first, replayed or discarded along with a source the user switched off, and in
-  both cases before the payload can be cleared.
+  leaving the first. Both are recorded now — once, at whichever of the two exits that
+  still have a readable payload reaches the row first, replayed or discarded along with a source
+  the user switched off, and in both cases before the payload can be cleared. Two other exits never
+  settle anything: an undecodable payload has nothing to settle, and a row whose commit attempts
+  run out is filed `FAILED` with its payload cleared and no gap at all — a hole older than this
+  release, now recorded as issue #28. What this release changed there is that a *settlement*
+  failure can no longer be what drives a row into it.
   What makes it once is a column rather than a reading of the flags. `event_journal.lossRecorded`
-  is set with the insert for everything this release accepts, defaults to 0 on rows carried over —
+  is set with the insert for an event whose loss this release recorded at acceptance — an ordinary
+  event that lost nothing stays 0, and so is never mistaken for one — defaults to 0 on rows carried over —
   which is the truth about them, since nothing was written for them — and is taken
   by a conditional update that writes the gap in the same transaction. A row replayed twenty times
   therefore lists one loss, and a claim whose gap cannot be written stays unspent for the next
@@ -96,9 +103,11 @@ were wrong in a way that changed the fix.
   that does not support it is the same defect facing the other way. A carried-over payload that no
   longer decodes cannot be read at all. A paused source's rows are settled when it is resumed or
   switched off, not while it is paused.
-  The column joins the unreleased schema 4 rather than adding a fifth version: 0.1.3 shipped
-  schema 3, so no device has ever run 4, and this is the same call round 33 made for the two
-  columns already in that migration.
+  The column joins the unreleased schema 4 rather than adding a fifth version: no released build
+  ships schema 4 — 0.1.3 ships 3 and no tag contains the commit that added 4 — so amending it is
+  the same call round 33 made for the two columns already in that migration. A development vault
+  that already ran the earlier 4 fails Room's identity-hash check and has to be cleared; that is a
+  cost paid on a workbench, not on a user's phone.
 - **An event the vault would not take at all is remembered until it can be recorded.** A journal
   insert that fails is recorded as a gap instead — but whatever stopped the insert does not stop at
   one statement, and a disk with no space left fails that gap too. Both writes failing left nothing
@@ -157,8 +166,9 @@ were wrong in a way that changed the fix.
   delete this source's data" additionally drops the source's name from its gaps — the intervals
   stay, because deleting them would hide a loss the user had already been shown, but they stop
   naming an app that was asked to be forgotten.
-- Gaps can say which source they belong to. Most cannot and must not: of the fifteen places that
-  record one, nine are process-wide. None can name a conversation, so there is deliberately no
+- Gaps can say which source they belong to. Most cannot and must not: of the sixteen places that
+  record one — fifteen in the coordinator and one in `HealthRepository`, which files a
+  `PROCESS_RESTART` gap for a session the last process never closed — ten are process-wide. None can name a conversation, so there is deliberately no
   conversation column. The first version of this argument was wrong about one site: a batch that
   lost messages *is* ingested — the survivors are committed and their conversation resolved — so
   "the ingest that did not happen" was not true of it. The gap for that loss is now written when
@@ -244,8 +254,9 @@ were wrong in a way that changed the fix.
   which attributes the silence to the other person in the same way, and is now 安静率. The word also reached the live Play store description.
 
 ### Changed
-- Database schema 3 → 4: two additive nullable columns, `gap_interval.packageName` and
-  `message.truncationFlags`, with `MIGRATION_3_4`, an exported `schemas/4.json` and a migration test
+- Database schema 3 → 4: three additive columns — `gap_interval.packageName` and
+  `message.truncationFlags`, both nullable, and `event_journal.lossRecorded`, `NOT NULL DEFAULT 0`
+  — with `MIGRATION_3_4`, an exported `schemas/4.json` and a migration test
   that asserts existing rows survive with both columns null. The backup format gained the same field,
   appended and defaulted so a newer reader restoring an older file gets null. It does not make the
   archive readable by an older build: `BackupStager` rejects a manifest whose schema is newer than

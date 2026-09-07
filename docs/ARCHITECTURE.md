@@ -15,7 +15,8 @@ app ──► feature:* ──► core:designsystem ──► core:model
  └──► platform:backup ──► platform:crypto, platform:storage, Tink Streaming AEAD
 ```
 
-`core:*` and `parsers:apps` are plain Kotlin/JVM modules: they cannot reference `android.*`, run on
+`core:*` except `core:designsystem` — which is an Android Compose library — and `parsers:apps` are
+plain Kotlin/JVM modules: they cannot reference `android.*`, run on
 the JVM under Kotest, and hold every algorithm the plan requires to be testable without a device
 (parsing, identity, deduplication, statistics, normalisation). `platform:*` modules wrap Android
 APIs; `feature:*` modules are Compose UI + Hilt ViewModels; `app` wires navigation and DI.
@@ -44,9 +45,11 @@ Process death before `journal` loses the event (documented as platform-unobserva
 `journal` the row is replayed on next vault open, on resume and after maintenance with
 `CaptureOrigin.REPLAY` — never while capture is paused, and never for a source disabled since.
 
-A row a release up to 0.1.3 left pending carries a loss that release recorded nowhere. Both ways
-out of `PENDING` — replay, and the discard that follows disabling or removing the source — settle
-it first, while the payload still says what it was. `event_journal.lossRecorded` (schema v4) is
+A row a release up to 0.1.3 left pending carries a loss that release recorded nowhere. The two
+exits that still have a readable payload — replay, and the discard that follows disabling or
+removing the source — settle it first. Two others never do: an undecodable payload has nothing to
+settle, and a row whose commit attempts run out is filed `FAILED` with its payload cleared and no
+gap (issue #28). `event_journal.lossRecorded` (schema v4) is
 claimed by a conditional update that writes the gap in the same transaction, so whichever path
 reaches the row first records it and no later pass records it again. Only what the payload settles
 is claimed: `LINES`, and `MESSAGES` with no surviving message of its own shortened.

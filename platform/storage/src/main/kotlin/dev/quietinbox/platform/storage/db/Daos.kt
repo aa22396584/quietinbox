@@ -65,17 +65,37 @@ interface JournalDao {
     )
     suspend fun setState(eventId: String, state: String, failure: String?)
 
-    /** Pending rows of one source, so the upgrade path can settle them before they are discarded. */
-    @Query("SELECT * FROM event_journal WHERE state = 'PENDING' AND packageName = :packageName")
-    suspend fun pendingForPackage(packageName: String): List<EventJournalEntity>
+    /**
+     * A page of one source's pending rows, so the upgrade path can settle them before they are
+     * discarded. Bounded like every other pending read: a source that has been paused for a long
+     * time accumulates rows — replay skips it and retention never deletes a `PENDING` row — and
+     * this runs inside the policy write transaction, so an unbounded read would hold the pipeline
+     * lock for as long as the decode took (round 35 subagent I2).
+     *
+     * Paged by `(receivedAtEpochMs, eventId)` rather than by offset: settling a row leaves it
+     * `PENDING`, so a repeated identical query would return it for ever.
+     */
+    @Query(
+        """
+        SELECT * FROM event_journal
+        WHERE state = 'PENDING' AND packageName = :packageName
+          AND (receivedAtEpochMs > :afterTime OR (receivedAtEpochMs = :afterTime AND eventId > :afterId))
+        ORDER BY receivedAtEpochMs, eventId LIMIT :limit
+        """,
+    )
+    suspend fun pendingForPackageAfter(packageName: String, afterTime: Long, afterId: String, limit: Int): List<EventJournalEntity>
 
     /**
      * Claims the right to record this event's own loss, returning 1 only for the caller that won.
      *
      * The conditional update is the whole guarantee: however often a pending row is replayed, and
-     * whichever of the two paths out of PENDING reaches it first, exactly one caller sees a 1 and
-     * writes the gap. `state = 'PENDING'` keeps a stale snapshot from claiming a row that has
-     * already been committed or discarded.
+     * whichever path reaches it first — the replay, or the discard that follows disabling or
+     * removing its source — exactly one caller sees a 1 and writes the gap. `state = 'PENDING'`
+     * keeps a stale snapshot from claiming a row that has already been committed or discarded.
+     *
+     * Two exits never reach here at all, both on purpose: a payload that will not decode (filed
+     * `FAILED` / `DECODE`, with nothing readable to settle) and a row whose commit attempts run out
+     * (filed `FAILED`, payload cleared, no gap — a hole older than this release, issue #28).
      */
     @Query("UPDATE event_journal SET lossRecorded = 1 WHERE eventId = :eventId AND lossRecorded = 0 AND state = 'PENDING'")
     suspend fun claimLoss(eventId: String): Int
@@ -280,9 +300,16 @@ interface MessageDao {
 
     /**
      * Records that a stored body was shortened, when a later observation of the same text proves
-     * it. Only ever sets the flag, never clears it: the label is about the body on disk, and a
-     * repost whose identical text happened not to be cut does not unmake the observation that it
-     * once was — a message cannot become less lost than it already was (round 34 I2).
+     * it. Only ever sets the flag, never clears it: a repost whose identical text happened not to
+     * be cut does not unmake the observation that it once was, and letting an old replay clear the
+     * flag would erase a newer, true loss (round 34 I2, round 35 Codex I4).
+     *
+     * The model this makes is **historical**: the flag says "this text was cut in at least one
+     * observation of this message", not "the version on screen is cut". The two diverge when the
+     * source sends a longer text and then the original again — the stored body never changes, so
+     * the reconciler sees a repost and the flag stays. Set-only is not a database-wide invariant
+     * either: it is the rule for the `Known` path. A revision replaces the body and recomputes the
+     * flag from scratch through `applyRevision`, including back to null.
      */
     @Query("UPDATE message SET truncationFlags = :truncationFlags WHERE id = :id AND truncationFlags IS NULL")
     suspend fun markTruncated(id: Long, truncationFlags: String)

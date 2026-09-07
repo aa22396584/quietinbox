@@ -28,6 +28,7 @@ import dev.quietinbox.platform.storage.db.VaultState
 import dev.quietinbox.platform.storage.db.VaultUnavailableException
 import dev.quietinbox.platform.storage.repo.HealthRepository
 import dev.quietinbox.platform.storage.repo.IngestRepository
+import dev.quietinbox.platform.storage.repo.JournalCursor
 import dev.quietinbox.platform.storage.repo.SourceRepository
 import dev.quietinbox.platform.storage.repo.VaultRepository
 import dev.quietinbox.platform.storage.settings.SettingsRepository
@@ -1109,10 +1110,21 @@ class CaptureCoordinator @Inject constructor(
                                     return@withLock
                                 }
                                 val replay = snapshot.copy(origin = if (snapshot.origin == CaptureOrigin.SYNTHETIC) snapshot.origin else CaptureOrigin.REPLAY)
+                                // Before the fence, so a row discarded for a disabled source keeps
+                                // its record exactly as a live event's does (round 33) — and
+                                // outside the try below, because this is bookkeeping and must not
+                                // spend one of the event's three commit attempts. Inside it, three
+                                // failed gap writes would file the row FAILED and clear its
+                                // payload, losing the survivors *and* the record (round 35
+                                // subagent C2). Nor may a failure fall through to the commit:
+                                // storing the batch while the record of what it lost goes missing
+                                // is round 33's finding. The symmetry with live capture is exact —
+                                // an event whose loss cannot be written is not accepted, and a
+                                // carried-over row whose loss cannot be written is not committed.
+                                val settled = runCatching { recordCarriedOverLoss(replay) }
+                                settled.exceptionOrNull()?.let { if (it is CancellationException) throw it }
+                                if (settled.isFailure) return@withLock
                                 try {
-                                    // Before the fence: a row discarded for a disabled source keeps
-                                    // its record, exactly as a live event's does (round 33).
-                                    recordCarriedOverLoss(replay)
                                     processJournaled(replay, generation, null)
                                 } catch (e: Exception) {
                                     if (e is CancellationException) throw e
@@ -1133,8 +1145,13 @@ class CaptureCoordinator @Inject constructor(
      *
      * The claim and the gap are one transaction inside the repository, so the row can never be
      * marked settled without the record appearing; and because the claim is conditional, the two
-     * ways a pending row leaves PENDING — replayed, or discarded with its source — cannot both
-     * record it. Whichever gets there first writes it, and the payload is still readable at both.
+     * paths that carry a readable payload — the replay, and the discard that follows disabling or
+     * removing the source — cannot both record it. Whichever gets there first writes it.
+     *
+     * Two other exits from PENDING never settle anything: an undecodable payload has nothing to
+     * settle, and a row whose commit attempts run out is filed `FAILED` with its payload cleared
+     * and no gap at all (issue #28). This release only stops a settlement failure from being what
+     * drives a row into the second — see the comment at the replay site.
      */
     private suspend fun recordCarriedOverLoss(snapshot: NotificationSnapshot) {
         if (!carriesUnrecordedLoss(snapshot.shape)) return
@@ -1154,9 +1171,19 @@ class CaptureCoordinator @Inject constructor(
      * The same, for rows about to be discarded outright because their source was disabled or
      * removed. They are never replayed, and the discard clears the payload, so this is the only
      * moment the evidence exists — which is why it runs inside the policy transaction.
+     *
+     * Paged, because a source paused for a long time accumulates pending rows and this holds the
+     * pipeline lock while it decodes them: live capture waits for as long as it takes. That is the
+     * cost of the disable the user just asked for, and it is bounded per page rather than by the
+     * size of the backlog (round 35 subagent I2).
      */
     private suspend fun settleCarriedOverLosses(packageName: String) {
-        for (snapshot in ingest.pendingJournalForPackage(packageName)) recordCarriedOverLoss(snapshot)
+        var after = JournalCursor.START
+        while (true) {
+            val page = ingest.pendingJournalForPackage(packageName, after)
+            for (snapshot in page.snapshots) recordCarriedOverLoss(snapshot)
+            after = page.next ?: return
+        }
     }
 
     /** Best-effort bookkeeping: failures are swallowed, a coroutine cancellation never is. */

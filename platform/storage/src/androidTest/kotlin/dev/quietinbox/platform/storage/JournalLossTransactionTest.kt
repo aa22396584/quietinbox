@@ -182,4 +182,50 @@ class JournalLossTransactionTest {
         allGaps().isEmpty() shouldBe true
         Unit
     }
+
+    /**
+     * Round 35, Codex C1 / subagent C2, on a real vault: settling a carried-over loss must never
+     * cost the event its commit attempts. Three failed settlements leave the row exactly as it was
+     * — still pending, payload readable — so the next pass still has the evidence.
+     */
+    @Test
+    fun aSettlementThatKeepsFailingNeverCostsTheEventItsAttempts() = runBlocking {
+        ready()
+        ingest.journal(snapshot("evt-retry"), "gen", 60_000) shouldBe true
+
+        repeat(3) {
+            runCatching { ingest.claimEventLoss("evt-retry") { error("the gap write failed") } }.isFailure shouldBe true
+        }
+
+        ingest.isJournalPending("evt-retry") shouldBe true
+        ingest.pendingJournalForPackage(pkg).snapshots.map { it.eventId } shouldBe listOf("evt-retry")
+        allGaps().isEmpty() shouldBe true
+
+        // And when it can finally be written, it is written once.
+        ingest.claimEventLoss("evt-retry") { recordLoss() } shouldBe true
+        allGaps().count { it.reason == GapReason.MESSAGES_DROPPED.name } shouldBe 1
+        Unit
+    }
+
+    /**
+     * The shape that would have happened had the settlement stayed inside the event's retry budget,
+     * reproduced deliberately so the pre-existing hole it belongs to is on record: a row whose
+     * commit attempts run out is filed FAILED with its payload cleared, and nothing anywhere says
+     * what it lost. That hole is older than this release and is issue #28; what this release
+     * guarantees is only that a *settlement* failure can no longer be what drives a row into it.
+     */
+    @Test
+    fun aRowWhoseCommitAttemptsRunOutLosesItsEvidenceAndSaysNothing() = runBlocking {
+        ready()
+        ingest.journal(snapshot("evt-exhausted"), "gen", 60_000) shouldBe true
+
+        repeat(3) { ingest.markJournalRetryable("evt-exhausted", "REPLAY_IllegalStateException") }
+
+        ingest.isJournalPending("evt-exhausted") shouldBe false
+        // The payload is gone, so the claim can no longer be taken and no gap can ever be written.
+        ingest.pendingJournalForPackage(pkg).snapshots.isEmpty() shouldBe true
+        ingest.claimEventLoss("evt-exhausted") { recordLoss() } shouldBe false
+        allGaps().isEmpty() shouldBe true
+        Unit
+    }
 }

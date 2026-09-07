@@ -147,10 +147,29 @@ class IngestRepository @Inject constructor(
      * policy transaction that is about to discard it anyway, and the replay path is what owns the
      * decision to mark a payload unreadable.
      */
-    suspend fun pendingJournalForPackage(packageName: String): List<NotificationSnapshot> =
-        holder.db().journalDao().pendingForPackage(packageName).mapNotNull { row ->
+    /**
+     * One page of a source's pending rows, decoded. Used before those rows are discarded outright:
+     * whatever loss they arrived with is settled while the payload still says what it was.
+     *
+     * A row that cannot be decoded is skipped rather than failed — this runs inside a source policy
+     * transaction that is about to discard it anyway, and the replay path is what owns the decision
+     * to mark a payload unreadable — but it still moves the cursor, or the page after it would
+     * never be reached.
+     */
+    suspend fun pendingJournalForPackage(
+        packageName: String,
+        after: JournalCursor = JournalCursor.START,
+        limit: Int = 200,
+    ): JournalPage {
+        val rows = holder.db().journalDao().pendingForPackageAfter(packageName, after.receivedAtEpochMs, after.eventId, limit)
+        val snapshots = rows.mapNotNull { row ->
             runCatching { json.decodeFromString(NotificationSnapshot.serializer(), row.payload) }.getOrNull()
         }
+        val last = rows.lastOrNull()
+        // Only a full page can have more behind it; a short one is the end.
+        val next = if (rows.size == limit && last != null) JournalCursor(last.receivedAtEpochMs, last.eventId) else null
+        return JournalPage(snapshots, next)
+    }
 
     suspend fun isJournalPending(eventId: String): Boolean = holder.db().journalDao().state(eventId) == "PENDING"
 
@@ -172,7 +191,10 @@ class IngestRepository @Inject constructor(
 
     /**
      * A failed commit stays PENDING (so replay retries it) until [MAX_ATTEMPTS] is reached; only
-     * then is it marked FAILED. Transient errors therefore never lose an accepted event.
+     * then is it marked FAILED — which clears the payload and leaves no gap, so an error that
+     * lasts *does* lose an accepted event (issue #28). Transient errors within that budget do not.
+     * Settling a carried-over loss deliberately does not go through here: bookkeeping must not
+     * spend the event's attempts.
      */
     suspend fun markJournalRetryable(eventId: String, failure: String) {
         val db = holder.db()
@@ -472,3 +494,13 @@ class IngestRepository @Inject constructor(
         else -> snapshot.observedAtEpochMs
     }
 }
+
+/** Where a paged walk over one source's pending journal rows has got to. */
+data class JournalCursor(val receivedAtEpochMs: Long, val eventId: String) {
+    companion object {
+        val START = JournalCursor(Long.MIN_VALUE, "")
+    }
+}
+
+/** A page of decodable pending snapshots, and where to continue — null when the page was the last. */
+data class JournalPage(val snapshots: List<NotificationSnapshot>, val next: JournalCursor?)

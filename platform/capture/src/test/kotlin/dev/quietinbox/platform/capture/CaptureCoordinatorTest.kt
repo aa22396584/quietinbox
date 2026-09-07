@@ -20,6 +20,7 @@ import dev.quietinbox.platform.storage.db.GapIntervalEntity
 import dev.quietinbox.platform.storage.repo.CommitOutcome
 import dev.quietinbox.platform.storage.repo.HealthRepository
 import dev.quietinbox.platform.storage.repo.IngestRepository
+import dev.quietinbox.platform.storage.repo.JournalPage
 import dev.quietinbox.platform.storage.repo.SourceRepository
 import dev.quietinbox.platform.storage.repo.VaultRepository
 import dev.quietinbox.platform.storage.settings.AppSettings
@@ -248,7 +249,28 @@ class CaptureCoordinatorTest : FunSpec({
                 }
                 won
             }
-            coEvery { ingest.pendingJournalForPackage(any()) } returns emptyList()
+            installPendingJournal()
+        }
+
+        /**
+         * The pending rows the vault holds for each source. `pendingJournalForPackage` reads this
+         * and `discardPendingJournal` empties it, exactly as the real pair do, so the *order* of
+         * the two inside the policy transaction is something a test can decide: discarding first
+         * leaves nothing to settle. Stubbing the read to a fixed list made that order untestable,
+         * which is how round 35 found the commit's own headline claim uncontrolled (subagent C3).
+         */
+        val pendingByPackage: MutableMap<String, MutableList<NotificationSnapshot>> =
+            Collections.synchronizedMap(HashMap())
+
+        private fun installPendingJournal() {
+            coEvery { ingest.pendingJournalForPackage(any(), any(), any()) } answers {
+                val pkg = firstArg<String>()
+                JournalPage(synchronized(pendingByPackage) { pendingByPackage[pkg]?.toList().orEmpty() }, null)
+            }
+            coEvery { ingest.discardPendingJournal(any()) } answers {
+                val pkg = firstArg<String>()
+                synchronized(pendingByPackage) { pendingByPackage.remove(pkg)?.size ?: 0 }
+            }
         }
 
         /** Replaces the journal stub; [answer] runs on the consumer coroutine. */
@@ -1214,11 +1236,25 @@ class CaptureCoordinatorTest : FunSpec({
 
         // The notification carried more messages than the snapshot may hold. The commit afterwards
         // is a perfectly good one, so nothing else would ever say that content existed and was lost.
-        coordinator.offerCaptured(capturedWithTruncation("evt-drop", setOf(TruncationFlag.MESSAGES_DROPPED)))
+        // The batch really does have a body, so this is the committed case rather than the empty
+        // one filed as skipped — which is what the test is named for (round 35 Codex M1).
+        val survived = CapturedNotification(
+            Fixtures.snapshot(
+                shape = Fixtures.messaging(conversationTitle = "Group") { message("Ana", "the newest one") }
+                    .copy(truncated = setOf(TruncationFlag.MESSAGES_DROPPED)),
+                packageName = ENABLED_PKG,
+                eventId = "evt-drop",
+            ),
+            null,
+        )
+        coordinator.offerCaptured(survived)
 
         coVerify(timeout = 5_000, exactly = 1) {
             h.health.recordGap(any(), any(), GapReason.MESSAGES_DROPPED, GapPrecision.BOUNDED, any(), ENABLED_PKG)
         }
+        // It was committed, not skipped: the loss belongs to an event whose survivors were stored.
+        coVerify(exactly = 1) { h.ingest.commit(any(), any(), any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { h.ingest.markJournal("evt-drop", "SKIPPED", any()) }
     }
 
     test("an event the journal already holds does not record its loss a second time") {
@@ -1396,20 +1432,22 @@ class CaptureCoordinatorTest : FunSpec({
             packageName = ENABLED_PKG,
             eventId = "evt-v013-discarded",
         )
-        coEvery { h.ingest.pendingJournalForPackage(ENABLED_PKG) } returns listOf(legacy)
+        h.pendingByPackage[ENABLED_PKG] = mutableListOf(legacy)
         val coordinator = h.coordinator()
         coordinator.onConnected(h.service)
         h.awaitConnected()
 
         coordinator.setSourceEnabled(ENABLED_PKG, false)
-        // Re-enabled and switched off again with the same row still on offer: the claim, not the
-        // caller, is what makes this once. A path that wrote the gap whenever it saw the flag
-        // would list one loss on the health page twice.
+        // The settle ran before the discard: reversing the two inside the policy transaction
+        // empties the pending rows first and this gap is never written.
+        h.gaps.count { it.reason == GapReason.MESSAGES_DROPPED.name && it.packageName == ENABLED_PKG } shouldBe 1
+        coVerify(exactly = 1) { h.ingest.discardPendingJournal(ENABLED_PKG) }
+
+        // Re-enabled and switched off again: the rows really are gone, so there is nothing to
+        // settle a second time, and the claim would refuse it even if there were.
         coordinator.setSourceEnabled(ENABLED_PKG, true)
         coordinator.setSourceEnabled(ENABLED_PKG, false)
-
         h.gaps.count { it.reason == GapReason.MESSAGES_DROPPED.name && it.packageName == ENABLED_PKG } shouldBe 1
-        coVerify(exactly = 2) { h.ingest.discardPendingJournal(ENABLED_PKG) }
     }
 
     test("a loss neither the journal nor its fallback could record is written on the next policy load") {
@@ -1473,5 +1511,38 @@ class CaptureCoordinatorTest : FunSpec({
         h.gaps.single { it.reason == GapReason.UNKNOWN.name }.endEpochMs shouldNotBe null
         // And it really was the acceptance that did it: the policy never loaded again.
         policyLoads shouldBe loadsSoFar
+    }
+
+    test("a carried-over row whose loss cannot be written is not committed and spends no attempt") {
+        val h = Harness()
+        // Round 35, subagent C2. The claim sat inside the try whose catch is markJournalRetryable,
+        // so a failing *bookkeeping* write spent one of the event's three commit attempts. Three of
+        // them filed the row FAILED, which clears the payload — losing the survivors and the record
+        // together, with nothing on the health page. It is also not allowed to fall through and
+        // commit: storing the batch while the record of what it lost goes missing is the round-33
+        // finding. The row simply stays as it was, for a pass that can write.
+        val legacy = Fixtures.snapshot(
+            shape = Fixtures.base(title = null, text = null).copy(truncated = setOf(TruncationFlag.LINES)),
+            packageName = ENABLED_PKG,
+            eventId = "evt-claim-fails",
+        )
+        var served = 0
+        coEvery { h.ingest.pendingJournal(any(), any()) } coAnswers {
+            if (served++ < 1) listOf("gen-old" to legacy) else emptyList()
+        }
+        coEvery { h.ingest.isJournalPending(any()) } returns true
+        coEvery { h.ingest.claimEventLoss(any(), any()) } throws IllegalStateException("no space left on device")
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+
+        h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
+
+        // The row was reached — the claim was asked for — and then nothing else happened to it.
+        coVerify(timeout = 5_000, atLeast = 1) { h.ingest.claimEventLoss("evt-claim-fails", any()) }
+        stillHolds {
+            coVerify(exactly = 0) { h.ingest.markJournalRetryable(any(), any()) }
+            coVerify(exactly = 0) { h.ingest.markJournal("evt-claim-fails", any(), any()) }
+            h.gaps.isEmpty() shouldBe true
+        }
     }
 })

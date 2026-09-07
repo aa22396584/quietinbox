@@ -15,7 +15,8 @@ app ──► feature:* ──► core:designsystem ──► core:model
  └──► platform:backup ──► platform:crypto, platform:storage, Tink Streaming AEAD
 ```
 
-`core:*` 與 `parsers:apps` 是純 Kotlin/JVM 模組：它們不能引用 `android.*`，在 JVM 上以 Kotest 執行，並且
+`core:*`（`core:designsystem` 除外，它是 Android Compose 函式庫）與 `parsers:apps` 是純 Kotlin/JVM
+模組：它們不能引用 `android.*`，在 JVM 上以 Kotest 執行，並且
 持有計畫要求「不需裝置即可測試」的每一個演算法（解析、身分、去重、統計、正規化）。`platform:*` 模組包裝
 Android API；`feature:*` 模組是 Compose UI + Hilt ViewModel；`app` 串接導覽與 DI。
 
@@ -42,8 +43,9 @@ StatusBarNotification
 在 `journal` 之前發生 process 死亡會遺失該事件（已記載為平台層面不可觀測）；在 `journal` 之後，該資料列
 會在下次開啟金庫、恢復擷取或維護結束後以 `CaptureOrigin.REPLAY` 重播——暫停期間絕不重播，來源在此期間被停用者一律丟棄。
 
-0.1.3 以前的版本留下的 PENDING 資料列，帶著那些版本從未記錄的損失。離開 `PENDING` 的兩條路——重播，以及
-停用或移除來源後隨之而來的丟棄——都會先結清它，趁 payload 還說得出它是什麼。`event_journal.lossRecorded`
+0.1.3 以前的版本留下的 PENDING 資料列，帶著那些版本從未記錄的損失。payload 仍可讀的那兩個出口——重播，
+以及停用或移除來源後隨之而來的丟棄——都會先結清它。另外兩個出口從不結清：解不出來的 payload 沒有東西可
+結清；commit 重試額度用盡的列會被標為 `FAILED`、payload 清空、完全沒有缺口（issue #28）。`event_journal.lossRecorded`
 （schema v4）由一道條件式 UPDATE 認領，缺口寫在同一個 transaction 內，因此先到的那條路記錄它、之後任何一次
 都不會再記一次。只認領 payload 足以判定的情況：`LINES`，以及沒有任何倖存訊息自身被截短的 `MESSAGES`。
 

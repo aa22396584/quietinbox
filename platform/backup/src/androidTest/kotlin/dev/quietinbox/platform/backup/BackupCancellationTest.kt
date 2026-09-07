@@ -39,9 +39,9 @@ import java.io.File
  * rows roll back and every blob written for them goes; after the commit the rows are durable, the
  * files they point at stay, and only the blobs no inserted message references are removed.
  *
- * Negative controls: (1) move `writtenFiles.removeAll(usedFiles)` back to after `withTransaction`
- * and the after-commit test fails on the linked file; (2) drop the `catch` cleanup and the
- * in-transaction test fails on the leaked blob.
+ * Negative controls: (1) move `writtenFiles.removeAll(usedFiles)` out of the transaction so the
+ * `check` after it fails (the used names would still be on the cleanup list); (2) drop the
+ * `catch` cleanup and the in-transaction test fails on the leaked blob.
  */
 @RunWith(AndroidJUnit4::class)
 class BackupCancellationTest {
@@ -139,9 +139,9 @@ class BackupCancellationTest {
     }
 
     @Test
-    fun aBlobTheVaultCannotWriteLeavesItsMessageMarkedAndIsCountedInTheResult() = runBlocking {
-        // The same backup with its media record's bytes replaced by text base64 cannot decode:
-        // the message is restored, its media state is FAILED, and "Done" carries the count.
+    fun aBlobWhoseBytesDoNotDecodeLeavesItsMessageMarkedAndIsCountedInTheResult() = runBlocking {
+        // Invalid Base64 becomes empty bytes on Android; that is not a picture, so the message
+        // is restored, its media state is FAILED, and "Done" carries the count.
         val key = dev.quietinbox.platform.crypto.RecoveryKeyCodec.decode(recoveryKey)!!
         val header = ByteArray(BackupCrypto.HEADER_BYTES)
         val lines = java.io.FileInputStream(backup).use { raw ->

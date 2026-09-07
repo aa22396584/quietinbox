@@ -100,14 +100,32 @@ class BackupRejectionTest {
 
     private suspend fun ready() = withTimeout(20_000) { holder.state.filterIsInstance<VaultState.Ready>().first() }
 
-    /** Every row count the restore could touch, plus every media file with its bytes. */
+    /**
+     * The restore's claim that a refusal left the vault unchanged: every column of every row it
+     * can touch, plus every media file's bytes. Counts alone would miss `UPDATE message SET body=…`
+     * (round 40, Codex I3).
+     */
     private suspend fun vaultFingerprint(): Map<String, Any> {
         val sql = holder.db().openHelper.writableDatabase
-        fun count(table: String) = sql.query("SELECT COUNT(*) FROM $table").use { it.moveToFirst(); it.getInt(0) }
+        fun table(name: String): List<String> {
+            val rows = ArrayList<String>()
+            sql.query("SELECT * FROM $name ORDER BY rowid").use { c ->
+                val cols = c.columnCount
+                while (c.moveToNext()) {
+                    rows += (0 until cols).joinToString("|") { i -> if (c.isNull(i)) "∅" else c.getString(i) ?: "∅" }
+                }
+            }
+            return rows
+        }
         val files = (File(context.filesDir, "media").listFiles() ?: emptyArray()).sortedBy { it.name }.associate { it.name to it.readBytes().toList() }
         return mapOf(
-            "source" to count("source_configuration"), "conversation" to count("conversation"), "message" to count("message"),
-            "revision" to count("message_revision"), "media_blob" to count("media_blob"), "files" to files,
+            "source" to table("source_configuration"),
+            "conversation" to table("conversation"),
+            "message" to table("message"),
+            "revision" to table("message_revision"),
+            "media_blob" to table("media_blob"),
+            "search_token" to table("search_token"),
+            "files" to files,
         )
     }
 

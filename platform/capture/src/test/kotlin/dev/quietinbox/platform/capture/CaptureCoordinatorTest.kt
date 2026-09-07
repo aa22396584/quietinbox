@@ -984,6 +984,31 @@ class CaptureCoordinatorTest : FunSpec({
         coVerify(timeout = 5_000, exactly = 1) { h.health.closeOpenGaps(any(), GapReason.UNKNOWN) }
     }
 
+    test("a Ready that arrives while the lock-out gap write is still in flight does not drop it") {
+        val h = Harness()
+        val locked = VaultUnavailableException(KeyFailure.Unavailable("locked"))
+        h.journalAnswers { throw locked }
+        val openStarted = CompletableDeferred<Unit>()
+        val releaseOpen = CompletableDeferred<Unit>()
+        coEvery { h.health.openGap(any(), GapReason.UNKNOWN, any(), any()) } coAnswers {
+            openStarted.complete(Unit)
+            releaseOpen.await()
+            throw locked
+        }
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+
+        coordinator.offerCaptured(captured("evt-locked"))
+        withTimeout(5_000) { openStarted.await() }
+        // The writer is parked inside openGap, flag set, since already assigned. Ready used to
+        // clear the flag here with since still null (round 40, Codex I1).
+        h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
+        releaseOpen.complete(Unit)
+
+        coVerify(timeout = 5_000, exactly = 1) { h.health.recordGap(any(), any(), GapReason.UNKNOWN, GapPrecision.BOUNDED, any()) }
+        coVerify(timeout = 5_000, exactly = 1) { h.health.closeOpenGaps(any(), GapReason.UNKNOWN) }
+    }
+
     test("a cold-start loss whose settle failed is kept and written on the next policy load") {
         val h = Harness()
         val factory: SnapshotFactory = mockk()

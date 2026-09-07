@@ -15,7 +15,7 @@
 | 不跨串流合併的身分判定 | 完成 | `core:identity` 5 個 JVM 測試 |
 | 去重（`AMBIGUOUS_REPEAT`、revision、過期視窗處理、resync 視為重貼） | 完成 | `core:reconcile` 22 個 JVM 測試，含兩個 1,000 次迭代的 property test（§7.2 的六個例子加上關閉視窗的歧義重複都是字面測試案例） |
 | 加密金庫（Room + SQLCipher、每次安裝隨機金鑰、Keystore 包裝） | 完成 | 真機測試 `VaultRoundTripTest` + `MigrationTest`（1→2、2→3、3→4）+ `KeystoreWrapperTest`（序列化的 KEK 建立）；`KeystoreWrapper` 設定 `setUserAuthenticationRequired(false)` |
-| Journal-first commit；撤權／暫停／來源變更／維護時的 commit 圍籬 | 完成 | `CaptureCoordinator`：等鎖前與鎖內各一次 admission 圍籬、寫入前的 commit 圍籬；來源政策變更在鎖內；`CaptureCoordinatorTest`（52） |
+| Journal-first commit；撤權／暫停／來源變更／維護時的 commit 圍籬 | 完成 | `CaptureCoordinator`：等鎖前與鎖內各一次 admission 圍籬、寫入前的 commit 圍籬；來源政策變更在鎖內；`CaptureCoordinatorTest`（77） |
 | 「刪除全部」是經驗證的獨佔維護執行；cipher 快取綁定金鑰 epoch | 完成 | `VaultMaintenance`、`VaultRepository.deleteEverything` → `ResetResult`；`VaultMaintenanceTest`（5）、真機 `DeletionGraphTest`；AVD 上實際走過重設 |
 | 刪除圖與讀取時到期（journal payload 清空、媒體列／檔案隨訊息刪除、投影重算、到期副本隱藏） | 完成 | `DeletionGraphTest`（5，真機） |
 | 帶品質標籤的收件匣／對話 UI | 完成 | 實機截圖 |
@@ -26,7 +26,7 @@
 | 擷取健康頁（缺口與診斷） | 完成 | 實機 UI |
 | 保留期限 TTL worker | 完成（未做 soak 測試） | `RetentionWorker`，12 小時週期 |
 | 媒體複製（content:// + 通知 bitmap，加密） | 已實作，**未經裝置驗證** | `MediaCopier`；`MediaReadTest`（10 個 JVM 測試：失敗對應——沒有串流、超過上限、授權被撤銷、檔案不存在、讀到一半斷掉、空內容——再加上「provider 永不回應時必須放棄而不是把呼叫端卡住」與「被取消的呼叫端必須維持取消」）。尚無測試碰過真實 `content://` URI：那仍然需要真機與來源 App |
-| 帶復原金鑰的加密備份匯出／匯入（在維護閘門內、分頁匯出、部分媒體回報） | 完成（模擬器） | `BackupService` + HKDF RFC 向量；`BackupStagerTest`（21 個 JVM 測試）；API 36 AVD 上的真機 `BackupRoundTripTest`（匯出 → 清空 → 匯入、排除到期副本、回報略過的媒體、媒體以現行金鑰解密）、`BackupCancellationTest`（提交後被切斷的還原保留已連結的檔；金庫寫不進的 blob 計為未還原）與 `BackupRejectionTest`（錯金鑰、竄改、截斷、標頭被切、非備份檔、空間不足：金庫逐位元組維持原樣）；尚未在裝置上走 SAF 選檔流程 |
+| 帶復原金鑰的加密備份匯出／匯入（在維護閘門內、分頁匯出、部分媒體回報） | 完成（模擬器） | `BackupService` + HKDF RFC 向量；`BackupStagerTest`（21 個 JVM 測試）；API 36 AVD 上的真機 `BackupRoundTripTest`（匯出 → 清空 → 匯入、排除到期副本、回報略過的媒體、媒體以現行金鑰解密）、`BackupCancellationTest`（提交後被切斷的還原保留已連結的檔；位元組解不出來的 blob 計為未還原）與 `BackupRejectionTest`（錯金鑰、竄改、截斷、標頭被切、非備份檔、空間不足：金庫逐位元組維持原樣）；尚未在裝置上走 SAF 選檔流程 |
 | 自己的提醒（預設關閉、DST 安全的本地時間、只在有未查看時） | 已實作，**未經裝置驗證** | `ReminderSchedulerTest`（5 個 JVM 測試：`delayUntilNext`、`ReminderPolicy`）；worker 本身尚無裝置測試 |
 | UI 鎖（BiometricPrompt）、截圖保護 | 已實作，**部分驗證** | 在加入 debug 專用豁免前，已驗證 FLAG_SECURE 會擋掉 `screencap`；生物辨識流程未演練 |
 | 示範模式（僅 debug 版） | 完成 | `DemoDataRepository` 位於 `platform:storage` 的 `debug` source set，藏在 `DemoData` 介面後；release 綁定 no-op，其 dex 不含任何示範類別或文字（以 `strings` 檢查 `classes.dex`）；真機 `DemoDataTest` |

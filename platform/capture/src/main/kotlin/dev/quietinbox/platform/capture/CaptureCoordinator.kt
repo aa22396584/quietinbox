@@ -289,21 +289,26 @@ class CaptureCoordinator @Inject constructor(
             vault.state.collectLatest { s ->
                 _status.update { it.copy(vaultLocked = s is VaultState.Locked) }
                 if (s is VaultState.Ready) {
-                    if (vaultGapOpen) {
-                        val now = System.currentTimeMillis()
-                        val since = vaultGapSince
-                        var written = false
-                        guarded {
-                            health.closeOpenGaps(now, GapReason.UNKNOWN)
-                            // The row could not be opened while the vault was locked: recorded now, bounded.
-                            if (since != null) health.recordGap(since, now, GapReason.UNKNOWN, GapPrecision.BOUNDED, now)
-                            written = true
-                        }
-                        // Forgotten only once it is on disk: a write that fails here (the vault locked
-                        // again, a reset cancelling this collector) is retried on the next Ready (round-13).
-                        if (written) {
-                            vaultGapOpen = false
-                            vaultGapSince = null
+                    // Under the pipeline lock so a Ready cannot settle between `vaultGapOpen = true`
+                    // and `vaultGapSince = …` (round 40, Codex I1): that window closed the flag
+                    // with since still null and the bounded gap was never written.
+                    pipelineMutex.withLock {
+                        if (vaultGapOpen) {
+                            val now = System.currentTimeMillis()
+                            val since = vaultGapSince
+                            var written = false
+                            guarded {
+                                health.closeOpenGaps(now, GapReason.UNKNOWN)
+                                // The row could not be opened while the vault was locked: recorded now, bounded.
+                                if (since != null) health.recordGap(since, now, GapReason.UNKNOWN, GapPrecision.BOUNDED, now)
+                                written = true
+                            }
+                            // Forgotten only once it is on disk: a write that fails here (the vault locked
+                            // again, a reset cancelling this collector) is retried on the next Ready (round-13).
+                            if (written) {
+                                vaultGapOpen = false
+                                vaultGapSince = null
+                            }
                         }
                     }
                     replayJournal()
@@ -1013,14 +1018,18 @@ class CaptureCoordinator @Inject constructor(
                     // The vault went away before the commit (an event journaled first is replayed later;
                     // one not journaled is lost): record an observable gap once per lock-out.
                     if (!vaultGapOpen) {
+                        // Remember the bound first: a Ready collector that ran between the flag and
+                        // this assignment used to close the episode with since == null and write
+                        // nothing (round 40, Codex I1).
+                        vaultGapSince = snapshot.observedAtEpochMs
                         vaultGapOpen = true
                         var written = false
                         guarded {
                             health.openGap(snapshot.observedAtEpochMs, GapReason.UNKNOWN, GapPrecision.BOUNDED, snapshot.observedAtEpochMs)
                             written = true
                         }
-                        // The gap table is behind the same lock: remembered, written when the vault opens.
-                        if (!written) vaultGapSince = snapshot.observedAtEpochMs
+                        // Live open interval is on disk: the Ready path only has to close it.
+                        if (written) vaultGapSince = null
                     }
                     // Published last: whoever reacts to the lock-out (the vault collector on the next
                     // Ready, a test synchronising on it) must find the gap already open, or a vault that

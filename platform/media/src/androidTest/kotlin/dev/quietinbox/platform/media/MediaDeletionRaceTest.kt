@@ -122,6 +122,7 @@ class MediaDeletionRaceTest {
         row.mediaState shouldBe MediaState.LOCAL_COPY.name
         val blob = holder.db().mediaDao().get(row.mediaBlobId!!)!!
         mediaFiles() shouldContain blob.fileName
+        blob.thumbFileName?.let { mediaFiles() shouldContain it }
         holder.db().mediaDao().orphans() shouldBe emptyList()
         Unit
     }

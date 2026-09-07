@@ -442,6 +442,10 @@ class BackupService @Inject constructor(
                 // remove. A commit that fails after this line leaves the linked blobs as orphan
                 // files for the retention sweep, a leak, never a loss (audit-2 ATOM-4).
                 writtenFiles.removeAll(usedFiles)
+                // The trim belongs in this transaction: moving it to after withTransaction returns
+                // leaves used files on the cleanup list, and a cancellation on the way out deletes
+                // the blobs the committed rows point at (round 40, Codex I2).
+                check(usedFiles.none { it in writtenFiles })
                 Counts(s.sources.size, convMap.size, inserted, restoredRevisions, usedFiles.size) to mediaNotRestored
             }
             restoreProbe(RestorePoint.AFTER_COMMIT)

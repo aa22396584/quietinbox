@@ -202,6 +202,12 @@ were wrong in a way that changed the fix.
   committed and could not be read back says the write landed and capture may still follow the
   previous setting until the vault next opens; a locked vault is the lock case; an unclassified
   failure invents no result. A cancellation is rethrown, never reported as a refusal.
+- **A vault that reopened while the lock-out gap was still being written could close the episode
+  with nothing on disk.** The writer set `vaultGapOpen` first and `vaultGapSince` only after
+  `openGap` failed; the Ready collector did not take the pipeline lock, so it could settle in
+  between, see a null bound, clear the flag, and leave notifications that were never journaled
+  without a gap. The bound is remembered first, and the collector now settles under the same lock
+  as the writer.
   Three cases deliberately record nothing. `MESSAGES` beside a message that was itself shortened
   is undecidable — the batch may also have been over the limit — and a loss invented from evidence
   that does not support it is the same defect facing the other way. A carried-over payload that no

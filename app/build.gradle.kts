@@ -47,8 +47,8 @@ android {
         minSdk = 26
         // Baseline target per plan §4; an API 37 compatibility lane is tracked in docs/COMPATIBILITY.md.
         targetSdk = 36
-        versionCode = 7
-        versionName = "0.1.3"
+        versionCode = 8
+        versionName = "0.1.4"
         testInstrumentationRunner = "dev.quietinbox.HiltTestRunner"
     }
 

@@ -1,22 +1,22 @@
 [
   {
     "language": "en-US",
-    "text": "0.1.3 fixes three wordings. The inbox summary now counts properly: a single uncertain observation reads \"Plus 1 observation with uncertain identity\", the sentence is left out altogether when there is none, and the gap clause no longer carries an ASCII space in Chinese and Japanese. The capture health page no longer runs a sentence into a fragment — the time it has been connected is part of the sentence now. Nothing about capture, storage or your data changed."
+    "text": "0.1.4 records losses instead of hiding them. Dropped messages, shortened text, a save that failed after retries, and the time you paused or stopped an app are now gaps or labels. Search no longer calls the first page a total, and a hit opens at that message. On a medium-width screen the conversation keeps a back arrow. Media copies time out instead of hanging Delete everything or Restore; a restore that lost files says so. A refused source change is a dialog, not a silent no-op."
   },
   {
     "language": "zh-TW",
-    "text": "0.1.3 修正三處文案。收件匣摘要在沒有身分不明觀測時整句省略，不再寫成「另有 0 筆」；中斷提示前面也不再多一個半形空格。擷取健康頁不再把一個句子接上一個片語，連線起始時間現在是句子的一部分。擷取、儲存與你的資料都沒有改變。"
+    "text": "0.1.4 把以前會藏起來的損失記下來。通知塞太多而丟掉的訊息、被截短的內文、多次儲存失敗、以及你暫停或停止某個來源的那段時間，現在都有缺口或標籤。搜尋不再把第一頁當成全部，點進一筆會落到那則訊息。中等寬度視窗的對話畫面有返回箭頭。媒體複製會逾時，不再卡住「全部刪除」或還原；還原若有檔案失敗會明說。來源變更被保險庫拒絕時會跳出對話框，不再默默沒動。"
   },
   {
     "language": "zh-CN",
-    "text": "0.1.3 修正三处文案。收件箱摘要在没有身份不明观测时整句省略，不再写成「另有 0 条」；中断提示前面也不再多一个半角空格。捕获健康页不再把一个句子接上一个片语，连接起始时间现在是句子的一部分。捕获、存储与你的数据都没有改变。"
+    "text": "0.1.4 把以前会藏起来的损失记下来。通知塞太多而丢掉的消息、被截短的正文、多次保存失败、以及你暂停或停止某个来源的那段时间，现在都有缺口或标签。搜索不再把第一页当成全部，点进一条会落到那则消息。中等宽度窗口的对话画面有返回箭头。媒体复制会超时，不再卡住「全部删除」或还原；还原若有文件失败会明说。来源变更被保险库拒绝时会弹出对话框，不再默默没动。"
   },
   {
     "language": "ja-JP",
-    "text": "0.1.3 では文言を 3 か所直しました。受信箱の要約は、送信者が不確かな観測が 1 件もないときにその一文をまるごと省くようになり、欠落の注記の前に半角スペースも入らなくなりました。キャプチャ状況の画面は文に断片をつなげるのをやめ、接続開始時刻が文の一部になりました。キャプチャ、保存、あなたのデータは何も変わりません。"
+    "text": "0.1.4 は、これまで隠していた損失を記録します。通知が多すぎて落ちたメッセージ、短く切られた本文、何度試しても保存できなかったこと、アプリを一時停止または停止していた時間は、欠落またはラベルとして見えます。検索は最初のページを総数と呼びません。ヒットはそのメッセージの位置で開きます。中幅の画面では会話に戻る矢印があります。メディアのコピーはタイムアウトし、「すべて削除」や復元を止めません。復元でファイルを失ったときは完了とは言いません。保管庫が拒否したソース変更は無言ではなくダイアログになります。"
   },
   {
     "language": "ko-KR",
-    "text": "0.1.3에서는 문구 세 곳을 고쳤습니다. 받은편지함 요약은 발신자가 불확실한 관측이 하나도 없을 때 해당 문장을 통째로 생략하며, 중국어와 일본어에서 누락 안내 앞에 붙던 반각 공백도 없앴습니다. 캡처 상태 화면은 문장에 조각을 이어 붙이지 않고, 연결 시작 시각이 문장의 일부가 되었습니다. 캡처, 저장, 사용자의 데이터는 달라지지 않았습니다."
+    "text": "0.1.4는 숨기던 손실을 기록합니다. 알림이 너무 많아 떨어진 메시지, 잘린 본문, 여러 번 저장에 실패한 경우, 앱을 일시중지하거나 끈 구간은 이제 공백이나 라벨로 보입니다. 검색은 첫 페이지를 전체 건수로 부르지 않으며, 결과는 그 메시지 위치로 엽니다. 중간 너비 화면의 대화에는 뒤로 화살표가 있습니다. 미디어 복사는 시간 제한으로 「모두 삭제」나 복원을 멈추지 않으며, 파일을 잃은 복원은 완료라고 하지 않습니다. 금고가 거절한 소스 변경은 침묵이 아니라 대화상자입니다."
   }
 ]

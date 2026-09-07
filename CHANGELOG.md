@@ -4,9 +4,14 @@ All notable changes to this project are documented here. The format follows Keep
 
 ## [Unreleased]
 
-Fixes from the second GPT-5.5 Pro re-review (issues #22–#27). Every item was re-verified against the
-code before it was worked: some of what the review asked for was already there, and two of its claims
-were wrong in a way that changed the fix.
+## [0.1.4] — 2026-09-08
+
+`versionCode` 8. Losses that used to be silent are now gaps or labels — dropped messages, shortened
+text, a save given up on (issue #28), a paused or stopped source — plus the media, search,
+onboarding and accessibility fixes from the second GPT-5.5 Pro re-review (issues #22–#27).
+Every item was re-verified against the code before it was worked: some of what the review asked for
+was already there, and two of its claims were wrong in a way that changed the fix.
+`PARSE_` / `DECODE` leaving `PENDING` with no gap is issue #33, not this release.
 
 ### Fixed
 - **A hung media provider could hang "Delete everything" and "Restore" for ever.** The 10-second read

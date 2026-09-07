@@ -68,6 +68,8 @@
     <string name="inbox_banner_locked">无法打开加密保险库，请到“捕获”页查看恢复选项。</string>
     <string name="inbox_pinned">已置顶</string>
     <string name="inbox_unviewed">未查看</string>
+    <string name="a11y_selected">已选取</string>
+    <string name="a11y_not_selected">未选取</string>
     <string name="inbox_delete_title">删除这个对话？</string>
     <string name="inbox_delete_body">这个对话里所有已保存的副本会从本机移除，来源应用不受影响；之后重放活动通知也不会恢复它们。</string>
     <string name="inbox_group">群组</string>
@@ -253,7 +255,8 @@
     </plurals>
     <string name="section_backup">备份与恢复</string>
     <string name="backup_recovery_key">恢复密钥</string>
-    <string name="backup_recovery_key_desc">在另一台设备上打开备份的唯一方式。请抄下来并离线保存。</string>
+    <string name="backup_recovery_key_desc">在别的设备上打开备份的唯一方法。请抄下来并离线保存。弄丢它，你已经做好的每一份备份就再也打不开——在这台设备上也一样，因为“删除全部”连密钥一起销毁。</string>
+    <string name="backup_key_screenshot_warning">截图阻挡目前是关闭的，所以这把密钥的截图可能被其他 App 上传到云端相册。</string>
     <string name="backup_show_key">显示恢复密钥</string>
     <string name="backup_key_warning">任何人拿到这把密钥加上备份文件就能读取你的副本。QuietInbox 无法替你找回它。</string>
     <string name="backup_key_ack">我已保存恢复密钥</string>

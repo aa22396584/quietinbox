@@ -15,8 +15,11 @@ Tink AES-256-GCM-HKDF streaming AEAD (1 MiB segments) over UTF-8 JSON lines:
 ```
 
 Key: HKDF-SHA256(ikm = 256-bit recovery key, salt, info = "quietinbox-backup-v1"). The recovery key
-is shown once as Crockford base32 (13 × 4 chars + 4-char checksum) and is the only cross-device
-secret; Keystore keys never leave the device.
+is shown as Crockford base32 (13 × 4 chars + 4-char checksum) and is the only cross-device secret;
+Keystore keys never leave the device. Settings re-shows it on demand rather than once: a key seen
+once and mistranscribed is only discovered on the day a restore is attempted, and the vault is
+already behind the device lock. "Delete everything" destroys it, and every backup taken with it
+becomes unreadable — on this device too, not only on another one.
 
 ## Import rules (plan §11)
 

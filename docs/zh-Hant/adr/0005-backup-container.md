@@ -15,8 +15,10 @@ Tink AES-256-GCM-HKDF streaming AEAD (1 MiB segments) over UTF-8 JSON lines:
 ```
 
 金鑰：HKDF-SHA256（ikm = 256 位元的復原金鑰、salt、info = "quietinbox-backup-v1"）。復原金鑰會以
-Crockford base32（13 × 4 個字元 + 4 個字元的檢查碼）顯示一次，而且是唯一的跨裝置密鑰；Keystore
-金鑰絕不離開裝置。
+Crockford base32（13 × 4 個字元 + 4 個字元的檢查碼）顯示，而且是唯一的跨裝置密鑰；Keystore
+金鑰絕不離開裝置。設定頁是「隨時可再顯示」而不是「只顯示一次」：只看過一次而抄錯的金鑰，要到真的
+需要還原的那天才會被發現，而金庫本來就已經在裝置鎖後面。「刪除全部」會銷毀它，屆時用它做的每一份
+備份都再也打不開——在這台裝置上也一樣，不只是換一台裝置。
 
 ## 匯入規則（計畫 §11）
 

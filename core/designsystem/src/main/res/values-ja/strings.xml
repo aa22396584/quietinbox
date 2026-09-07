@@ -68,6 +68,8 @@
     <string name="inbox_banner_locked">保管庫を開けませんでした。「キャプチャ」で復旧オプションを確認してください。</string>
     <string name="inbox_pinned">ピン留め済み</string>
     <string name="inbox_unviewed">未閲覧</string>
+    <string name="a11y_selected">選択中</string>
+    <string name="a11y_not_selected">未選択</string>
     <string name="inbox_delete_title">この会話を削除しますか？</string>
     <string name="inbox_delete_body">この会話に保存されたコピーはすべてこの端末から削除されます。送信元アプリには影響しません。アクティブな通知を再生しても復元されません。</string>
     <string name="inbox_group">グループ</string>
@@ -253,7 +255,8 @@
     </plurals>
     <string name="section_backup">バックアップと復元</string>
     <string name="backup_recovery_key">復旧キー</string>
-    <string name="backup_recovery_key_desc">別の端末でバックアップを開く唯一の手段です。書き留めて、オフラインで保管してください。</string>
+    <string name="backup_recovery_key_desc">他の端末でバックアップを開く唯一の方法です。書き留めてオフラインで保管してください。失うと、すでに作成したバックアップは二度と開けません。「すべて削除」は鍵も消すため、この端末でも開けなくなります。</string>
+    <string name="backup_key_screenshot_warning">スクリーンショットのブロックがオフです。この鍵のスクリーンショットが他のアプリによってクラウドのアルバムへ送られる可能性があります。</string>
     <string name="backup_show_key">復旧キーを表示</string>
     <string name="backup_key_warning">このキーとバックアップファイルがあれば、誰でもコピーを読めます。QuietInbox が代わりに復旧することはできません。</string>
     <string name="backup_key_ack">復旧キーを保存しました</string>

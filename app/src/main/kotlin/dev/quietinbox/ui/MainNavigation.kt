@@ -66,18 +66,28 @@ private val topLevel = listOf(
 )
 
 /**
- * Navigation 3 back stack with a bottom bar on compact windows, a wide rail on medium/expanded
- * windows, and a list-detail scene so the inbox and a conversation sit side by side on tablets
- * and unfolded devices (plan section 12).
+ * Navigation 3 back stack with a bottom bar on compact windows, a wide rail from medium windows up,
+ * and a list-detail scene so the inbox and a conversation sit side by side on tablets and unfolded
+ * devices (plan section 12).
+ *
+ * The two decisions have different breakpoints and used to share one. The rail replaces the bottom
+ * bar at medium (600dp), which is the Material guidance. Two panes only appear at expanded (840dp):
+ * `rememberListDetailSceneStrategy` defaults to `calculatePaneScaffoldDirective`, which allows one
+ * horizontal partition for compact *and* medium and two only from expanded. Deriving both from
+ * 600dp meant that between 600dp and 839dp — a small tablet, a landscape phone, a split-window pane
+ * — the conversation filled the window alone while the code believed the inbox was still beside it,
+ * so it drew no back arrow. The system back gesture still worked, but the only visible way out was
+ * the rail (FT-02).
  */
 @Composable
 fun MainNavigation() {
     val backStack = rememberNavBackStack(InboxRoute)
     val windowSizeClass = currentWindowAdaptiveInfoV2().windowSizeClass
-    val wide = windowSizeClass.isWidthAtLeastBreakpoint(WindowSizeClass.WIDTH_DP_MEDIUM_LOWER_BOUND)
+    val railLayout = windowSizeClass.isWidthAtLeastBreakpoint(WindowSizeClass.WIDTH_DP_MEDIUM_LOWER_BOUND)
+    val twoPane = windowSizeClass.isWidthAtLeastBreakpoint(WindowSizeClass.WIDTH_DP_EXPANDED_LOWER_BOUND)
     val current = backStack.lastOrNull()
     val currentTop = backStack.lastOrNull { key -> topLevel.any { it.route == key } } ?: InboxRoute
-    val showChrome = current !is ConversationRoute || wide
+    val showChrome = current !is ConversationRoute || twoPane
 
     fun goTop(route: NavKey) {
         if (backStack.lastOrNull() == route) return
@@ -121,7 +131,7 @@ fun MainNavigation() {
                     ConversationScreen(
                         conversationId = key.id,
                         onBack = { backStack.removeLastOrNull() },
-                        showBackButton = !wide,
+                        showBackButton = !twoPane,
                     )
                 }
                 entry<SearchRoute> {
@@ -138,7 +148,7 @@ fun MainNavigation() {
         )
     }
 
-    if (wide) {
+    if (railLayout) {
         Row(Modifier.fillMaxSize()) {
             NavigationRail(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
                 for (item in topLevel) {

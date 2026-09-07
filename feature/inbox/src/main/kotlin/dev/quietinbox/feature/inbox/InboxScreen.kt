@@ -65,6 +65,8 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -330,6 +332,7 @@ private fun ConversationRow(
     modifier: Modifier = Modifier,
 ) {
     var menu by remember { mutableStateOf(false) }
+    val unviewedLabel = stringResource(R.string.inbox_unviewed)
     val title = conversation.title ?: stringResource(R.string.analytics_unknown_conversation)
     val identity = identityLabel(conversation.identityConfidence)
     Box(modifier) {
@@ -337,6 +340,10 @@ private fun ConversationRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .combinedClickable(onClick = onClick, onLongClick = { menu = true })
+                // The unviewed signal was a coloured dot, a bold title and a tinted time — all of
+                // them invisible to a screen reader, which CONTRIBUTING.md's "colour is never the
+                // only signal" rule covers too (A11Y-03).
+                .semantics { if (conversation.hasUnviewed) stateDescription = unviewedLabel }
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.Top,
             horizontalArrangement = Arrangement.spacedBy(14.dp),

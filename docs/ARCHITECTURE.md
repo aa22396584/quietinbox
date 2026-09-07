@@ -102,8 +102,11 @@ expired copy; media it cannot read is counted as skipped and reported.
 ## UI
 
 Material 3 Expressive (`MaterialExpressiveTheme`, expressive motion scheme, large shapes) with a
-brand palette by default and optional dynamic colour. Navigation 3 back stack; on windows ≥ medium
-width a `NavigationRail` plus `ListDetailSceneStrategy` shows inbox and conversation side by side.
+brand palette by default and optional dynamic colour. Navigation 3 back stack; from medium width
+(600dp) the bottom bar becomes a `NavigationRail`, and from expanded width (840dp)
+`ListDetailSceneStrategy` shows inbox and conversation side by side. The two breakpoints are
+deliberately different: the default pane directive allows two panes only from expanded, so between
+600dp and 839dp the rail is up but the conversation is alone and keeps its back arrow.
 Every quality state renders text + icon (colour is never the only signal). The activity screen is
 five tabs (overview, rankings, best time, chattiness, quiet rate) over one shared period selector,
 each computed by pure functions in `core:analytics` and each labelled as observed messages only.

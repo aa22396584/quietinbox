@@ -70,6 +70,8 @@
     <string name="inbox_banner_locked">The vault could not be opened. Open Capture for recovery options.</string>
     <string name="inbox_pinned">Pinned</string>
     <string name="inbox_unviewed">Unviewed</string>
+    <string name="a11y_selected">Selected</string>
+    <string name="a11y_not_selected">Not selected</string>
     <string name="inbox_delete_title">Delete this conversation?</string>
     <string name="inbox_delete_body">All saved copies in this conversation are removed from this device. The source app is not affected. Replays of active notifications will not restore them.</string>
     <string name="inbox_group">Group</string>
@@ -256,7 +258,8 @@
     </plurals>
     <string name="section_backup">Backup &amp; restore</string>
     <string name="backup_recovery_key">Recovery key</string>
-    <string name="backup_recovery_key_desc">The only way to open your backups on another device. Write it down and keep it offline.</string>
+    <string name="backup_recovery_key_desc">The only way to open your backups on another device. Write it down and keep it offline. Lose it and every backup you have already made can never be opened again — not even here, because \"Delete everything\" destroys the key too.</string>
+    <string name="backup_key_screenshot_warning">Screenshot blocking is off, so a screenshot of this key can be uploaded to a cloud photo album by another app.</string>
     <string name="backup_show_key">Show recovery key</string>
     <string name="backup_key_warning">Anyone with this key and a backup file can read your copies. QuietInbox cannot recover it for you.</string>
     <string name="backup_key_ack">I have saved my recovery key</string>

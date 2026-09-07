@@ -1,6 +1,9 @@
 package dev.quietinbox.feature.conversation
 
 import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -68,6 +71,11 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -191,6 +199,9 @@ fun ConversationScreen(
                             style = MaterialTheme.typography.labelLarge,
                             modifier = Modifier.padding(horizontal = 12.dp),
                         )
+                        IconButton(onClick = {
+                            copyToClipboard(context, state.messages.filter { it.id in state.selection }.joinToString("\n\n") { it.body })
+                        }) { Icon(Icons.Outlined.ContentCopy, stringResource(R.string.action_copy)) }
                         IconButton(onClick = { deleteDialog = true }) { Icon(Icons.Outlined.Delete, stringResource(R.string.action_delete)) }
                         IconButton(onClick = viewModel::clearSelection) { Icon(Icons.Outlined.CheckCircle, stringResource(R.string.action_close)) }
                     } else {
@@ -246,6 +257,12 @@ fun ConversationScreen(
                             selected = m.id in state.selection,
                             selecting = selecting,
                             onToggleSelect = { viewModel.toggleSelect(m.id) },
+                            onCopy = { copyToClipboard(context, m.body) },
+                            onDeleteOnly = {
+                                viewModel.clearSelection()
+                                viewModel.toggleSelect(m.id)
+                                deleteDialog = true
+                            },
                             loadThumbnail = viewModel::loadThumbnail,
                             modifier = Modifier.animateItem(),
                         )
@@ -322,6 +339,8 @@ private fun MessageBubble(
     selected: Boolean,
     selecting: Boolean,
     onToggleSelect: () -> Unit,
+    onCopy: () -> Unit,
+    onDeleteOnly: () -> Unit,
     loadThumbnail: suspend (Long) -> ByteArray?,
     modifier: Modifier = Modifier,
 ) {
@@ -344,8 +363,15 @@ private fun MessageBubble(
         bottomStart = if (self) 20.dp else 6.dp,
         bottomEnd = if (self) 6.dp else 20.dp,
     )
+    val selectedLabel = stringResource(R.string.a11y_selected)
+    val notSelectedLabel = stringResource(R.string.a11y_not_selected)
+    val copyLabel = stringResource(R.string.action_copy)
+    val deleteLabel = stringResource(R.string.action_delete)
     Column(
-        modifier = modifier.fillMaxWidth(),
+        // One node, not two: the sender's name sits outside the clickable column, so TalkBack read
+        // it separately and the merged bubble never said who sent the message — the group-chat case
+        // the reviewer named (A11Y-02).
+        modifier = modifier.fillMaxWidth().semantics(mergeDescendants = true) {},
         horizontalAlignment = if (self) Alignment.End else Alignment.Start,
     ) {
         if (showSender && !self) {
@@ -366,6 +392,17 @@ private fun MessageBubble(
                     onClick = { if (selecting) onToggleSelect() },
                     onLongClick = onToggleSelect,
                 )
+                // Selection was signalled by container colour alone, and copy was reachable only by
+                // a touch-drag inside SelectionContainer — neither exists for a screen reader
+                // (A11Y-03, A11Y-04). CONTRIBUTING.md already says colour is never the only signal.
+                .semantics {
+                    this.selected = selected
+                    if (selecting) stateDescription = if (selected) selectedLabel else notSelectedLabel
+                    customActions = listOf(
+                        CustomAccessibilityAction(copyLabel) { onCopy(); true },
+                        CustomAccessibilityAction(deleteLabel) { onDeleteOnly(); true },
+                    )
+                }
                 .padding(horizontal = 14.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
@@ -437,4 +474,11 @@ private fun Thumbnail(blobId: Long, load: suspend (Long) -> ByteArray?) {
                 .clip(RoundedCornerShape(14.dp)),
         )
     }
+}
+
+/** The clipboard is the only outbound path a message body has; nothing here leaves the device. */
+private fun copyToClipboard(context: Context, text: String) {
+    if (text.isBlank()) return
+    context.getSystemService(ClipboardManager::class.java)
+        ?.setPrimaryClip(ClipData.newPlainText("QuietInbox", text))
 }

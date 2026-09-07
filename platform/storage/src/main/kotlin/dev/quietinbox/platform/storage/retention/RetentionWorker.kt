@@ -86,9 +86,13 @@ class RetentionService @Inject constructor(
         // permanent dead weight nothing ever looks at (QI-MEDIA-017). Names are compared against
         // every name a row still points at, and a file younger than the grace window is left alone:
         // `work {}` runs concurrently with a copy that has written its file but not yet committed.
+        // Order matters: list the directory first, then ask the database. A blob committed between
+        // the two reads is in the database and survives; a file created after the listing is not in
+        // the list. The grace window is the second guard, for a file written but not yet committed.
+        val onDisk = mediaDir.namesWithAge()
         val live = db.mediaDao().allFileNames().toHashSet()
         val strayCutoff = now - STRAY_FILE_GRACE_MS
-        val stray = mediaDir.namesWithAge().filter { (name, modified) -> name !in live && modified < strayCutoff }
+        val stray = onDisk.filter { (name, modified) -> name !in live && modified < strayCutoff }
         for ((name, _) in stray) mediaDir.delete(name)
 
         // `pendingMedia` had no caller anywhere: a copy that threw inside store(), or was cancelled

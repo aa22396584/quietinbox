@@ -39,6 +39,27 @@ were wrong in a way that changed the fix.
   the flag behind it was hardcoded. QuietInbox never keeps a source `PendingIntent`, so it cannot know
   whether the notification is live — the sentence now says what is actually true: the app opens at its
   own starting screen, not at this chat.
+- **Between 600dp and 839dp the conversation had no visible way back.** One value decided both where
+  the navigation sits and whether the inbox stays beside the conversation, but those have different
+  breakpoints: the rail replaces the bottom bar at medium width, while `ListDetailSceneStrategy`'s
+  default directive gives two panes only from expanded width. On a small tablet, a landscape phone or
+  a split-window pane the conversation therefore filled the window while the code believed the inbox
+  was still next to it, and drew no back arrow. The system back gesture still worked and the rail
+  still led out, so nobody was trapped — but the only visible exit was gone. The two decisions are
+  now separate, and so are they in `tools/demo-screenshots.sh`, which had inherited the same
+  assumption.
+- The recovery key said it was "the only way to open your backups on another device" without ever
+  saying what losing it costs. It is the only way to open them *anywhere*: "Delete everything"
+  destroys the key too, so every backup already taken becomes unreadable on this device as well. The
+  screen says that now, and warns about screenshots when the screenshot block — whose toggle is on
+  that same screen — is off.
+- TalkBack could not tell that a message was selected, that a conversation was unviewed, or copy a
+  message at all: selection and the unviewed dot were signalled by colour alone, and copying existed
+  only as a touch-drag inside `SelectionContainer`. The message row now carries its selection state,
+  the inbox row its unviewed state, and each message a Copy and a Delete accessibility action. There
+  is a Copy button in the selection toolbar too, which is where a sighted user was missing it.
+- In a group chat TalkBack read the sender's name as a node of its own, so the merged message node
+  never said who sent it. The row is one node now.
 - An avatar monogram cut a surrogate pair in half, so a name beginning with an emoji ("😀 Mom") drew a
   lone half-character as tofu. Two call sites, not one.
 - The Traditional Chinese activity tab was labelled 神隱率 — slang for "went dark on you" — which is
@@ -46,6 +67,9 @@ were wrong in a way that changed the fix.
   in step with the Japanese and Korean labels. The word also reached the live Play store description.
 
 ### Changed
+- ADR-0005 said the recovery key "is shown once". It is re-showable on demand, and has been all
+  along — a key seen once and mistranscribed is only discovered on the day a restore is attempted.
+  The ADR now describes what ships, in both languages.
 - `SHA256SUMS.txt` no longer opens with a comment line: `sha256sum -c` reports one as "improperly
   formatted". Which of its four files the release actually carries is said in the release notes now,
   with the `--ignore-missing` invocation that verifies them. `v0.1.3`'s copy still has the comment.

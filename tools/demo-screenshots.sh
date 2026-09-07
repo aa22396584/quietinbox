@@ -53,6 +53,10 @@ WORK_DIR="$(mktemp -d)"
 # Narrow until the device says otherwise (screen_dp_width, in the run section). Declared here because
 # tap_tab reads it and `set -u` would abort on a forward reference if a call ever moved earlier.
 LAYOUT="narrow"
+# Where the navigation strip sits (>=600dp: rail) and whether the inbox stays beside the
+# conversation (>=840dp: two panes) are separate decisions with separate breakpoints. The app used
+# to derive both from 600dp, which is the FT-02 defect; the harness must not repeat it.
+PANES="one"
 
 log() { printf '• %s\n' "$*" >&2; }
 warn() { printf '! %s\n' "$*" >&2; }
@@ -217,12 +221,16 @@ def main():
         return 1
 
     if command == "conversation-ready":
-        # Narrow layout: the pinned title is on screen and no bottom-bar item with the inbox label
+        # Keyed on the pane count, not on where the navigation sits: the two have different
+        # breakpoints (rail from 600dp, two panes from 840dp).
+        # One pane: the pinned title is on screen and no bottom-bar item with the inbox label
         # remains (the inbox row carries the same title; the bar is hidden on the conversation page).
-        # Wide layout: the inbox stays beside the conversation, so the bar test cannot apply — the
+        # A rail item never sits in the bottom band, so this stays correct at 600-839dp, where the
+        # navigation is a rail but the conversation is still alone.
+        # Two panes: the inbox stays beside the conversation, so the bar test cannot apply — the
         # detail pane has opened once the title appears twice, in the list row and in the detail
         # header. Either way "the inbox is still all there is" never passes as a conversation shot.
-        title, inbox_tab, layout = sys.argv[2], sys.argv[3], sys.argv[4]
+        title, inbox_tab, panes = sys.argv[2], sys.argv[3], sys.argv[4]
         height = 0
         for node in nodes(tree):
             box = bounds(node)
@@ -234,11 +242,11 @@ def main():
             description = (node.get("content-desc") or "").strip()
             if text == title or description == title:
                 titles += 1
-            if layout == "narrow" and (text == inbox_tab or description == inbox_tab):
+            if panes == "one" and (text == inbox_tab or description == inbox_tab):
                 box = bounds(node)
                 if box and box[1] >= int(height * 0.85):
                     return 1
-        if layout == "wide":
+        if panes == "two":
             return 0 if titles >= 2 else 1
         return 0 if titles >= 1 else 1
 
@@ -507,10 +515,11 @@ command -v adb >/dev/null 2>&1 || die "adb is not on PATH"
 command -v python3 >/dev/null 2>&1 || die "python3 is not on PATH"
 device get-state >/dev/null 2>&1 || die "device $SERIAL is not available (adb devices)"
 
-# The app follows the window size class: below 600dp of width the navigation is a bottom bar and the
-# conversation replaces the inbox; at or above it the navigation is a left rail and the conversation
-# opens beside the inbox (`ListDetailSceneStrategy`). Everything that depends on where the navigation
-# sits, or on whether the inbox stays on screen, reads this.
+# The app follows the window size class, and on two different breakpoints. Below 600dp of width the
+# navigation is a bottom bar; at or above it, a left rail. Separately, the conversation only opens
+# *beside* the inbox from 840dp up: `ListDetailSceneStrategy`'s default directive allows one pane
+# for compact and medium widths and two only from expanded. Between the two — a small tablet, a
+# landscape phone, a split-window pane — the navigation is a rail but the conversation is alone.
 # Reads the physical display, so it assumes the device is upright and the app has the whole screen:
 # a landscape phone or a split-window run would be judged narrow. A wrong judgement makes the tab
 # taps fail loudly (tap_tab dies) rather than produce a wrong screenshot.
@@ -524,7 +533,8 @@ screen_dp_width() {
 }
 if DP_WIDTH="$(screen_dp_width)"; then
   [ "$DP_WIDTH" -ge 600 ] && LAYOUT="wide"
-  log "window width ${DP_WIDTH}dp -> $LAYOUT layout ($([ "$LAYOUT" = wide ] && echo 'navigation rail, list-detail' || echo 'bottom bar'))"
+  [ "$DP_WIDTH" -ge 840 ] && PANES="two"
+  log "window width ${DP_WIDTH}dp -> $LAYOUT navigation ($([ "$LAYOUT" = wide ] && echo 'rail' || echo 'bottom bar')), $PANES pane(s)"
 else
   warn "could not read the screen size; assuming the narrow (bottom bar) layout"
 fi
@@ -605,13 +615,14 @@ shot "1_inbox"
 tap_first_list_item
 # The conversation loads asynchronously: wait for the pinned conversation's title in the app bar (and
 # a moment more for the list to settle at its newest message) instead of trusting a fixed delay.
-# Ready = the pinned title is on screen *and* the bottom bar is gone on the narrow layout (the inbox
-# shows the same title in its first row, and the bar is hidden on the conversation page); on the wide
-# layout the inbox stays beside it, so ready means the title appears twice — once in the list row and
-# once in the detail header. One UI dump per attempt.
+# Ready = the pinned title is on screen *and* the bottom bar is gone when the conversation is alone
+# (the inbox shows the same title in its first row, and the bar is hidden on the conversation page);
+# with two panes the inbox stays beside it, so ready means the title appears twice — once in the list
+# row and once in the detail header. Keyed on the pane count, not on where the navigation sits: at
+# 600-839dp the navigation is a rail but there is still only one pane. One UI dump per attempt.
 conversation_ready() {
   dump_ui || return 1
-  python3 "$HELPER" conversation-ready "$DEMO_PINNED_TITLE" "$NAV_INBOX" "$LAYOUT" < "$WORK_DIR/ui.xml"
+  python3 "$HELPER" conversation-ready "$DEMO_PINNED_TITLE" "$NAV_INBOX" "$PANES" < "$WORK_DIR/ui.xml"
 }
 for _ in 1 2 3 4 5 6 7 8 9 10; do
   conversation_ready && break
@@ -621,9 +632,9 @@ conversation_ready || die "the conversation page did not settle after 10 attempt
 sleep 2
 assert_locale_clock "2_conversation"
 shot "2_conversation"
-# Only the narrow layout needs to come back from the conversation: on the wide one the rail never
+# Only a single-pane window needs to come back from the conversation: with two panes the inbox never
 # left, and a BACK there pops the scene the app is standing on.
-if [ "$LAYOUT" = "narrow" ]; then
+if [ "$PANES" = "one" ]; then
   shell input keyevent KEYCODE_BACK
   sleep 2
 fi

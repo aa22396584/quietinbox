@@ -235,6 +235,11 @@ fun SettingsScreen(
                                     )
                                 }
                                 Text(stringResource(R.string.backup_key_warning), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                                // The toggle that lifts FLAG_SECURE is on this same screen, and a
+                                // 56-character secret is exactly what someone screenshots.
+                                if (!s.screenshotProtection) {
+                                    Text(stringResource(R.string.backup_key_screenshot_warning), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                                }
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     TextButton(onClick = { viewModel.acknowledgeRecoveryKey(); viewModel.hideRecoveryKey() }) { Text(stringResource(R.string.backup_key_ack)) }
                                     TextButton(onClick = viewModel::hideRecoveryKey) { Text(stringResource(R.string.action_hide)) }

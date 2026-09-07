@@ -68,6 +68,8 @@
     <string name="inbox_banner_locked">無法開啟加密金庫，請到「擷取」頁查看復原選項。</string>
     <string name="inbox_pinned">已釘選</string>
     <string name="inbox_unviewed">未查看</string>
+    <string name="a11y_selected">已選取</string>
+    <string name="a11y_not_selected">未選取</string>
     <string name="inbox_delete_title">刪除這個對話？</string>
     <string name="inbox_delete_body">這個對話裡所有已保存的副本會從本機移除，來源 App 不受影響；之後重播活動通知也不會復活它們。</string>
     <string name="inbox_group">群組</string>
@@ -253,7 +255,8 @@
     </plurals>
     <string name="section_backup">備份與還原</string>
     <string name="backup_recovery_key">復原金鑰</string>
-    <string name="backup_recovery_key_desc">在另一台裝置開啟備份的唯一方式。請抄下並離線保存。</string>
+    <string name="backup_recovery_key_desc">在別台裝置上打開備份的唯一方法。請抄下來並離線保存。弄丟它，你已經做好的每一份備份就再也打不開——在這台裝置上也一樣，因為「刪除全部」連金鑰一起銷毀。</string>
+    <string name="backup_key_screenshot_warning">截圖阻擋目前是關閉的，所以這把金鑰的截圖可能被其他 App 上傳到雲端相簿。</string>
     <string name="backup_show_key">顯示復原金鑰</string>
     <string name="backup_key_warning">任何人拿到這把金鑰加上備份檔就能讀取你的副本。QuietInbox 無法替你找回它。</string>
     <string name="backup_key_ack">我已保存復原金鑰</string>

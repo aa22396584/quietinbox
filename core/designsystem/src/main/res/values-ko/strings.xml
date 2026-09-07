@@ -68,6 +68,8 @@
     <string name="inbox_banner_locked">보관소를 열 수 없습니다. ‘캡처’에서 복구 옵션을 확인하세요.</string>
     <string name="inbox_pinned">고정됨</string>
     <string name="inbox_unviewed">미확인</string>
+    <string name="a11y_selected">선택됨</string>
+    <string name="a11y_not_selected">선택 안 됨</string>
     <string name="inbox_delete_title">이 대화를 삭제할까요?</string>
     <string name="inbox_delete_body">이 대화에 저장된 모든 사본이 이 기기에서 제거됩니다. 소스 앱에는 영향이 없습니다. 활성 알림을 다시 재생해도 복원되지 않습니다.</string>
     <string name="inbox_group">그룹</string>
@@ -253,7 +255,8 @@
     </plurals>
     <string name="section_backup">백업 및 복원</string>
     <string name="backup_recovery_key">복구 키</string>
-    <string name="backup_recovery_key_desc">다른 기기에서 백업을 여는 유일한 방법입니다. 적어 두고 오프라인으로 보관하세요.</string>
+    <string name="backup_recovery_key_desc">다른 기기에서 백업을 열 수 있는 유일한 방법입니다. 적어서 오프라인으로 보관하세요. 잃어버리면 이미 만들어 둔 모든 백업을 다시는 열 수 없습니다. \"모두 삭제\"는 키까지 지우므로 이 기기에서도 마찬가지입니다.</string>
+    <string name="backup_key_screenshot_warning">스크린샷 차단이 꺼져 있어, 이 키의 스크린샷이 다른 앱을 통해 클라우드 앨범에 올라갈 수 있습니다.</string>
     <string name="backup_show_key">복구 키 표시</string>
     <string name="backup_key_warning">이 키와 백업 파일이 있으면 누구나 사본을 읽을 수 있습니다. QuietInbox가 대신 복구해 줄 수 없습니다.</string>
     <string name="backup_key_ack">복구 키를 저장했습니다</string>

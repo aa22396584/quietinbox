@@ -81,10 +81,12 @@ exists, and no source notification is ever read.
   failing to switch the device into night mode fails the run. The UI dump itself retries, since every
   capture now depends on one. The first two are what the tablet set was missing. Without those two the first tablet set captured
   the launcher and the system settings, and the size floor passed them (a wallpaper compresses to 3.3 MB).
-  **Both layouts are supported**: the harness reads the window width in dp and taps the navigation rail
-  at ≥ 600dp, the bottom bar below it; on a wide window the conversation counts as ready when the pinned
-  title is on screen twice (the list row and the detail header, since the inbox stays beside it) and no
-  BACK is sent, because the rail never went away. Tablet shots go to `docs/screenshots/tablet/<locale>/`
+  **Both layouts are supported, on two separate breakpoints**: the harness reads the window width in dp
+  and taps the navigation rail at ≥ 600dp, the bottom bar below it; separately, only at ≥ 840dp does the
+  conversation open beside the inbox, and there it counts as ready when the pinned title is on screen
+  twice (the list row and the detail header) and no BACK is sent, because the rail never went away.
+  Between 600dp and 839dp the rail is up but the conversation is alone — the band the app itself used to
+  get wrong (FT-02), which is why the harness keys the two decisions separately. Tablet shots go to `docs/screenshots/tablet/<locale>/`
   and `fastlane/metadata/android/<locale>/images/tenInchScreenshots/` (en-US and zh-TW so far, captured on
   `Foldable_Test`, 2076×2152).
 - Coverage: `DemoDataTest` (instrumented, `platform:storage`) seeds, asserts the row counts and the

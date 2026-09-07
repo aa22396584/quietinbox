@@ -39,6 +39,13 @@ jobs:
           distribution: temurin
           java-version: 17
       - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        # v6 moved caching into `gradle-actions-caching`, a proprietary component that is not
+        # covered by the MIT licence and whose Terms of Use you accept by upgrading. `basic` is the
+        # MIT-licensed provider (built on @actions/cache) added in v6.1.0; it keys the cache on the
+        # build files and clears it when they change, which is what this repo needs. Stated at every
+        # call site rather than inherited, because the default is `enhanced`.
+        with:
+          cache-provider: basic
       - name: Restore upload keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.QUIETINBOX_KEYSTORE_BASE64 }}

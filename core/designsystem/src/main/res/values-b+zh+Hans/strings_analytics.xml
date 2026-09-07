@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  扩展版“活动统计”界面用字（标签页、期间、热力图、时段、健谈度、沉默率、口头禅）。
+  扩展版“活动统计”界面用字（标签页、期间、热力图、时段、健谈度、安静率、口头禅）。
   所有标签只描述“观测到的消息”：来源应用放进通知、QuietInbox 才复制到的内容。
   不得声称回复、已读或真实消息总量。键名须与 values/strings_analytics.xml 完全一致。
 -->
@@ -9,7 +9,7 @@
     <string name="analytics_tab_rankings">排行榜</string>
     <string name="analytics_tab_best_time">最佳时段</string>
     <string name="analytics_tab_chattiness">健谈度</string>
-    <string name="analytics_tab_quiet">沉默率</string>
+    <string name="analytics_tab_quiet">安静率</string>
 
     <string name="analytics_sub_overview">仅统计所选期间内观测到的消息。</string>
     <string name="analytics_sub_rankings">仅统计观测到的消息，不排“谁回复了谁”。</string>
@@ -61,7 +61,7 @@
     <string name="analytics_chattiness_formula">观测到的消息数，除以“至少有一条消息”的本地日数。完全没有观测到消息的日子不计入分母。</string>
 
     <string name="analytics_quiet_title">没有观测到消息的日子</string>
-    <string name="analytics_quiet_value">沉默 %1$d%%</string>
+    <string name="analytics_quiet_value">安静 %1$d%%</string>
     <string name="analytics_quiet_days">%2$d 天中有 %1$d 天</string>
     <string name="analytics_quiet_streak">最长连续 %1$d 天</string>
     <string name="analytics_quiet_formula">所选期间内没有观测到消息的天数，除以该期间的所有天数（含对话第一次出现之前的日子）。没有消息也可能只是来源应用当天没有发出通知。</string>

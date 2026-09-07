@@ -2,8 +2,11 @@ package dev.quietinbox.feature.conversation
 
 import android.content.ActivityNotFoundException
 import android.content.ClipData
+import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.Build
+import android.os.PersistableBundle
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -149,8 +152,10 @@ fun ConversationScreen(
             return@LaunchedEffect
         }
         // Afterwards follow new messages only when the reader is already at the end.
-        val atEnd = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index?.let { it >= lastIndex - 1 } ?: true
-        if (atEnd) listState.animateScrollToItem(lastIndex)
+        // No layout yet (a rotation or a fold rebuilt the composition) means we do not know where
+        // the reader was — and guessing "at the bottom" is what overwrites a restored position.
+        val visibleEnd = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: return@LaunchedEffect
+        if (visibleEnd >= lastIndex - 1) listState.animateScrollToItem(lastIndex)
     }
     LaunchedEffect(highlighted) {
         if (highlighted != null) {
@@ -405,21 +410,9 @@ private fun MessageBubble(
     val copyLabel = stringResource(R.string.action_copy)
     val deleteLabel = stringResource(R.string.action_delete)
     Column(
-        // One node, not two: the sender's name sits outside the clickable column, so TalkBack read
-        // it separately and the merged bubble never said who sent the message — the group-chat case
-        // the reviewer named (A11Y-02).
-        modifier = modifier.fillMaxWidth().semantics(mergeDescendants = true) {},
+        modifier = modifier.fillMaxWidth(),
         horizontalAlignment = if (self) Alignment.End else Alignment.Start,
     ) {
-        if (showSender && !self) {
-            Text(
-                message.senderName ?: stringResource(R.string.conv_unknown_sender),
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(start = 12.dp, bottom = 2.dp, top = 4.dp),
-            )
-        }
         Column(
             modifier = Modifier
                 .widthIn(max = 340.dp)
@@ -433,16 +426,30 @@ private fun MessageBubble(
                 // a touch-drag inside SelectionContainer — neither exists for a screen reader
                 // (A11Y-03, A11Y-04). CONTRIBUTING.md already says colour is never the only signal.
                 .semantics {
-                    this.selected = selected
-                    if (selecting) stateDescription = if (selected) selectedLabel else notSelectedLabel
-                    customActions = listOf(
-                        CustomAccessibilityAction(copyLabel) { onCopy(); true },
-                        CustomAccessibilityAction(deleteLabel) { onDeleteOnly(); true },
-                    )
+                    if (selecting) {
+                        this.selected = selected
+                        stateDescription = if (selected) selectedLabel else notSelectedLabel
+                    }
+                    customActions = buildList {
+                        if (message.body.isNotBlank()) add(CustomAccessibilityAction(copyLabel) { onCopy(); true })
+                        add(CustomAccessibilityAction(deleteLabel) { onDeleteOnly(); true })
+                    }
                 }
                 .padding(horizontal = 14.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
+            // Inside the bubble, not above it. `combinedClickable` makes this column a merging
+            // semantics node, and a merging node is never absorbed by an outer one — so a sender
+            // drawn outside stayed a separate TalkBack stop and the bubble never said who sent it
+            // (A11Y-02). Verified by dumping the node tree, not by reasoning about the modifier.
+            if (showSender && !self) {
+                Text(
+                    message.senderName ?: stringResource(R.string.conv_unknown_sender),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
             if (message.mediaState == MediaState.LOCAL_COPY && message.mediaBlobId != null) {
                 Thumbnail(blobId = message.mediaBlobId!!, load = loadThumbnail)
             }
@@ -516,8 +523,13 @@ private fun Thumbnail(blobId: Long, load: suspend (Long) -> ByteArray?) {
 /** The clipboard is the only outbound path a message body has; nothing here leaves the device. */
 private fun copyToClipboard(context: Context, text: String) {
     if (text.isBlank()) return
-    context.getSystemService(ClipboardManager::class.java)
-        ?.setPrimaryClip(ClipData.newPlainText("QuietInbox", text))
+    val clip = ClipData.newPlainText("QuietInbox", text)
+    // Android 13+ shows a preview of whatever is copied and every app can read the clip. A vault
+    // whose whole point is keeping private messages on the device must at least say so.
+    if (Build.VERSION.SDK_INT >= 33) {
+        clip.description.extras = PersistableBundle().apply { putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true) }
+    }
+    context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(clip)
 }
 
 /** How long a search hit stays tinted after the screen lands on it. */

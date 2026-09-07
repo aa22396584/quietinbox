@@ -10,6 +10,7 @@ import dev.quietinbox.platform.storage.repo.SearchRepository
 import dev.quietinbox.platform.storage.repo.VaultRepository
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -107,22 +108,48 @@ class SearchViewModelTest : FunSpec({
         collector.cancel()
     }
 
-    test("a page that verifies nothing ends the run instead of leaving a button that cannot help") {
+    test("a page that verifies nothing keeps its cursor, because the index is not finished") {
         val h = Harness()
         val cursor = SearchCursor(sortKey = 5, id = 5)
+        val deeper = SearchCursor(sortKey = 4, id = 4)
         coEvery { h.search.searchPage(any(), any(), any(), any(), any(), isNull(), any()) } returns
             SearchPage(List(100) { h.hit }, cursor)
-        // More candidates remained, but none of them verified: there is nothing further to show.
+        // No candidate on this page verified, but the repository still handed back a cursor: that
+        // means its scan budget ran out, not that the index is exhausted. Only a null cursor may
+        // ever let the header state a total.
         coEvery { h.search.searchPage(any(), any(), any(), any(), any(), eq(cursor), any()) } returns
-            SearchPage(emptyList(), SearchCursor(sortKey = 4, id = 4))
+            SearchPage(emptyList(), deeper)
         val vm = h.viewModel()
         val collector = launch { vm.state.collect {} }
         h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
         vm.setQuery("hello")
         awaitUntil { vm.state.value.next shouldBe cursor }
         vm.loadMore()
-        awaitUntil { vm.state.value.next shouldBe null }
+        awaitUntil { vm.state.value.next shouldBe deeper }
         vm.state.value.results.size shouldBe 100
+        collector.cancel()
+    }
+
+    test("a stale page is discarded when the query has moved on") {
+        val h = Harness()
+        val cursor = SearchCursor(sortKey = 5, id = 5)
+        coEvery { h.search.searchPage(any(), any(), any(), any(), any(), isNull(), any()) } returns
+            SearchPage(List(100) { h.hit }, cursor)
+        coEvery { h.search.searchPage(any(), any(), any(), any(), any(), eq(cursor), any()) } coAnswers {
+            delay(300)
+            SearchPage(List(5) { h.hit }, null)
+        }
+        val vm = h.viewModel()
+        val collector = launch { vm.state.collect {} }
+        h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
+        vm.setQuery("hello")
+        awaitUntil { vm.state.value.next shouldBe cursor }
+        vm.loadMore()
+        // The reader retypes while the page is in flight: those five hits belong to nobody now.
+        vm.setQuery("")
+        vm.setQuery("hello")
+        delay(600)
+        vm.state.value.results.size shouldNotBe 105
         collector.cancel()
     }
 })

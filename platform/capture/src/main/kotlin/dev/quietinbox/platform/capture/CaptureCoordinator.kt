@@ -11,6 +11,7 @@ import dev.quietinbox.core.model.GapPrecision
 import dev.quietinbox.core.model.GapReason
 import dev.quietinbox.core.model.Limits
 import dev.quietinbox.core.model.ListenerState
+import dev.quietinbox.core.model.MediaState
 import dev.quietinbox.core.model.NotificationSnapshot
 import dev.quietinbox.core.model.SourceScope
 import dev.quietinbox.core.parser.ParserRegistry
@@ -875,16 +876,24 @@ class CaptureCoordinator @Inject constructor(
             retentionMs = retentionDays * DAY_MS,
             mediaAllowed = appSettings.mediaCopyEnabled && (source?.mediaEnabled ?: true),
         )
-        // Past every early return — the commit fence, a parse failure, an empty batch — so unlike
-        // `acceptedCount` this one only moves when a copy really was written.
-        _status.update { it.copy(lastCommittedAtEpochMs = now) }
+        // Only when rows were actually written. `commit` has a path that journals the event and
+        // returns an empty outcome (no identity, or every decision suppressed), and `now` is the
+        // event's *observed* time — a journal replay carries an old one, which would make the page
+        // say a copy was saved hours ago, or walk the value backwards.
+        if (outcome.newMessageIds.isNotEmpty() || outcome.summaryRecorded) {
+            val savedAt = System.currentTimeMillis()
+            _status.update { it.copy(lastCommittedAtEpochMs = maxOf(it.lastCommittedAtEpochMs ?: 0L, savedAt)) }
+        }
         if (reconcile?.degraded == true) ingest.diagnostic("RECONCILE_DEGRADED", null, snapshot.source.packageName, now)
         if (batch.warnings.isNotEmpty()) ingest.diagnostic("PARSE_WARNINGS", batch.warnings.joinToString(",") { it.name }, snapshot.source.packageName, now)
         if (outcome.pendingMediaMessageIds.isNotEmpty()) {
             if (queuedMediaCopies.incrementAndGet() > MAX_QUEUED_MEDIA_COPIES) {
                 queuedMediaCopies.decrementAndGet()
-                // The copy never runs. The rows stay PENDING and the retention sweep settles them;
-                // the drop itself is recorded rather than left to look like a copy still in flight.
+                // The copy never runs, so the rows are settled here rather than left showing an
+                // hourglass for up to an hour until the sweep reaches them: PENDING means "a copy
+                // is in flight", and none is. This runs under `pipelineMutex`, the single-writer
+                // lane, so the write is legal where it stands.
+                ingest.settlePendingMedia(outcome.pendingMediaMessageIds, MediaState.FAILED.name)
                 ingest.diagnostic("MEDIA_QUEUE_OVERFLOW", outcome.pendingMediaMessageIds.size.toString(), snapshot.source.packageName, now)
                 return false
             }

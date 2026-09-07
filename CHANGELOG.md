@@ -51,9 +51,10 @@ were wrong in a way that changed the fix.
 - **Search called its first page a total.** The screen asked for 100 hits and rendered "%d results",
   so a query matching five thousand messages said "100 results" — the repository's own kdoc admitted
   it showed the first page only. It now says "Newest 100 shown; there may be more" while a cursor
-  remains, offers Load more, and only calls a number a count once the index is exhausted. A cursor
-  means more *candidates*, not more hits, so a page that verifies nothing ends the run rather than
-  leaving a button that can never produce anything.
+  remains, offers Load more, and only calls a number a count once the index is exhausted — which is
+  precisely when the repository hands back a null cursor, and never otherwise. A page that verifies
+  nothing still keeps its cursor: that means the candidate scan budget ran out, not that the index is
+  finished, and treating the two as the same thing would have re-introduced the very claim this fixes.
 - **A search hit opened the conversation at today's newest message.** The hit's message id was
   dropped at the navigation boundary, so a match from six months ago left the reader at the bottom
   of the chat with no indication of where it was. The route carries the id now, the screen lands on
@@ -113,13 +114,16 @@ were wrong in a way that changed the fix.
   only as a touch-drag inside `SelectionContainer`. The message row now carries its selection state,
   the inbox row its unviewed state, and each message a Copy and a Delete accessibility action. There
   is a Copy button in the selection toolbar too, which is where a sighted user was missing it.
-- In a group chat TalkBack read the sender's name as a node of its own, so the merged message node
-  never said who sent it. The row is one node now.
+- In a group chat TalkBack read the sender's name as a node of its own, so the message node never
+  said who sent it. Merging from the outside does not fix this — a clickable is itself a merging
+  semantics node and nested merging nodes are never absorbed — so the sender's name moved inside the
+  bubble, where it is genuinely part of the same node.
 - An avatar monogram cut a surrogate pair in half, so a name beginning with an emoji ("😀 Mom") drew a
   lone half-character as tofu. Two call sites, not one.
 - The Traditional Chinese activity tab was labelled 神隱率 — slang for "went dark on you" — which is
-  precisely the claim `ActivityAnalytics` and that catalogue's own header forbid. It is 安靜天數 now,
-  in step with the Japanese and Korean labels. The word also reached the live Play store description.
+  precisely the claim `ActivityAnalytics` and that catalogue's own header forbid. It is 安靜率 now,
+  matching the English "Quiet rate" and the percentage it sits above; Simplified Chinese said 沉默率,
+  which attributes the silence to the other person in the same way, and is now 安静率. The word also reached the live Play store description.
 
 ### Changed
 - ADR-0005 said the recovery key "is shown once". It is re-showable on demand, and has been all

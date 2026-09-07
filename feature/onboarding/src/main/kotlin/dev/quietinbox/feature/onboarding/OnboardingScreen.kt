@@ -227,7 +227,10 @@ private fun AccessStep(state: OnboardingUiState, settingsMissing: Boolean, onOpe
 private fun TestStep(state: OnboardingUiState, onSend: () -> Unit) {
     Illustration(Icons.Outlined.Science, MaterialShapes.Cookie7Sided.toShape())
     StepTitle(stringResource(R.string.ob_test_title), stringResource(R.string.ob_test_body))
-    FilledTonalButton(onClick = onSend, enabled = state.granted) { Text(stringResource(R.string.ob_test_button)) }
+    // The failure branch has its own retry, so two identical buttons would sit on the same screen.
+    if (!state.testFailed) {
+        FilledTonalButton(onClick = onSend, enabled = state.granted) { Text(stringResource(R.string.ob_test_button)) }
+    }
     if (!state.canPostNotifications && Build.VERSION.SDK_INT >= 33) {
         Text(stringResource(R.string.ob_notification_permission), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }

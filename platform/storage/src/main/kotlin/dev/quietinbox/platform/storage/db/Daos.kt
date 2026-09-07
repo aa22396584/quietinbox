@@ -265,6 +265,15 @@ interface MessageDao {
     @Query("UPDATE message SET mediaState = :state, mediaBlobId = :blobId WHERE id = :id")
     suspend fun setMedia(id: Long, state: String, blobId: Long?)
 
+    /**
+     * Settles a row only while it is still PENDING. The retention sweep and a media copy both run
+     * as `maintenance.work`, which permits concurrency, so an unguarded update could overwrite a
+     * `LOCAL_COPY` that committed in between — and the next sweep would then delete its file as an
+     * orphan.
+     */
+    @Query("UPDATE message SET mediaState = :state, mediaBlobId = NULL WHERE id = :id AND mediaState = 'PENDING'")
+    suspend fun settlePendingMedia(id: Long, state: String): Int
+
     @Query("DELETE FROM message WHERE id IN (:ids)")
     suspend fun delete(ids: List<Long>)
 

@@ -23,7 +23,7 @@ records what the repository **actually delivers today** and what it does **not**
 | Inbox / conversation UI with quality labels | Done | Device screenshots |
 | Search (CJK bigram + Latin trigram, parameterised, keyset-paged, verified until the page is full) | Done | Instrumented `VaultRoundTripTest` (開會 / hel) and `SearchPagingTest` (250 false-positive candidates, resumable cursor); UI on device |
 | Cold start fails closed: nothing read from a notification before the source policy is known | Done | `CaptureCoordinatorTest` (held unread, dropped with a `COLD_START` gap when the vault does not open); synthetic capture on the AVD after a cold start |
-| Locked / opening vault on the search and conversation pages | Done | `SearchViewModelTest` (2), `ConversationViewModelTest` (1); not device-exercised (a vault cannot be locked on demand on the AVD) |
+| Locked / opening vault on the search and conversation pages | Done | `SearchViewModelTest` (5, of which 2 cover the locked and opening vault), `ConversationViewModelTest` (1); not device-exercised (a vault cannot be locked on demand on the AVD) |
 | Activity insights (observed-only: overview, heat map, rankings, best time, chattiness, quiet rate, emoji, catchphrases) | Done | 34 JVM tests in `core:analytics` plus 8 in `AnalyticsViewModelTest` (state rules, off-main-thread computation, locked/opening vault); UI on device; at most 50,000 messages per period are loaded (every tab shows a notice when it capped) |
 | Capture health page with gaps and diagnostics | Done | UI on device |
 | Retention TTL worker | Done (not soak-tested) | `RetentionWorker`, 12h periodic |

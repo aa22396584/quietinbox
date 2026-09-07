@@ -140,6 +140,12 @@ class IngestRepository @Inject constructor(
     suspend fun findConversationId(identity: ConversationIdentity): Long? =
         holder.db().conversationDao().find(identity.scope.packageName, identity.scope.profileKey, identity.scope.accountKey, identity.identityKey)?.id
 
+    /** Settles rows whose media copy will never start, while they are still PENDING. */
+    suspend fun settlePendingMedia(messageIds: List<Long>, state: String) {
+        val dao = holder.db().messageDao()
+        for (id in messageIds) dao.settlePendingMedia(id, state)
+    }
+
     suspend fun diagnostic(code: String, detail: String? = null, packageName: String? = null, now: Long) {
         runCatching { holder.db().diagnosticsDao().insert(DiagnosticEventEntity(code = code, detail = detail, packageName = packageName, atEpochMs = now)) }
             .onFailure { if (it is CancellationException) throw it }

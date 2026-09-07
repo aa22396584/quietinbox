@@ -41,6 +41,8 @@ data class SearchUiState(
      */
     val next: SearchCursor? = null,
     val loadingMore: Boolean = false,
+    /** Bumped on every query, range or filter change; a page from an older one is discarded. */
+    val generation: Int = 0,
     val searching: Boolean = false,
     val searched: Boolean = false,
     /** The vault could not be opened: nothing can be searched and "no results" would be a lie (QI-VAULT-010). */
@@ -57,6 +59,7 @@ class SearchViewModel @Inject constructor(
     private val vault: VaultRepository,
 ) : ViewModel() {
     private val local = MutableStateFlow(SearchUiState())
+    private var generation = 0
 
     val state: StateFlow<SearchUiState> = combine(local, inbox.observePackagesWithData().catch { emit(emptyList()) }, vault.state) { s, p, v ->
         s.copy(availablePackages = p.toImmutableList(), vaultLocked = v is VaultState.Locked, vaultOpening = v is VaultState.Opening)
@@ -73,8 +76,8 @@ class SearchViewModel @Inject constructor(
 
     fun retryVault() = viewModelScope.launch { runCatching { vault.retryOpen() } }
 
-    fun setQuery(q: String) = local.update { it.copy(query = q, searching = q.isNotBlank()) }
-    fun setRange(r: SearchRange) = local.update { it.copy(range = r) }
+    fun setQuery(q: String) = local.update { it.copy(query = q, searching = q.isNotBlank(), generation = ++generation) }
+    fun setRange(r: SearchRange) = local.update { it.copy(range = r, generation = ++generation) }
 
     /**
      * Appends the next page. The screen used to show the first 100 hits and call them "%d results",
@@ -91,23 +94,25 @@ class SearchViewModel @Inject constructor(
                 .getOrNull()
             local.update { cur ->
                 // The query may have changed while the page was in flight; that result is not ours.
-                if (cur.query != s.query || cur.range != s.range || cur.packages != s.packages) {
+                if (cur.generation != s.generation) {
                     cur.copy(loadingMore = false)
                 } else if (page == null) {
                     cur.copy(loadingMore = false)
                 } else {
                     cur.copy(
                         results = (cur.results + page.hits).toImmutableList(),
-                        // A page that verified nothing means the cursor had no hits left to give.
-                        next = if (page.hits.isEmpty()) null else page.next,
+                        // `next == null` is the repository's own "index exhausted" signal and the
+                        // only sound one. An empty page with a cursor means the candidate scan
+                        // budget ran out — there may well be hits further down.
+                        next = page.next,
                         loadingMore = false,
                     )
                 }
             }
         }
     }
-    fun togglePackage(p: String) = local.update { it.copy(packages = if (p in it.packages) it.packages - p else it.packages + p) }
-    fun clearPackages() = local.update { it.copy(packages = emptySet()) }
+    fun togglePackage(p: String) = local.update { it.copy(packages = if (p in it.packages) it.packages - p else it.packages + p, generation = ++generation) }
+    fun clearPackages() = local.update { it.copy(packages = emptySet(), generation = ++generation) }
 
     private fun fromMs(range: SearchRange): Long? {
         val now = System.currentTimeMillis()
@@ -127,9 +132,12 @@ class SearchViewModel @Inject constructor(
         val page = runCatching { search.searchPage(s.query, s.packages, fromMs(s.range), null, limit = PAGE, cursor = null) }
             .getOrDefault(SearchPage(emptyList(), null))
         local.update {
+            // `s` is the snapshot this run was started from; anything newer owns the state now.
+            if (it.generation != s.generation) return@update it
             it.copy(
                 results = page.hits.toImmutableList(),
-                next = if (page.hits.isEmpty()) null else page.next,
+                next = page.next,
+                loadingMore = false,
                 searching = false,
                 searched = true,
             )

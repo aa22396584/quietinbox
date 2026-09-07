@@ -62,6 +62,8 @@
     <string name="inbox_empty_title">Nothing captured yet</string>
     <string name="inbox_empty_body">Copies of notifications from the sources you enable will appear here. Try a synthetic test notification to see the pipeline work.</string>
     <string name="inbox_empty_archived_title">No archived conversations</string>
+    <string name="inbox_empty_unviewed_title">Nothing unviewed</string>
+    <string name="inbox_empty_filtered_title">Nothing from these sources</string>
     <string name="inbox_send_test">Send test notification</string>
     <string name="inbox_grant_access">Grant notification access</string>
     <string name="inbox_banner_not_granted">Notification access is not granted, so nothing is being captured.</string>
@@ -234,7 +236,6 @@
     <string name="health_last_saved">last copy saved %1$s</string>
     <string name="health_last_saved_never">no copy saved since the listener started</string>
     <string name="health_gaps_caveat">A gap is a window QuietInbox knows it could not observe. It is not a count of what was missed: only what a source posts as a notification can be seen, and the missing count is unknown.</string>
-    <string name="health_saved">saved</string>
 
     <!-- Settings -->
     <string name="settings_title">Settings</string>

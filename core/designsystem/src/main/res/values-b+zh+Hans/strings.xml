@@ -60,6 +60,8 @@
     <string name="inbox_empty_title">还没有任何副本</string>
     <string name="inbox_empty_body">你启用的来源应用发出通知后，副本会出现在这里。先发一条合成测试通知，看看整条流水线如何运作。</string>
     <string name="inbox_empty_archived_title">没有已归档的对话</string>
+    <string name="inbox_empty_unviewed_title">没有未查看的对话</string>
+    <string name="inbox_empty_filtered_title">这些来源没有内容</string>
     <string name="inbox_send_test">发送测试通知</string>
     <string name="inbox_grant_access">授予通知使用权</string>
     <string name="inbox_banner_not_granted">尚未授予通知使用权，目前没有任何捕获。</string>
@@ -232,7 +234,6 @@
     <string name="health_last_saved">最近存下副本 %1$s</string>
     <string name="health_last_saved_never">自监听器启动以来没有存下任何副本</string>
     <string name="health_gaps_caveat">中断是指 QuietInbox 知道自己看不到的那段时间。它不是漏掉多少的数量：只有来源 App 推送成通知的内容才看得到，漏掉多少无从得知。</string>
-    <string name="health_saved">已存下</string>
 
     <!-- Settings -->
     <string name="settings_title">设置</string>

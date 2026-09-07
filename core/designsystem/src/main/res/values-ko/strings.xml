@@ -60,6 +60,8 @@
     <string name="inbox_empty_title">아직 캡처된 내용이 없습니다</string>
     <string name="inbox_empty_body">사용 설정한 소스의 알림 사본이 여기에 표시됩니다. 합성 테스트 알림을 보내 파이프라인이 동작하는 모습을 확인해 보세요.</string>
     <string name="inbox_empty_archived_title">보관처리된 대화가 없습니다</string>
+    <string name="inbox_empty_unviewed_title">확인하지 않은 것이 없습니다</string>
+    <string name="inbox_empty_filtered_title">이 소스에는 아무것도 없습니다</string>
     <string name="inbox_send_test">테스트 알림 보내기</string>
     <string name="inbox_grant_access">알림 액세스 허용</string>
     <string name="inbox_banner_not_granted">알림 액세스가 허용되지 않아 아무것도 캡처되지 않습니다.</string>
@@ -232,7 +234,6 @@
     <string name="health_last_saved">마지막으로 저장한 사본 %1$s</string>
     <string name="health_last_saved_never">리스너가 시작된 뒤로 저장된 사본이 없습니다</string>
     <string name="health_gaps_caveat">공백은 QuietInbox가 관찰할 수 없었다고 아는 구간입니다. 놓친 개수가 아닙니다. 알림으로 올라온 것만 볼 수 있고, 놓친 개수는 알 수 없습니다.</string>
-    <string name="health_saved">저장됨</string>
 
     <!-- Settings -->
     <string name="settings_title">설정</string>

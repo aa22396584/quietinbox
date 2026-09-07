@@ -92,4 +92,4 @@ Material 3 Expressive（`MaterialExpressiveTheme`、expressive motion scheme、�
 這兩個斷點刻意不同：預設的 pane directive 只在 expanded 給兩欄，所以 600–839dp 之間是「有 rail、
 但對話獨佔畫面」，此時對話頁保留返回鍵。每個品質狀態都會同時呈現文字 + 圖示（顏色絕不是唯一
 的訊號）。活動頁是共用同一個期間選擇器的五個分頁（概觀、排行、最佳時段、好聊度、安靜
-天數），每個分頁都由 `core:analytics` 的純函式計算，而且都標示為僅限已觀測的訊息。
+率），每個分頁都由 `core:analytics` 的純函式計算，而且都標示為僅限已觀測的訊息。

@@ -34,6 +34,11 @@ Compile/target baseline: compileSdk 37 (required by the AndroidX versions used),
   The capture health page shows the listener as connected while nothing arrives — which is why the
   page always states when it last accepted an event and when it last saved a copy, and why the
   diagnostics summary carries both.
+- Sources are configured per package, not per profile: enabling LINE captures both the personal
+  and the work LINE. Per-profile source control and a non-null account key in the conversation
+  identity are planned schema work (see `docs/SCOPE.md`, "Not done").
+- Android Q and older on low-RAM ("Go") devices do not bind notification listeners at all
+  (`ActivityManager.isLowRamDevice`); QuietInbox cannot capture there.
 
 ## Hidden previews: Android's own setting and the app's (QI-ID-009)
 
@@ -48,11 +53,6 @@ Distinguishing them would need `RECEIVE_SENSITIVE_NOTIFICATIONS`, a restricted p
 deliberately does not request: it would widen what QuietInbox can read for a labelling nicety. So the
 label stays honest about its own uncertainty, and the advice the app gives names both places to look
 rather than claiming to know which one applies.
-- Sources are configured per package, not per profile: enabling LINE captures both the personal
-  and the work LINE. Per-profile source control and a non-null account key in the conversation
-  identity are planned schema work (see `docs/SCOPE.md`, "Not done").
-- Android Q and older on low-RAM ("Go") devices do not bind notification listeners at all
-  (`ActivityManager.isLowRamDevice`); QuietInbox cannot capture there.
 
 ## Submitting an anonymised fixture (QI-PARSER-017)
 

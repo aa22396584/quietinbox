@@ -91,6 +91,10 @@ fun MainNavigation() {
     val twoPane = windowSizeClass.isWidthAtLeastBreakpoint(WindowSizeClass.WIDTH_DP_EXPANDED_LOWER_BOUND)
     val current = backStack.lastOrNull()
     val currentTop = backStack.lastOrNull { key -> topLevel.any { it.route == key } } ?: InboxRoute
+    // Two panes are not enough on their own: only the inbox is a list pane, so a conversation
+    // opened from search or activity fills the window even at expanded width and needs its back
+    // arrow. Hiding it whenever the window was wide was the same defect FT-02 fixed, one route over.
+    val besideList = twoPane && backStack.getOrNull(backStack.lastIndex - 1) is InboxRoute
     val showChrome = current !is ConversationRoute || twoPane
 
     fun goTop(route: NavKey) {
@@ -136,7 +140,7 @@ fun MainNavigation() {
                         conversationId = key.id,
                         messageId = key.messageId,
                         onBack = { backStack.removeLastOrNull() },
-                        showBackButton = !twoPane,
+                        showBackButton = !besideList,
                     )
                 }
                 entry<SearchRoute> {

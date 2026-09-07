@@ -99,8 +99,9 @@ class RetentionService @Inject constructor(
         // by a reset or restore, left its row PENDING for ever and the bubble showed an hourglass
         // that never resolved (QI-MEDIA-015). The state written is FAILED, not URI_EXPIRED: the
         // copy is known not to have finished, but nothing here observed why.
-        val stalePending = db.messageDao().pendingMedia(500).filter { it.observedAtEpochMs < now - PENDING_MEDIA_GRACE_MS }
-        for (row in stalePending) db.messageDao().setMedia(row.id, MediaState.FAILED.name, null)
+        val stale = db.messageDao().pendingMedia(500).filter { it.observedAtEpochMs < now - PENDING_MEDIA_GRACE_MS }
+        var stalePending = 0
+        for (row in stale) stalePending += db.messageDao().settlePendingMedia(row.id, MediaState.FAILED.name)
 
         val journal = db.journalDao().deleteExpired(now)
         val suppression = db.suppressionDao().deleteExpired(now)
@@ -113,7 +114,7 @@ class RetentionService @Inject constructor(
         db.checkpointDao().deleteStale(now - 14L * DAY_MS)
         val emptyConversations = db.conversationDao().emptyOlderThan(now - 7L * DAY_MS)
         for (id in emptyConversations) db.conversationDao().delete(id)
-        return RetentionReport(deletedMessages, orphans.size, journal, suppression, diagnostics, emptyConversations.size, stray.size, stalePending.size)
+        return RetentionReport(deletedMessages, orphans.size, journal, suppression, diagnostics, emptyConversations.size, stray.size, stalePending)
     }
 
     companion object {

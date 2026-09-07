@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  擴充版「活動統計」畫面用字（分頁、期間、熱區圖、時段、好聊度、安靜天數、口頭禪）。
+  擴充版「活動統計」畫面用字（分頁、期間、熱區圖、時段、好聊度、安靜率、口頭禪）。
   所有標籤只描述「觀測到的訊息」：來源 App 放進通知、QuietInbox 才複製到的內容。
   不得宣稱回覆、已讀或真實訊息總量。鍵名須與 values/strings_analytics.xml 完全一致。
 -->
@@ -9,7 +9,7 @@
     <string name="analytics_tab_rankings">排行榜</string>
     <string name="analytics_tab_best_time">最佳時段</string>
     <string name="analytics_tab_chattiness">好聊度</string>
-    <string name="analytics_tab_quiet">安靜天數</string>
+    <string name="analytics_tab_quiet">安靜率</string>
 
     <string name="analytics_sub_overview">僅計算所選期間內觀測到的訊息。</string>
     <string name="analytics_sub_rankings">僅計算觀測到的訊息，不排「誰回覆了誰」。</string>

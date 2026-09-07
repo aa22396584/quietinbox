@@ -162,13 +162,24 @@ fun InboxScreen(
             }
             if (state.conversations.isEmpty()) {
                 item(key = "empty") {
+                    // "Nothing captured yet" is only true when nothing is filtered. A vault full of
+                    // read conversations must not be told it has never captured anything, and the
+                    // send-a-test prompt makes no sense when a filter is what emptied the list.
+                    val filtered = state.filter.archived || state.filter.unviewed || state.filter.packages.isNotEmpty()
                     EmptyState(
-                        title = stringResource(if (state.filter.archived) R.string.inbox_empty_archived_title else R.string.inbox_empty_title),
-                        body = stringResource(R.string.inbox_empty_body),
+                        title = stringResource(
+                            when {
+                                state.filter.archived -> R.string.inbox_empty_archived_title
+                                state.filter.unviewed -> R.string.inbox_empty_unviewed_title
+                                state.filter.packages.isNotEmpty() -> R.string.inbox_empty_filtered_title
+                                else -> R.string.inbox_empty_title
+                            },
+                        ),
+                        body = if (filtered) "" else stringResource(R.string.inbox_empty_body),
                         icon = Icons.Outlined.Inbox,
                         actions = {
                             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                if (!state.listenerGranted) {
+                                if (!state.listenerGranted && !filtered) {
                                     if (settingsMissing) {
                                         Text(stringResource(R.string.listener_settings_manual), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                                     }
@@ -178,10 +189,12 @@ fun InboxScreen(
                                         Text(stringResource(R.string.inbox_grant_access))
                                     }
                                 }
-                                FilledTonalButton(onClick = sendTest, enabled = state.listenerGranted) {
-                                    Icon(Icons.Outlined.Send, contentDescription = null)
-                                    Spacer(Modifier.width(8.dp))
-                                    Text(stringResource(R.string.inbox_send_test))
+                                if (!filtered) {
+                                    FilledTonalButton(onClick = sendTest, enabled = state.listenerGranted) {
+                                        Icon(Icons.Outlined.Send, contentDescription = null)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(stringResource(R.string.inbox_send_test))
+                                    }
                                 }
                             }
                         },

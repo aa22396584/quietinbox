@@ -3,6 +3,11 @@
 # `gradle/verification-metadata.xml` from a cold cache, which every Gradle dependency change
 # requires (docs/RELEASE.md), so a security PR for a Gradle artifact would only ever arrive red.
 # The alert is the part worth having: it says what to fix, and the fix stays a human's job.
+#
+# One coverage limit worth stating rather than discovering: GitHub raises Actions alerts only for
+# semantic-version references, never for SHA references. Every action in this repo is SHA-pinned, so
+# no alert here will ever fire for one of them. The pins stay — they are the stronger property — and
+# upstream advisories are followed by hand.
 version: 2
 updates:
   # Actions only: every Gradle dependency change needs the verification metadata regenerated from

@@ -30,6 +30,11 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.meta.outputs.version }}
+      # The commit the binaries were actually built from. `workflow_dispatch` carries the branch it
+      # was started from in `github.ref` and the tag in `inputs.tag` — two different fields — so a
+      # downstream job checking out `github.ref` would pair a tag's binaries with main's release
+      # texts. Every downstream checkout uses this instead.
+      sha: ${{ steps.meta.outputs.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -39,11 +44,12 @@ jobs:
           distribution: temurin
           java-version: 17
       - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
-        # v6 moved caching into `gradle-actions-caching`, a proprietary component that is not
-        # covered by the MIT licence and whose Terms of Use you accept by upgrading. `basic` is the
-        # MIT-licensed provider (built on @actions/cache) added in v6.1.0; it keys the cache on the
-        # build files and clears it when they change, which is what this repo needs. Stated at every
-        # call site rather than inherited, because the default is `enhanced`.
+        # The v6 package contains `gradle-actions-caching`, a proprietary component not covered by
+        # the MIT licence; `basic` does not load or execute it. `basic` (v6.1.0, built on
+        # @actions/cache) derives one exact key from a hash of a fixed set of Gradle files — root
+        # `gradle.properties` is not among them — and uses no fallback restore keys, so a changed
+        # key is a miss against a new entry, not a deletion of the old one; GitHub's own eviction
+        # retires those. Stated at every call site rather than inherited: the default is `enhanced`.
         with:
           cache-provider: basic
       - name: Restore upload keystore
@@ -66,6 +72,7 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"; [ -n "${{ inputs.tag }}" ] && VERSION="${{ inputs.tag }}" && VERSION="${VERSION#v}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           mkdir -p dist
           cp app/build/outputs/apk/release/app-release.apk "dist/quietinbox-$VERSION.apk"
           cp app/build/outputs/bundle/release/app-release.aab "dist/quietinbox-$VERSION.aab"
@@ -91,7 +98,10 @@ jobs:
       contents: write
     if: startsWith(github.ref, 'refs/tags/v') || inputs.tag != ''
     steps:
+      # The same commit the binaries came from: the release notes are read out of this tree.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.build.outputs.sha }}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-${{ needs.build.outputs.version }}
@@ -118,8 +128,10 @@ jobs:
         with:
           name: release-${{ needs.build.outputs.version }}
           path: dist
+      # Same commit as the bundle: `fastlane/whatsnew` is read from here.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.build.outputs.sha }}
           path: src
       - name: Upload AAB
         uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1.1.5

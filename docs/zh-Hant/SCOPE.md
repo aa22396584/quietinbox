@@ -46,7 +46,7 @@
 - **到期與 retention 掃除之間的會話清單計數**（審計 #7）：到期副本在所有讀取處都於讀取時隱藏，但會話列的 `messageCount` 只在刪除、掃除或還原時重算，所以一列可能比頁面總數多 1，直到下一次掃除（最多 12 小時）。
 - **還原會重設到期時間**（審計 #7 / #16）：備份永遠不含製作當時已到期的副本；還原較舊的備份會刻意給它的副本一段新的保留期（整體審查要求舊備份不要在下一次執行就被掃掉）。因此還原是刻意的「把它帶回來」，不會是意外。
 - **刪除抑制以 fingerprint 為鍵**（審計 #9，第 11 輪）：多則同 fingerprint 的已刪訊息共用一個 token，所以同一 post 的重播會整體被抑制（正確），但同一 post 內真正新的同 fingerprint 訊息也會被抑制；每個 id 一個 token 需要 schema v4。
-- **尚未進 CI 的治理項目**（審計 #12）：detekt / ktlint、CodeQL、SBOM、覆蓋率門檻、可重現建置與 commit 簽章。每一項都會增加依賴或維護者端的金鑰；已追蹤，未開始。已經有的部分：每一個 action 都以 SHA 釘選、每一個 Gradle artifact 都做 checksum 驗證、Dependabot alerts 已開啟——自動 security-update PR 則刻意關閉，因為機器人無法重生 Gradle 升級所需的驗證中繼資料。
+- **尚未進 CI 的治理項目**（審計 #12）：detekt / ktlint、CodeQL、SBOM、覆蓋率門檻、可重現建置與 commit 簽章。每一項都會增加依賴或維護者端的金鑰；已追蹤，未開始。已經有的部分：每一個 action 都以 SHA 釘選；Gradle 依賴驗證已開啟，其中 `com.android.tools.build:aapt2` 是明示的 `trusted-artifacts` 例外，因為每個主機作業系統解析到的 jar 不同（見 `docs/RELEASE.md`）；Dependabot alerts 已開啟，自動 security-update PR 則刻意關閉，因為機器人無法重生 Gradle 升級所需的驗證中繼資料。要注意 alerts **涵蓋不到**什麼：GitHub 只對語意化版本的 Actions 參照發出通報，對 SHA 參照不會，而這裡每一個 action 都是 SHA 釘選——所以 pin 維持不變，上游的安全公告只能靠人追。
 - **parser 變更的 golden corpus diff 報告**（計畫 §14）：fixture 是 Kotest 案例，尚無獨立的 corpus 工具。
 - **帶去識別化預覽的診斷包匯出**（計畫 §14）：目前只有不含本文的剪貼簿摘要。
 - **名稱／商標清查**：名稱尚未清查。套件 id 已無法再改——`dev.quietinbox.app` 已在 Google Play 上架（Gradle namespace 為 `dev.quietinbox`），已發布的 applicationId 不能變更。

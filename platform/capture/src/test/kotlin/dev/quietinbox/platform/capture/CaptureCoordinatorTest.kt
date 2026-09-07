@@ -990,23 +990,29 @@ class CaptureCoordinatorTest : FunSpec({
         h.journalAnswers { throw locked }
         val openStarted = CompletableDeferred<Unit>()
         val releaseOpen = CompletableDeferred<Unit>()
+        val openReturned = java.util.concurrent.atomic.AtomicBoolean(false)
         coEvery { h.health.openGap(any(), GapReason.UNKNOWN, any(), any()) } coAnswers {
             openStarted.complete(Unit)
             releaseOpen.await()
+            openReturned.set(true)
             throw locked
+        }
+        coEvery { h.health.closeOpenGaps(any(), GapReason.UNKNOWN) } coAnswers {
+            // Without the pipeline lock this runs while openGap is still parked and the test
+            // fails here (round 41, Codex I1). With the lock it cannot run until we release.
+            check(openReturned.get()) { "Ready settled the lock-out while its gap write was still in flight" }
         }
         val coordinator = h.coordinator()
         coordinator.onConnected(h.service)
 
         coordinator.offerCaptured(captured("evt-locked"))
         withTimeout(5_000) { openStarted.await() }
-        // The writer is parked inside openGap, flag set, since already assigned. Ready used to
-        // clear the flag here with since still null (round 40, Codex I1).
         h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
         releaseOpen.complete(Unit)
 
         coVerify(timeout = 5_000, exactly = 1) { h.health.recordGap(any(), any(), GapReason.UNKNOWN, GapPrecision.BOUNDED, any()) }
         coVerify(timeout = 5_000, exactly = 1) { h.health.closeOpenGaps(any(), GapReason.UNKNOWN) }
+        coordinator.status.value.vaultLocked shouldBe false
     }
 
     test("a cold-start loss whose settle failed is kept and written on the next policy load") {

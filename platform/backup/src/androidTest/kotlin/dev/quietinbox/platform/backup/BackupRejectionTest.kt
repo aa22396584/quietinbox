@@ -112,7 +112,9 @@ class BackupRejectionTest {
             sql.query("SELECT * FROM $name ORDER BY rowid").use { c ->
                 val cols = c.columnCount
                 while (c.moveToNext()) {
-                    rows += (0 until cols).joinToString("|") { i -> if (c.isNull(i)) "∅" else c.getString(i) ?: "∅" }
+                    rows += (0 until cols).joinToString("\u001f") { i ->
+                        if (c.isNull(i)) "N" else "S${c.getString(i).length}:${c.getString(i)}"
+                    }
                 }
             }
             return rows
@@ -125,6 +127,7 @@ class BackupRejectionTest {
             "revision" to table("message_revision"),
             "media_blob" to table("media_blob"),
             "search_token" to table("search_token"),
+            "diagnostic" to table("local_diagnostic_event"),
             "files" to files,
         )
     }
@@ -182,6 +185,21 @@ class BackupRejectionTest {
     fun aFileThatIsNotABackupIsRefusedAsABadHeaderAndChangesNothing() = runBlocking {
         val foreign = damaged("foreign.qibk") { raf -> raf.seek(0); raf.write("PK\u0003\u0004".toByteArray()) }
         refused(foreign, recoveryKey, BackupResult.Reason.BAD_HEADER)
+        Unit
+    }
+
+    @Test
+    fun aBodyRewriteThatDoesNotChangeRowCountsIsVisibleToTheFingerprint() = runBlocking {
+        service.import(Uri.fromFile(backup), recoveryKey).shouldBeInstanceOf<BackupResult.Ok>()
+        ready()
+        val before = vaultFingerprint()
+        holder.db().openHelper.writableDatabase.execSQL("UPDATE message SET body='mutated'")
+        vaultFingerprint() shouldNotBe before
+        holder.db().openHelper.writableDatabase.execSQL(
+            "INSERT INTO local_diagnostic_event (code, detail, packageName, atEpochMs) VALUES ('x','y',null,1)",
+        )
+        vaultFingerprint() shouldNotBe before
+        Unit
     }
 
     @Test

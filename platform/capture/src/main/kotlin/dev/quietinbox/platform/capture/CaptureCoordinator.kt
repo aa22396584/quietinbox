@@ -287,11 +287,13 @@ class CaptureCoordinator @Inject constructor(
         })
         scope.launch {
             vault.state.collectLatest { s ->
-                _status.update { it.copy(vaultLocked = s is VaultState.Locked) }
-                if (s is VaultState.Ready) {
-                    // Under the pipeline lock so a Ready cannot settle between `vaultGapOpen = true`
-                    // and `vaultGapSince = …` (round 40, Codex I1): that window closed the flag
-                    // with since still null and the bounded gap was never written.
+                if (s is VaultState.Locked) {
+                    _status.update { it.copy(vaultLocked = true) }
+                } else if (s is VaultState.Ready) {
+                    // Status and gap settle share the pipeline lock with the lock-out writer
+                    // (round 40/41, Codex I1): publishing unlocked first left statusLocked=true
+                    // after a Ready that waited on openGap, and settling without the lock
+                    // dropped a bound that had not been assigned yet.
                     pipelineMutex.withLock {
                         if (vaultGapOpen) {
                             val now = System.currentTimeMillis()
@@ -310,6 +312,7 @@ class CaptureCoordinator @Inject constructor(
                                 vaultGapSince = null
                             }
                         }
+                        _status.update { it.copy(vaultLocked = false) }
                     }
                     replayJournal()
                 }

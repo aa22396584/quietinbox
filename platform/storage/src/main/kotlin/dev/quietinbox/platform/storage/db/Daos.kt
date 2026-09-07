@@ -413,8 +413,9 @@ interface MessageDao {
     @Query("UPDATE message SET truncationFlags = :truncationFlags WHERE id = :id AND truncationFlags IS NULL")
     suspend fun markTruncated(id: Long, truncationFlags: String)
 
+    /** Returns the rows updated: 0 when the message is gone, which a linking write must notice. */
     @Query("UPDATE message SET mediaState = :state, mediaBlobId = :blobId WHERE id = :id")
-    suspend fun setMedia(id: Long, state: String, blobId: Long?)
+    suspend fun setMedia(id: Long, state: String, blobId: Long?): Int
 
     /**
      * Settles a row only while it is still PENDING. The retention sweep and a media copy both run

@@ -164,6 +164,33 @@ were wrong in a way that changed the fix.
   label with it — and the bubble read as complete again, depending on the order the user restored
   in. The merge now adds the label the existing row lacks, the same single-valued write the live
   path makes, and never takes one away.
+- **A restore cancelled on its way out could delete the media it had just restored.** Every blob is
+  written to disk before the transaction, and the list of files to remove on failure was trimmed
+  to the unreferenced ones by a flag set *after* `withTransaction` returned. A cancellation landing
+  between the commit and that return is delivered as an exception from a call whose rows are
+  already durable, so the flag was still false and every file went, linked ones included. The list
+  is now trimmed inside the transaction, as the media copier has done since round 10; a commit
+  that fails after that line leaves the linked files for the retention sweep, a leak, never a loss
+  (audit-2 ATOM-4; the working rule in `CLAUDE.md` had said this since round 10, the code had not).
+- **A restore that lost media said "Done".** A blob that could not be decoded, was over the size
+  limit or could not be encrypted left its message marked `FAILED` and the result unqualified. The
+  count is now on the result and on the screen. And a vault without room for the file's media used
+  to find out half-way through: the free space is checked before anything is written, and a
+  refused restore changes nothing (audit-2 ATOM-3; the check is coarse — decoded media bytes plus a
+  32 MB floor for the rows).
+- **A half-copied backup file was told its key was wrong.** Tink refuses the cut segment before the
+  reader can miss the end record, so a truncated file and a wrong key share one reason; the label
+  now says "modified or incomplete" (audit-2 ATOM-2). A file that ends inside its own header used
+  to get the same answer, because the zero-filled tail still passed the magic and version checks;
+  it is now refused as incomplete. Wrong key, a flipped ciphertext byte, a file cut in the body,
+  one cut inside the header and one that is not a backup at all are each proved to leave the
+  vault byte for byte as it was (audit-2 ATOM-1, ATOM-2).
+- **A media copy that finished after its message was deleted left an orphan blob and its file.**
+  `media_blob` has no foreign key to `message`, and the linking write did not look at how many
+  rows it touched, so a delete or an expiry landing between the copier's read of the row and its
+  transaction committed a blob nothing pointed at, to be found by whichever sweep ran next. The
+  link is now checked inside the transaction: zero rows undoes the insert and the file goes with it
+  (audit-2 MED-7). The media module joins the instrumented lane for it.
 - **"Stop capturing this app" could do nothing and say nothing.** Switching a source off and
   removing it first settle the losses its pending rows carry, inside the policy transaction; a
   settlement that fails rolls the whole change back — correctly, since the discard that follows

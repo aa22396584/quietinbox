@@ -293,8 +293,9 @@
     <string name="backup_import_key_prompt">バックアップを作成した端末の復旧キーを入力</string>
     <string name="backup_result_ok">完了: 会話 %1$d 件、メッセージ %2$d 件、メディア %3$d 件。</string>
     <string name="backup_result_partial_media">%1$d 件のメディアを読み取れなかったため、このバックアップには含まれていません。</string>
+    <string name="restore_result_partial_media">このバックアップ内の %1$d 件のメディアを復元できませんでした。該当メッセージには印が付いています。</string>
     <string name="backup_failed_no_key">利用できる復旧キーがありません。</string>
-    <string name="backup_failed_key">復旧キーが間違っているか、ファイルが変更されています。</string>
+    <string name="backup_failed_key">復旧キーが間違っているか、ファイルが変更されているか不完全です。</string>
     <string name="backup_failed_truncated">バックアップファイルが不完全です。</string>
     <string name="backup_failed_io">ファイルを読み書きできませんでした。バックアップは書き出されていません。最後のコピー自体が失敗した場合を除き、既存の出力先ファイルは変更されていません。</string>
     <string name="backup_failed_version">サポートされていないバックアップのバージョンです。</string>
@@ -302,6 +303,7 @@
     <string name="backup_failed_too_large">バックアップがサイズ上限を超えています。</string>
     <string name="backup_failed_vault">保管庫がロックされています。</string>
     <string name="backup_failed_maintenance">リセットまたは復元の実行中です。完了してからもう一度お試しください。</string>
+    <string name="backup_failed_low_space">空き容量が不足しているため、このバックアップを復元できません。何も変更されていません。</string>
     <string name="hours_short">%1$d 時間</string>
     <string name="backup_failed_corrupt">バックアップファイルが破損しています（レコードを読み取れませんでした）。</string>
     <string name="backup_file_name">quietinbox-backup-%1$s.qibk</string>

@@ -39,11 +39,17 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 sealed interface BackupResult {
-    /** [skippedMedia] > 0 means the file is a partial backup: media that could not be read or was too large is not in it. */
-    data class Ok(val counts: Counts, val skippedMedia: Int = 0) : BackupResult
+    /**
+     * [skippedMedia] > 0 means the file is a partial backup: media that could not be read or was
+     * too large is not in it (export). [mediaNotRestored] > 0 means a restore inserted messages
+     * whose media was in the file but could not be written to the vault (a bad or oversized blob,
+     * a failed encryption); those rows carry `FAILED`, and the count is what the "Done" line
+     * qualifies itself with (audit-2 ATOM-3).
+     */
+    data class Ok(val counts: Counts, val skippedMedia: Int = 0, val mediaNotRestored: Int = 0) : BackupResult
     data class Failed(val reason: Reason, val detail: String? = null) : BackupResult
 
-    enum class Reason { NO_RECOVERY_KEY, KEY_UNAVAILABLE, IO, BAD_HEADER, WRONG_KEY_OR_TAMPERED, CORRUPT, TRUNCATED, COUNT_MISMATCH, TOO_LARGE, UNSUPPORTED_VERSION, VAULT_UNAVAILABLE, MAINTENANCE }
+    enum class Reason { NO_RECOVERY_KEY, KEY_UNAVAILABLE, IO, BAD_HEADER, WRONG_KEY_OR_TAMPERED, CORRUPT, TRUNCATED, COUNT_MISMATCH, TOO_LARGE, UNSUPPORTED_VERSION, VAULT_UNAVAILABLE, MAINTENANCE, LOW_SPACE }
 }
 
 /**
@@ -246,6 +252,10 @@ class BackupService @Inject constructor(
                     if (n < 0) break
                     read += n
                 }
+                // A file that ends inside its own header is a half-copied file, not a foreign one:
+                // the zero-filled tail used to pass the magic and version checks and die in Tink
+                // as "wrong key or modified" (audit-2 ATOM-2).
+                if (read < header.size) return@withContext BackupResult.Failed(BackupResult.Reason.TRUNCATED, "header $read/${header.size}")
                 val salt = BackupCrypto.parseHeader(header) ?: return@withContext BackupResult.Failed(BackupResult.Reason.BAD_HEADER)
                 val saead = BackupCrypto.streamingAead(key, salt)
                 val dec = saead.newDecryptingStream(raw, header)
@@ -265,8 +275,23 @@ class BackupService @Inject constructor(
         } finally {
             key.fill(0)
         }
+        // Every blob is written to disk before the transaction, and a vault that runs out of space
+        // half-way through used to end as messages labelled FAILED under an unqualified "Done".
+        // The check is coarse (decoded media bytes plus a floor for the rows), and it refuses
+        // before anything is written, so a refused restore changes nothing (audit-2 ATOM-3).
+        val mediaBytes = staged.media.sumOf { it.dataBase64.length.toLong() * 3 / 4 }
+        val free = freeBytes()
+        if (free < mediaBytes + LOW_SPACE_FLOOR_BYTES) {
+            return@withContext BackupResult.Failed(BackupResult.Reason.LOW_SPACE, "need ${mediaBytes + LOW_SPACE_FLOOR_BYTES}, free $free")
+        }
         apply(db, staged)
     }
+
+    /** Bytes the restore wants free beyond the decoded media: room for the rows and the WAL. */
+    internal val LOW_SPACE_FLOOR_BYTES: Long = 32L * 1024 * 1024
+
+    /** Free bytes on the volume that holds the vault and its media; a test seam, production never sets it. */
+    internal var freeBytes: () -> Long = { android.os.StatFs(mediaDir.dir.parentFile?.path ?: mediaDir.dir.path).availableBytes }
 
     private val stager = BackupStager(json)
 
@@ -278,9 +303,10 @@ class BackupService @Inject constructor(
      * time), so legitimate duplicates inside the backup keep their multiplicity.
      */
     private suspend fun apply(db: QuietInboxDatabase, s: Staged): BackupResult {
+        // Every blob written to disk and not yet owned by a committed row. Trimmed to the unused
+        // ones *inside* the transaction (see below), so the same list is right on every exit.
         val writtenFiles = ArrayList<String>()
         val usedFiles = HashSet<String>() // blobs referenced by a message that was actually inserted
-        var committed = false
         // Blobs are decoded and encrypted to disk BEFORE the write transaction so the SQLite write
         // lock is never held during Tink work and file I/O (live capture would otherwise stall).
         class Prepared(val fileName: String, val byteCount: Long)
@@ -335,6 +361,7 @@ class BackupService @Inject constructor(
                     preExisting[cid] = rows
                 }
                 var inserted = 0
+                var mediaNotRestored = 0
                 var skippedOrphans = 0
                 for (m in s.messages) {
                     val cid = convMap[m.conversationId]
@@ -362,7 +389,11 @@ class BackupService @Inject constructor(
                     var mediaState = m.mediaState
                     val media = mediaByOldMessage[m.id]
                     val blob = media?.let { prepared[m.id] }
-                    if (media != null && blob == null) mediaState = MediaState.FAILED.name
+                    if (media != null && blob == null) {
+                        // In the file, not in the vault: the row says so, and so does the result.
+                        mediaState = MediaState.FAILED.name
+                        mediaNotRestored++
+                    }
                     if (media == null && m.mediaState == MediaState.LOCAL_COPY.name) mediaState = MediaState.FAILED.name
                     if (blob != null) mediaState = MediaState.PENDING.name
                     val newId = db.messageDao().insert(
@@ -399,18 +430,37 @@ class BackupService @Inject constructor(
                 if (skippedOrphans > 0) {
                     db.diagnosticsDao().insert(dev.quietinbox.platform.storage.db.DiagnosticEventEntity(code = "RESTORE_ORPHAN_MESSAGES", detail = skippedOrphans.toString(), packageName = null, atEpochMs = System.currentTimeMillis()))
                 }
-                Counts(s.sources.size, convMap.size, inserted, restoredRevisions, usedFiles.size)
+                restoreProbe(RestorePoint.IN_TRANSACTION)
+                // Trimmed inside the transaction, as MediaCopier.store clears its list: a
+                // cancellation landing between the commit and the return of withTransaction is
+                // delivered as an exception from a call whose rows are already durable, and a flag
+                // set after the call cannot tell that exit from a rollback. Until this line the list
+                // is every blob (a rollback owns none of them); from here it is only the blobs no
+                // inserted message references (duplicates, orphans), which is all either exit may
+                // remove. A commit that fails after this line leaves the linked blobs as orphan
+                // files for the retention sweep, a leak, never a loss (audit-2 ATOM-4).
+                writtenFiles.removeAll(usedFiles)
+                Counts(s.sources.size, convMap.size, inserted, restoredRevisions, usedFiles.size) to mediaNotRestored
             }
-            committed = true
+            restoreProbe(RestorePoint.AFTER_COMMIT)
             // Blobs prepared for messages that were skipped (duplicates, orphans) have no row: remove them.
-            for (f in writtenFiles) if (f !in usedFiles) mediaDir.delete(f)
-            BackupResult.Ok(counts)
+            for (f in writtenFiles) mediaDir.delete(f)
+            BackupResult.Ok(counts.first, mediaNotRestored = counts.second)
         } catch (e: Exception) {
-            // Before the commit every blob is an orphan; after it (a cancellation landing on the way
-            // out) only the ones no inserted message references may go. Runs before the rethrow.
-            for (f in writtenFiles) if (!committed || f !in usedFiles) mediaDir.delete(f)
+            // Before the commit every blob is an orphan; after it only the unreferenced ones are
+            // still on the list. Runs before the rethrow.
+            for (f in writtenFiles) mediaDir.delete(f)
             if (e is CancellationException) throw e
             BackupResult.Failed(BackupResult.Reason.IO, "apply:${e::class.java.simpleName}")
         }
     }
+
+    /** Where a restore can be interrupted by a test; production never sets [restoreProbe]. */
+    internal enum class RestorePoint { IN_TRANSACTION, AFTER_COMMIT }
+
+    /**
+     * Test seam: called at each [RestorePoint] of a restore. A cancellation thrown from it lands
+     * exactly where a real one would, so the instrumented tests can prove what each exit keeps.
+     */
+    internal var restoreProbe: suspend (RestorePoint) -> Unit = {}
 }

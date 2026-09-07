@@ -135,6 +135,9 @@ class MediaCopier @Inject constructor(
      * Writes the blob (and thumbnail), then links row and message in one transaction. Any failure
      * after a file was written removes that file: no orphan survives a cancelled or failed copy.
      */
+    /** Test seam: runs after the files are written and before the linking transaction; production never sets it. */
+    internal var beforeLink: suspend (messageId: Long) -> Unit = {}
+
     private suspend fun store(messageId: Long, bytes: ByteArray, mimeType: String?): MediaState {
         // The vault quota is checked here, where both paths meet: it used to sit in copyUri only,
         // so notification bitmaps ignored the 512 MB cap entirely (QI-MEDIA-016). A full store is
@@ -165,7 +168,8 @@ class MediaCopier @Inject constructor(
                 }
             }
             val db = holder.db()
-            db.withTransaction {
+            beforeLink(messageId)
+            val linked = db.withTransaction {
                 val id = db.mediaDao().insert(
                     MediaBlobEntity(
                         messageId = messageId,
@@ -180,12 +184,21 @@ class MediaCopier @Inject constructor(
                         createdAtEpochMs = System.currentTimeMillis(),
                     ),
                 )
-                db.messageDao().setMedia(messageId, MediaState.LOCAL_COPY.name, id)
+                // The message can leave between copyPending's read of its row and this write (a
+                // delete, an expiry sweep), and media_blob has no foreign key to it: the blob row
+                // used to outlive the message as an orphan, file and all, until the next sweep
+                // happened to find it. Linking zero rows undoes the insert, and the file goes with
+                // it below, because the list is cleared only on a link (audit-2 MED-7).
+                if (db.messageDao().setMedia(messageId, MediaState.LOCAL_COPY.name, id) != 1) {
+                    db.mediaDao().delete(listOf(id))
+                    return@withTransaction false
+                }
                 // Cleared inside the transaction: a cancellation landing between commit and return
                 // must not delete files the committed rows now point at (round-10 finding).
                 written.clear()
+                true
             }
-            return MediaState.LOCAL_COPY
+            return if (linked) MediaState.LOCAL_COPY else MediaState.FAILED
         } finally {
             for (f in written) dir.delete(f)
         }

@@ -16,6 +16,7 @@ dependencies {
 
     testImplementation(libs.kotest.runner.junit5)
     testImplementation(libs.mockk)
+    androidTestImplementation(project(":core:testing"))
 }
 
 // Kotest specs run on the JUnit Platform, as in the other platform modules.

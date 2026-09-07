@@ -296,8 +296,9 @@
     <string name="backup_import_key_prompt">Enter the recovery key of the device that made the backup</string>
     <string name="backup_result_ok">Done: %1$d conversations, %2$d messages, %3$d media items.</string>
     <string name="backup_result_partial_media">%1$d media items could not be read and are not in this backup.</string>
+    <string name="restore_result_partial_media">%1$d media items in this backup could not be restored; their messages are marked.</string>
     <string name="backup_failed_no_key">No recovery key available.</string>
-    <string name="backup_failed_key">Wrong recovery key, or the file was modified.</string>
+    <string name="backup_failed_key">Wrong recovery key, or the file was modified or is incomplete.</string>
     <string name="backup_failed_truncated">The backup file is incomplete.</string>
     <string name="backup_failed_io">Could not read or write the file. The backup was not written; an existing target file was left unchanged unless the final copy itself failed.</string>
     <string name="backup_failed_version">Unsupported backup version.</string>
@@ -305,6 +306,7 @@
     <string name="backup_failed_too_large">The backup exceeds size limits.</string>
     <string name="backup_failed_vault">The vault is locked.</string>
     <string name="backup_failed_maintenance">A reset or restore is in progress; try again when it has finished.</string>
+    <string name="backup_failed_low_space">Not enough free space to restore this backup. Nothing was changed.</string>
     <string name="hours_short">%1$d h</string>
     <string name="backup_failed_corrupt">The backup file is corrupt (a record could not be read).</string>
     <string name="backup_file_name">quietinbox-backup-%1$s.qibk</string>

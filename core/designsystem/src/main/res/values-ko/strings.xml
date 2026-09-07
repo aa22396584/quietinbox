@@ -293,8 +293,9 @@
     <string name="backup_import_key_prompt">백업을 만든 기기의 복구 키를 입력하세요</string>
     <string name="backup_result_ok">완료: 대화 %1$d개, 메시지 %2$d개, 미디어 %3$d개.</string>
     <string name="backup_result_partial_media">미디어 %1$d개를 읽을 수 없어 이 백업에 포함되지 않았습니다.</string>
+    <string name="restore_result_partial_media">이 백업의 미디어 %1$d개를 복원할 수 없습니다. 해당 메시지에 표시되어 있습니다.</string>
     <string name="backup_failed_no_key">사용 가능한 복구 키가 없습니다.</string>
-    <string name="backup_failed_key">복구 키가 잘못되었거나 파일이 수정되었습니다.</string>
+    <string name="backup_failed_key">복구 키가 잘못되었거나 파일이 수정되었거나 불완전합니다.</string>
     <string name="backup_failed_truncated">백업 파일이 불완전합니다.</string>
     <string name="backup_failed_io">파일을 읽거나 쓸 수 없습니다. 백업은 기록되지 않았으며, 마지막 복사 자체가 실패한 경우가 아니면 기존 대상 파일은 변경되지 않았습니다.</string>
     <string name="backup_failed_version">지원되지 않는 백업 버전입니다.</string>
@@ -302,6 +303,7 @@
     <string name="backup_failed_too_large">백업이 크기 제한을 초과합니다.</string>
     <string name="backup_failed_vault">보관소가 잠겨 있습니다.</string>
     <string name="backup_failed_maintenance">재설정 또는 복원이 진행 중입니다. 완료된 후 다시 시도하세요.</string>
+    <string name="backup_failed_low_space">여유 공간이 부족하여 이 백업을 복원할 수 없습니다. 아무것도 변경되지 않았습니다.</string>
     <string name="hours_short">%1$d시간</string>
     <string name="backup_failed_corrupt">백업 파일이 손상되었습니다(레코드를 읽을 수 없음).</string>
     <string name="backup_file_name">quietinbox-backup-%1$s.qibk</string>

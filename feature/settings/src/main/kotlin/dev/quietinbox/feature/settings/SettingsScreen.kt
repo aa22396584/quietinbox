@@ -414,7 +414,8 @@ private fun ToggleRow(title: String, description: String, checked: Boolean, onCh
 private fun backupResultText(result: BackupResult?): String? = when (result) {
     null -> null
     is BackupResult.Ok -> stringResource(R.string.backup_result_ok, result.counts.conversations, result.counts.messages, result.counts.media) +
-        if (result.skippedMedia > 0) " " + stringResource(R.string.backup_result_partial_media, result.skippedMedia) else ""
+        (if (result.skippedMedia > 0) " " + stringResource(R.string.backup_result_partial_media, result.skippedMedia) else "") +
+        (if (result.mediaNotRestored > 0) " " + stringResource(R.string.restore_result_partial_media, result.mediaNotRestored) else "")
     is BackupResult.Failed -> when (result.reason) {
         BackupResult.Reason.NO_RECOVERY_KEY, BackupResult.Reason.KEY_UNAVAILABLE -> stringResource(R.string.backup_failed_no_key)
         BackupResult.Reason.WRONG_KEY_OR_TAMPERED -> stringResource(R.string.backup_failed_key)
@@ -426,6 +427,7 @@ private fun backupResultText(result: BackupResult?): String? = when (result) {
         BackupResult.Reason.TOO_LARGE -> stringResource(R.string.backup_failed_too_large)
         BackupResult.Reason.VAULT_UNAVAILABLE -> stringResource(R.string.backup_failed_vault)
         BackupResult.Reason.MAINTENANCE -> stringResource(R.string.backup_failed_maintenance)
+        BackupResult.Reason.LOW_SPACE -> stringResource(R.string.backup_failed_low_space)
     }
 }
 

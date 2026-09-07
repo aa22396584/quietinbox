@@ -326,12 +326,13 @@ class BackupService @Inject constructor(
                 val msgMap = HashMap<Long, Long>()
                 val mediaByOldMessage = s.media.filter { it.messageId != null }.associateBy { it.messageId!! }
                 // Pre-existing content per conversation, computed once (O(n)), before any insert.
-                // Counted per key so an existing duplicate consumes exactly one backup copy.
-                val preExisting = HashMap<Long, HashMap<String, Int>>()
+                // Kept per key as the rows themselves, so an existing duplicate consumes exactly
+                // one backup copy — and so the copy it consumed can still add what the row lacks.
+                val preExisting = HashMap<Long, HashMap<String, ArrayDeque<MessageEntity>>>()
                 for (cid in convMap.values.distinct()) {
-                    val counts = HashMap<String, Int>()
-                    for (row in db.messageDao().forConversation(cid)) counts.merge("${row.fingerprint}|${row.sortKey}|${row.observedAtEpochMs}", 1, Int::plus)
-                    preExisting[cid] = counts
+                    val rows = HashMap<String, ArrayDeque<MessageEntity>>()
+                    for (row in db.messageDao().forConversation(cid)) rows.getOrPut("${row.fingerprint}|${row.sortKey}|${row.observedAtEpochMs}") { ArrayDeque() }.addLast(row)
+                    preExisting[cid] = rows
                 }
                 var inserted = 0
                 var skippedOrphans = 0
@@ -342,9 +343,18 @@ class BackupService @Inject constructor(
                         continue
                     }
                     val dupKey = "${m.fingerprint}|${m.sortKey}|${m.observedAtEpochMs}"
-                    val remaining = preExisting.getValue(cid)[dupKey] ?: 0
-                    if (remaining > 0) {
-                        preExisting.getValue(cid)[dupKey] = remaining - 1
+                    val existing = preExisting.getValue(cid)[dupKey]?.removeFirstOrNull()
+                    if (existing != null) {
+                        // The row is already here, but the copy may know something it does not:
+                        // the truncation flag is set on a row *after* insert when a later repost of
+                        // the same bounded body arrives shortened, and that update changes none of
+                        // the three columns the key is made of. A backup taken after that update,
+                        // merged into a vault restored from one taken before it, used to lose the
+                        // flag on the way in — and then the bubble read as complete again (round 35
+                        // Codex I2). Single-valued, so "add what is missing" is exactly the write
+                        // the live path makes; nothing here ever clears a flag the row already has.
+                        val flag = m.truncationFlags
+                        if (flag != null && existing.truncationFlags == null) db.messageDao().markTruncated(existing.id, flag)
                         continue
                     }
                     // Insert the message first, then the blob bound to its new id (retention treats

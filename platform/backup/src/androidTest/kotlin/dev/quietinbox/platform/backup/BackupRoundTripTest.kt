@@ -6,6 +6,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import dev.quietinbox.core.identity.IdentityResolver
 import dev.quietinbox.core.model.KnownSources
 import dev.quietinbox.core.model.MediaState
+import dev.quietinbox.core.model.TruncationFlag
 import dev.quietinbox.core.model.NotificationSnapshot
 import dev.quietinbox.core.parser.StandardParser
 import dev.quietinbox.core.reconcile.Reconciler
@@ -145,6 +146,43 @@ class BackupRoundTripTest {
         val result = maintenance.exclusive { service.export(Uri.fromFile(target), "test") }
         result shouldBe BackupResult.Failed(BackupResult.Reason.MAINTENANCE)
         target.exists() shouldBe false
+        Unit
+    }
+    /**
+     * Round 35 Codex I2. A row's truncation flag is set *after* insert, when a later repost of
+     * the same bounded body arrives shortened, and that update changes none of the three columns
+     * the merge's duplicate key is made of. So a backup taken after the flag and merged into a
+     * vault restored from one taken before it used to skip the row and drop the flag on the way
+     * in. Both orders, because the order the user restores in must not decide what the bubble says.
+     */
+    @Test
+    fun aMergeAddsTheTruncationEvidenceARowWasMissingWhicheverBackupComesFirst() = runBlocking {
+        ready()
+        val stored = commit(Fixtures.snapshot(Fixtures.bigText("Alice", "cut me"), packageName = KnownSources.TELEGRAM, eventId = "m1", observedAt = 1_700_000_000_000L))
+        val id = stored.newMessageIds.single()
+        val before = File(context.cacheDir, "before-flag.qibk")
+        service.export(Uri.fromFile(before), "test").shouldBeInstanceOf<BackupResult.Ok>()
+        // The live path's own write: the flag lands on the existing row, key unchanged.
+        holder.db().messageDao().markTruncated(id, TruncationFlag.TEXT.name)
+        val after = File(context.cacheDir, "after-flag.qibk")
+        service.export(Uri.fromFile(after), "test").shouldBeInstanceOf<BackupResult.Ok>()
+        val recoveryKey = service.recoveryKeyText().shouldBeInstanceOf<KeyResult.Ok<String>>().value
+
+        suspend fun restoreInOrder(first: File, second: File): List<String?> {
+            holder.closeAndDeleteFiles() shouldBe true
+            holder.retry()
+            ready()
+            service.import(Uri.fromFile(first), recoveryKey).shouldBeInstanceOf<BackupResult.Ok>()
+            service.import(Uri.fromFile(second), recoveryKey).shouldBeInstanceOf<BackupResult.Ok>()
+            return holder.db().messageDao().exportPage(0L, 10, System.currentTimeMillis()).map { it.truncationFlags }
+        }
+
+        // Before, then after: the second import finds the row and must add what it lacks.
+        restoreInOrder(before, after) shouldBe listOf(TruncationFlag.TEXT.name)
+        // After, then before: the second import finds the row and must not take anything away.
+        restoreInOrder(after, before) shouldBe listOf(TruncationFlag.TEXT.name)
+        before.delete()
+        after.delete()
         Unit
     }
 }

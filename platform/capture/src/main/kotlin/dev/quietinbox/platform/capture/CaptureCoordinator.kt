@@ -509,6 +509,11 @@ class CaptureCoordinator @Inject constructor(
      * Writes the loss of an event that neither the journal nor its fallback gap could record, once
      * the vault will take it. Bounded by the time it happened and the time it was written, and
      * forgotten only then — the same rule as the two losses above (round 34 I3).
+     *
+     * Called from the policy load and from the first event accepted after the failure, because
+     * those are the two moments something has just proved the vault is writable again; the second
+     * matters most, since a device that recovers its disk space may see no policy change for days
+     * (round 35 agy I1).
      */
     private suspend fun settleUnrecordedJournalLoss(now: Long) {
         val since = journalLossSince ?: return
@@ -915,6 +920,11 @@ class CaptureCoordinator @Inject constructor(
                         }
                     if (!ingest.journal(snapshot, item.generation, ttl, lossOnAccept)) return
                     journaled = true
+                    // The vault just took a write, which is the signal a remembered loss was
+                    // waiting for. Hanging it on the policy load alone left it in memory for as
+                    // long as the user changed no source — capture working normally the whole
+                    // time — and a process death in that window lost it for good (round 35 agy I1).
+                    settleUnrecordedJournalLoss(System.currentTimeMillis())
                     _status.update { it.copy(acceptedCount = it.acceptedCount + 1) }
                     bitmapHandedOver = processJournaled(snapshot, item.generation, item.captured.bitmap)
                 } catch (e: VaultUnavailableException) {

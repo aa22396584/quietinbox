@@ -1439,4 +1439,39 @@ class CaptureCoordinatorTest : FunSpec({
         h.observedSources.emit(listOf(sourceConfig(ENABLED_PKG), sourceConfig(UNLISTED_PKG)))
         stillHolds { h.gaps.count { it.reason == GapReason.UNKNOWN.name } shouldBe 1 }
     }
+
+    test("a remembered loss is written by the next event the vault accepts, with no policy change") {
+        val h = Harness()
+        // Round 35, agy I1. Hanging the settle on the policy load alone left the loss in memory for
+        // as long as the user changed no source — which on a device that simply got its disk space
+        // back is indefinitely, with capture working normally the whole time. A process death in
+        // that window took the only record that the event had ever existed.
+        val full = IllegalStateException("no space left on device")
+        h.journalAnswers { throw full }
+        coEvery {
+            h.health.recordGap(any(), any(), GapReason.UNKNOWN, GapPrecision.EXACT, any(), any())
+        } throws full
+        var policyLoads = 0
+        coEvery { h.sources.sources() } answers { policyLoads++; listOf(sourceConfig(ENABLED_PKG)) }
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+        h.awaitConnected()
+
+        coordinator.offerCaptured(capturedWithTruncation("evt-nospace-2", emptySet()))
+        awaitUntil { coordinator.lastError shouldBe "IllegalStateException" }
+        stillHolds { h.gaps.isEmpty() shouldBe true }
+        // The policy loaded once, on the way in to this first event; the point of the test is that
+        // it never loads again, so nothing after this line can be the policy load's doing.
+        val loadsSoFar = policyLoads
+
+        // Space is back. The next accepted event is itself the proof that the vault takes writes,
+        // and no source was touched between the two.
+        h.journalAnswers { true }
+        coordinator.offerCaptured(capturedWithTruncation("evt-after", emptySet()))
+
+        awaitUntil { h.gaps.count { it.reason == GapReason.UNKNOWN.name } shouldBe 1 }
+        h.gaps.single { it.reason == GapReason.UNKNOWN.name }.endEpochMs shouldNotBe null
+        // And it really was the acceptance that did it: the policy never loaded again.
+        policyLoads shouldBe loadsSoFar
+    }
 })

@@ -103,8 +103,11 @@ were wrong in a way that changed the fix.
   insert that fails is recorded as a gap instead — but whatever stopped the insert does not stop at
   one statement, and a disk with no space left fails that gap too. Both writes failing left nothing
   anywhere saying the event had existed, while the release claimed "less precise, never absent".
-  The loss is now kept and written as a bounded gap by the next source-policy load, and forgotten
-  only once it is on disk — the same contract the cold-start and vault-lock-out losses already had.
+  The loss is now kept and written as a bounded gap by the next thing that proves the vault is
+  writable — an accepted event, or a source-policy load — and forgotten only once it is on disk,
+  the same contract the cold-start and vault-lock-out losses already had. Waiting for a policy load
+  alone would have left it in memory for as long as the user changed no source, with capture
+  working normally throughout, and a process death in that window would have taken it.
   One interval covers the outage rather than one per event: it opens at the first event that could
   not be recorded and closes when the write finally lands. A locked vault is a different path,
   caught by exception type before this one, and already had its own remembered obligation.

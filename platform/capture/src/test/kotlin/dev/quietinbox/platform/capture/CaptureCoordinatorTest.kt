@@ -152,10 +152,15 @@ class CaptureCoordinatorTest : FunSpec({
 
         /** Replaces the journal stub; [answer] runs on the consumer coroutine. */
         fun journalAnswers(answer: suspend (NotificationSnapshot) -> Boolean) {
-            coEvery { ingest.journal(any(), any(), any()) } coAnswers {
+            coEvery { ingest.journal(any(), any(), any(), any()) } coAnswers {
                 val snapshot = firstArg<NotificationSnapshot>()
                 journaled += snapshot.eventId
-                answer(snapshot)
+                val accepted = answer(snapshot)
+                // The real repository runs this inside the acceptance transaction and only when the
+                // insert created the row. The fake has to do the same, or a test about where a loss
+                // is written would be a test about nothing.
+                if (accepted) arg<(suspend () -> Unit)?>(3)?.invoke()
+                accepted
             }
         }
 
@@ -962,6 +967,57 @@ class CaptureCoordinatorTest : FunSpec({
 
         coVerify(timeout = 5_000, exactly = 1) {
             h.health.recordGap(any(), any(), GapReason.MESSAGES_DROPPED, GapPrecision.BOUNDED, any(), ENABLED_PKG)
+        }
+    }
+
+    test("an event the journal already holds does not record its loss a second time") {
+        val h = Harness()
+        // What the primary key does in the real repository: the second insert of an eventId
+        // changes nothing and returns -1, so acceptance — and the loss written with it — happens
+        // exactly once however many times the event is delivered.
+        val seen = mutableSetOf<String>()
+        h.journalAnswers { seen.add(it.eventId) }
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+
+        coordinator.offerCaptured(capturedWithTruncation("evt-twice", setOf(TruncationFlag.MESSAGES_DROPPED)))
+        awaitUntil { coordinator.status.value.acceptedCount shouldBe 1L }
+        coordinator.offerCaptured(capturedWithTruncation("evt-twice", setOf(TruncationFlag.MESSAGES_DROPPED)))
+        awaitUntil { h.journaled.count { it == "evt-twice" } shouldBe 2 }
+
+        stillHolds {
+            coVerify(exactly = 1) {
+                h.health.recordGap(any(), any(), GapReason.MESSAGES_DROPPED, any(), any(), any())
+            }
+        }
+    }
+
+    test("replaying a pending row does not record its loss again") {
+        val h = Harness()
+        // The regression this guards: while the gap was written inside processJournaled, every
+        // replay of the same row wrote another one, so one loss was listed on the health page as
+        // many. It is now written once, in the transaction that accepted the event — which this
+        // row went through in an earlier run, before it was left pending.
+        val pending = Fixtures.snapshot(
+            shape = Fixtures.base(title = null, text = null).copy(truncated = setOf(TruncationFlag.MESSAGES_DROPPED)),
+            packageName = ENABLED_PKG,
+            eventId = "evt-pending-drop",
+        )
+        var served = false
+        coEvery { h.ingest.pendingJournal(any(), any()) } coAnswers {
+            if (served) emptyList() else { served = true; listOf("gen-old" to pending) }
+        }
+        coEvery { h.ingest.isJournalPending(any()) } returns true
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+
+        h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
+
+        // It really was replayed and processed, so a gap written on this path would have been seen.
+        coVerify(timeout = 5_000, exactly = 1) { h.ingest.markJournal("evt-pending-drop", "SKIPPED", any()) }
+        h.journaled shouldBe emptyList()
+        coVerify(exactly = 0) {
+            h.health.recordGap(any(), any(), GapReason.MESSAGES_DROPPED, any(), any(), any())
         }
     }
 

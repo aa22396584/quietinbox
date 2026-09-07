@@ -82,8 +82,23 @@ class IngestRepository @Inject constructor(
     }
     private val windowSerializer = ListSerializer(WindowItemJson.serializer())
 
-    /** Durable acceptance: the snapshot is only "accepted" once this returns. */
-    suspend fun journal(snapshot: NotificationSnapshot, generation: String, ttlMs: Long): Boolean {
+    /**
+     * Durable acceptance: the snapshot is only "accepted" once this returns.
+     *
+     * [lossOnAccept] runs inside the same transaction as the journal insert, and only when the
+     * insert actually created the row. A loss the event already carries — messages the framework
+     * dropped before we ever saw them — is therefore committed with the event or not at all, and
+     * every terminal path afterwards (committed, skipped, discarded by a disabled source, or left
+     * pending by a pause) inherits it without having to know it exists. Because `eventId` is the
+     * primary key and the insert ignores conflicts, a replay of the same event is a no-op here and
+     * cannot record the same loss twice.
+     */
+    suspend fun journal(
+        snapshot: NotificationSnapshot,
+        generation: String,
+        ttlMs: Long,
+        lossOnAccept: (suspend () -> Unit)? = null,
+    ): Boolean {
         val db = holder.db()
         val row = EventJournalEntity(
             eventId = snapshot.eventId,
@@ -96,7 +111,11 @@ class IngestRepository @Inject constructor(
             payload = json.encodeToString(NotificationSnapshot.serializer(), snapshot),
             packageName = snapshot.source.packageName,
         )
-        return db.journalDao().insert(row) != -1L
+        return db.withTransaction {
+            val accepted = db.journalDao().insert(row) != -1L
+            if (accepted) lossOnAccept?.invoke()
+            accepted
+        }
     }
 
     /** Pending rows of a source the user disabled or removed: discarded, payload cleared (QI-SEC-001). */

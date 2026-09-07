@@ -796,7 +796,29 @@ class CaptureCoordinator @Inject constructor(
                         return
                     }
                     val ttl = settings.current().journalTtlHours * 60L * 60L * 1000L
-                    if (!ingest.journal(snapshot, item.generation, ttl)) return
+                    // A batch that arrived already shortened lost whole messages before the parser
+                    // ever ran, so the loss belongs to the event, not to what is later made of it.
+                    // It is written in the acceptance transaction: once the event is durable the gap
+                    // is durable with it, and every way the event can end afterwards — committed,
+                    // skipped, discarded because the source was disabled, or left pending by a pause
+                    // and then discarded — keeps the record. Round 33 found each of those paths
+                    // losing it when the gap was written after the commit fence instead.
+                    val lossOnAccept: (suspend () -> Unit)? =
+                        if (snapshot.shape.truncated.any { it in DROPPED_MESSAGES }) {
+                            {
+                                health.recordGap(
+                                    snapshot.postedAtEpochMs ?: snapshot.observedAtEpochMs,
+                                    snapshot.observedAtEpochMs,
+                                    GapReason.MESSAGES_DROPPED,
+                                    GapPrecision.BOUNDED,
+                                    snapshot.observedAtEpochMs,
+                                    snapshot.source.packageName,
+                                )
+                            }
+                        } else {
+                            null
+                        }
+                    if (!ingest.journal(snapshot, item.generation, ttl, lossOnAccept)) return
                     journaled = true
                     _status.update { it.copy(acceptedCount = it.acceptedCount + 1) }
                     bitmapHandedOver = processJournaled(snapshot, item.generation, item.captured.bitmap)
@@ -858,19 +880,14 @@ class CaptureCoordinator @Inject constructor(
      * Commit fence (QI-SEC-001): a source that was disabled or removed since the event was
      * accepted discards it for good; a pause (global or per source) or a maintenance run leaves
      * it PENDING for the next replay.
+     *
+     * A loss the event arrived with — messages dropped before the parser ran — is already durable
+     * by the time this runs: it was written in the acceptance transaction, so the fence discarding
+     * or deferring the event cannot take the record with it.
      */
     private suspend fun processJournaled(snapshot: NotificationSnapshot, generation: String, bitmap: Bitmap?): Boolean {
         val now = snapshot.observedAtEpochMs
         if (commitFenced(snapshot)) return false
-        // Recorded before anything can short-circuit on the parse result, because it is a property
-        // of the snapshot and not of what was made of it. The notification carried more messages
-        // than the snapshot may hold, so the oldest were discarded before parsing — and whatever
-        // followed, a clean commit or an empty batch, nothing else would ever have said that
-        // content existed and was lost. It is worst when the parse yields nothing: then the loss
-        // is total and the event is merely "skipped".
-        if (snapshot.shape.truncated.any { it in DROPPED_MESSAGES }) {
-            guarded { health.recordGap(snapshot.postedAtEpochMs ?: now, now, GapReason.MESSAGES_DROPPED, GapPrecision.BOUNDED, now, snapshot.source.packageName) }
-        }
         val parser = registry.parserFor(snapshot)
         val batch = try {
             parser.parse(snapshot)

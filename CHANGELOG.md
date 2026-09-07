@@ -51,9 +51,14 @@ were wrong in a way that changed the fix.
 - **A notification that carried more messages than the snapshot may hold lost the oldest ones
   silently.** They were discarded before parsing, the ingest that followed reported a clean commit,
   and nothing anywhere said content had existed and been lost — a gap hidden inside a success, in an
-  app whose first rule is that gaps are shown. It is recorded as a gap now, before the parse result
-  can short-circuit it: when the parse then yields nothing the loss is total, and that case used to
-  be filed merely as "skipped".
+  app whose first rule is that gaps are shown. It is recorded as a gap now, in the transaction that
+  accepts the event: the loss arrived with the notification, so it is committed with it or not at
+  all. Every way the event can end afterwards inherits the record without having to know it exists —
+  a clean commit, an empty parse filed merely as "skipped", a pause that leaves the row pending, or
+  a source disabled later, which discards the row for good. Writing it after the commit fence
+  instead, as the first attempt did, lost it on three of those four paths and wrote it twice on
+  replay; the event id is the journal's primary key, so acceptance — and the gap with it — happens
+  exactly once however often the event is delivered.
   Making that possible needed a flag split first. `TruncationFlag.MESSAGES` was raised by two
   different losses in the same function — whole messages discarded, and a kept message whose text
   was shortened — so a gap keyed on it would have manufactured gaps that never happened.

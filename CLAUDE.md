@@ -28,7 +28,8 @@ ANDROID_SERIAL=<emulator> ./gradlew \
           :platform:storage:connectedDebugAndroidTest \
           :platform:crypto:connectedDebugAndroidTest \
           :platform:backup:connectedDebugAndroidTest \
-          :feature:conversation:connectedDebugAndroidTest    # SQLCipher, migration, key fsync, backup, merged semantics
+          :feature:conversation:connectedDebugAndroidTest \
+          :feature:health:connectedDebugAndroidTest          # SQLCipher, migration, key fsync, backup, merged semantics, the refused-change dialog
 # Bind ANDROID_SERIAL: connectedDebugAndroidTest otherwise runs on every attached device.
 ./gradlew :app:assembleRelease                                # R8; no keystore in repo
 tools/check-permissions.sh                                    # merged-manifest permission gate

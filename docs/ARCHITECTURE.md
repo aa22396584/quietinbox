@@ -47,15 +47,18 @@ Process death before `journal` loses the event (documented as platform-unobserva
 
 A row a release up to 0.1.3 left pending carries a loss that release recorded nowhere. The two
 exits that still have a readable payload — replay, and the discard that follows disabling or
-removing the source — settle it first. Two others never do: an undecodable payload has nothing to
-settle, and a row whose commit attempts run out is filed `FAILED` with its payload cleared and no
-gap (issue #28). `event_journal.lossRecorded` (schema v4) is
+removing the source — settle it first. Two others do not settle *that* loss: an undecodable payload
+has nothing to settle, and a row whose commit attempts run out records a loss of its own, the whole
+event (`COMMIT_FAILED`), in the transaction that files it `FAILED` and clears its payload — the row
+leaves `PENDING` with its record or not at all (issue #28). `event_journal.lossRecorded` (schema v4) is
 claimed by a conditional update that writes the gap in the same transaction, so whichever path
 reaches the row first records it and no later pass records it again. Only what the payload settles
 is claimed: `LINES`, and `MESSAGES` with no surviving message of its own shortened.
 
-That column holds three values, because a settlement the vault refuses is neither settled nor
-merely unsettled. Charging the failure to the event's commit attempts destroys the payload after
+That column is two bits — settled, and deferred — because a settlement the vault refuses is neither
+settled nor merely unsettled, and because a row given up on needs the same parking place whether
+its arrival loss was settled or not: a resume gives a row back exactly the settled state it had, so
+a spent claim stays spent on the way back. Charging the failure to the event's commit attempts destroys the payload after
 three tries; leaving the row in the replay's candidate set puts it at the head of every page, where
 enough of them starve everything behind. A refused settlement is *deferred* instead: still
 `PENDING`, payload and claim untouched, out of both readers until a pass puts it back. A replay does
@@ -70,7 +73,14 @@ the row is deferred, or the row has left `PENDING` — because only the first tw
 disk. A Boolean conflated the second and the third, and a replay holding a page read before another
 pass deferred a row would then commit it and clear the evidence. Passes are coalesced for the same
 reason: a page is read outside the pipeline lock, so two overlapping passes are what make a stale
-page possible at all.
+page possible at all. A request sets a flag only the pass holding the gate clears, every caller
+waits for the gate (a holder cancelled mid-pass releases it on the way out, and the next waiter
+finds the request standing), and a request that finds maintenance active is kept for the run's end.
+A row whose record of being given up on cannot be written is parked by the same mechanism and gets
+one more commit when a pass resumes it; the residual is the same as a deferred settlement's — a
+device with parked rows waits for a gap write to succeed or a lifecycle trigger, payload intact —
+plus one narrow path into it: a resume that lands on the pass's last round puts the rows back
+without trying them, and they then wait for a lifecycle trigger rather than for proof.
 
 Both readers are bounded and both are paged. The settle walk runs inside the source policy
 transaction, under the pipeline lock, so its cost is live capture's: it seeks to a

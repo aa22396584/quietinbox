@@ -86,11 +86,9 @@ were wrong in a way that changed the fix.
   causes above, and a payload whose every surviving message is complete rules the second one out,
   leaving the first. Both are recorded now — once, at whichever of the two exits that
   still have a readable payload reaches the row first, replayed or discarded along with a source
-  the user switched off, and in both cases before the payload can be cleared. Two other exits never
-  settle anything: an undecodable payload has nothing to settle, and a row whose commit attempts
-  run out is filed `FAILED` with its payload cleared and no gap at all — a hole older than this
-  release, now recorded as issue #28. What this release changed there is that a *settlement*
-  failure can no longer be what drives a row into it.
+  the user switched off, and in both cases before the payload can be cleared. Two other exits do
+  not settle *that* loss: an undecodable payload has nothing to settle, and a row whose commit
+  attempts run out records a loss of its own — see the next entry.
   What makes it once is a column rather than a reading of the flags. `event_journal.lossRecorded`
   is set with the insert for an event whose loss this release recorded at acceptance — an ordinary
   event that lost nothing stays 0, and so is never mistaken for one — defaults to 0 on rows carried over —
@@ -98,7 +96,7 @@ were wrong in a way that changed the fix.
   by a conditional update that writes the gap in the same transaction. A row replayed twenty times
   therefore lists one loss, and a claim whose gap cannot be written stays unspent for the next
   attempt rather than marking a record that does not exist.
-  That column has three values, not two, because a settlement that *cannot* be written is neither
+  That column is two bits, not a flag, because a settlement that *cannot* be written is neither
   "done" nor "not started yet" and both of those readings caused a defect of their own. Charging the
   failure to the event's three commit attempts filed the row `FAILED` and cleared its payload,
   losing the survivors and the record together. Leaving it merely unsettled kept the evidence but
@@ -126,11 +124,54 @@ were wrong in a way that changed the fix.
   aborts the whole policy change on the other two, because the discard that follows would clear the
   evidence for good.
   Replay passes are coalesced rather than run side by side, which is what made that interleaving
-  possible: a page is read outside the pipeline lock, and five things can start a pass. A caller
-  that finds one running leaves it to that pass, and the request is re-checked as the gate is
-  released, so nothing is dropped and no two passes hold overlapping pages. The walk's resume is
+  possible: a page is read outside the pipeline lock, and five things can start a pass. A request
+  sets a flag that only the pass holding the gate clears, and every caller waits for the gate
+  rather than leaving a busy one to its holder: the holder can be cancelled mid-pass — a
+  maintenance run cancels the work it is inside, a vault state change cancels the collector that
+  started it — and a request that arrived meanwhile then had no one left to run it, so a
+  maintenance run's end could leave the rows it had interrupted in the journal until the next
+  lifecycle event (found by Codex in review round 38, against a real maintenance run). A request
+  that finds maintenance active is kept, not cleared, for the run's end. The walk's resume is
   scoped to the one source whose policy transaction it runs in, rather than resetting every app's
   deferred rows and undoing that again if the transaction rolls back.
+- **An event whose commit failed on every attempt it had vanished without a record.** The third
+  failed commit filed the journal row `FAILED`, which clears the payload, and nothing wrote a gap:
+  an accepted event — durable, acknowledged, counted — disappeared with nothing on the capture page
+  to say so, the exact shape this release exists to remove, one path further along (issue #28,
+  older than 0.1.4). The loss of the whole event is now recorded first, in the transaction that
+  files the row — `could not be saved after repeated attempts`, bounded by the notification's post
+  and the observation, scoped to the source — so the row leaves `PENDING` with its record or not at
+  all. When that record cannot be written the row is parked the way a refused settlement is, and
+  tried once more when a pass resumes it: the third failure is the point at which the loss must be
+  recorded, not a ceiling on trying, and a parked row that commits on its fourth go lost nothing.
+  That needed the deferral to become a bit rather than a value — exhausted rows arrive with their
+  arrival loss already settled as often as not, and the earlier deferral either could not park such
+  a row or resumed it as unsettled, after which the next pass claimed and wrote that loss a second
+  time. A resume now gives a row back exactly the settled state it had. The design was put to an
+  independent reviewer read-only as three options and its choice, with the transition table and
+  the tests that decide it, is archived under `docs/reviews/2026-09-07-issue28-consult/`.
+- **A group body cut on a line separator lost a whole row with nothing to show for it.** The
+  round-34 rule above is right that every surviving row is complete, and it left the row that
+  began after the separator — gone before the parser saw it — with no gap and no label anywhere.
+  The parser is the only thing that can see this loss, and it exists only relative to the batch
+  that is stored, so the batch now carries it and the commit records it in its own transaction, on
+  both of its exits: committed with the messages or not at all. A cut that fell *inside* the last
+  row still marks that row and claims nothing about what may have followed it.
+- **A backup merge dropped the truncation evidence a row already here was missing.** The label is
+  set on a row *after* insert, when a repost of the same bounded body arrives shortened, and that
+  update changes none of the three columns the merge's duplicate key is made of; so a backup taken
+  after the label, merged into a vault restored from one taken before it, skipped the row and the
+  label with it — and the bubble read as complete again, depending on the order the user restored
+  in. The merge now adds the label the existing row lacks, the same single-valued write the live
+  path makes, and never takes one away.
+- **"Stop capturing this app" could do nothing and say nothing.** Switching a source off and
+  removing it first settle the losses its pending rows carry, inside the policy transaction; a
+  settlement that fails rolls the whole change back — correctly, since the discard that follows
+  would clear the payload it is the last reader of — and the switch, bound to the repository's
+  flow, sprang back to "on" without a word, while the capture page also wrapped every policy call
+  in a `runCatching {}` that swallowed cancellation. The refusal is now a dialog naming the app,
+  saying that nothing changed and capture continues, why, and what to try; a cancellation is
+  rethrown, never reported as a refusal.
   Three cases deliberately record nothing. `MESSAGES` beside a message that was itself shortened
   is undecidable — the batch may also have been over the limit — and a loss invented from evidence
   that does not support it is the same defect facing the other way. A carried-over payload that no
@@ -185,7 +226,8 @@ were wrong in a way that changed the fix.
   of one body — the WhatsApp group heuristic — only the last can be the one that lost text, because
   truncation takes the tail; and only when the cut fell inside it. A cut landing on a line
   separator leaves the last surviving row complete: what was lost there is a whole row, and calling
-  the surviving one shortened is wrong about text that is all present. A revision recomputes it:
+  the surviving one shortened is wrong about text that is all present — that row is recorded as a
+  gap with the commit instead (see above). A revision recomputes it:
   replacing a body without replacing what that body lost left a shortened label on text that was
   now complete.
   A repost is evidence too. The same text arriving again, this time from a notification that says

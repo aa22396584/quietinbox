@@ -5,7 +5,7 @@ workflow mode. Write your report in 繁體中文 to the path you were given.
 
 ## Subject
 
-`29cfaf0..HEAD` on `main` of `/Users/iml1s/Documents/mine/quietinbox` — the five fix commits
+`29cfaf0..4ba8652` on `main` of `/Users/iml1s/Documents/mine/quietinbox` — the five fix commits
 that close what rounds 35–38 left open, plus their docs:
 
 - `bb8c2ba` round-35 Codex I1 — a WhatsApp group body cut on a line separator records the missing
@@ -28,10 +28,11 @@ that close what rounds 35–38 left open, plus their docs:
   round-38 Minors: two-source resume test, deterministic coalescing control, "at most one retry per
   deferral" test, KDoc, the residual's second path.
 - `6e843c9` docs, both languages; `.github/workflows/ci.yml` gains `:feature:health:connectedDebugAndroidTest`.
+- `27e1659`, `4ba8652` the round-38 README row, this brief, and the round-38 reports verbatim.
 
 ```
-git log --oneline 29cfaf0..HEAD
-git diff 29cfaf0..HEAD --stat
+git log --oneline 29cfaf0..4ba8652
+git diff 29cfaf0..4ba8652 --stat
 git show <sha>
 ```
 
@@ -69,7 +70,7 @@ git show <sha>
    that fails at the *gap open* write rather than the settlement gets the settle wording — is that
    acceptable?
 7. **Every new test, adversarially** (JVM `CaptureCoordinatorTest` 63→73, `WhatsAppParserTest`
-   8→12, `HealthViewModelTest` 5 new; instrumented `JournalLossTransactionTest` 21→33,
+   10→12, `HealthViewModelTest` 5 new; instrumented `JournalLossTransactionTest` 21→33,
    `BackupRoundTripTest` 2→3, `PolicyFailureDialogTest` 3 new). What one-line change to product code
    would make each fail? The commits list ten negative controls (NC24–NC26 for #28, NC27–NC31 for
    round 38); treat the list as a claim.

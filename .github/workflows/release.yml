@@ -67,6 +67,10 @@ jobs:
         run: ./gradlew --no-daemon --console=plain test :app:assembleRelease :app:bundleRelease
       - name: No network permission in release APK
         run: tools/check-permissions.sh app/build/outputs/apk/release/app-release.apk
+      - name: Release APK carries the tag's version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"; [ -n "${{ inputs.tag }}" ] && VERSION="${{ inputs.tag }}" && VERSION="${VERSION#v}"
+          tools/check-version.sh app/build/outputs/apk/release/app-release.apk "$VERSION"
       - name: Name artifacts
         id: meta
         run: |

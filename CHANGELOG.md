@@ -196,9 +196,12 @@ were wrong in a way that changed the fix.
   settlement that fails rolls the whole change back — correctly, since the discard that follows
   would clear the payload it is the last reader of — and the switch, bound to the repository's
   flow, sprang back to "on" without a word, while the capture page also wrapped every policy call
-  in a `runCatching {}` that swallowed cancellation. The refusal is now a dialog naming the app,
-  saying that nothing changed and capture continues, why, and what to try; a cancellation is
-  rethrown, never reported as a refusal.
+  in a `runCatching {}` that swallowed cancellation. The refusal is now a dialog naming the app.
+  What it may promise is decided by the coordinator's exception type, not by which button was
+  tapped: a rollback (including a settlement rollback) may say nothing was changed; a change that
+  committed and could not be read back says the write landed and capture may still follow the
+  previous setting until the vault next opens; a locked vault is the lock case; an unclassified
+  failure invents no result. A cancellation is rethrown, never reported as a refusal.
   Three cases deliberately record nothing. `MESSAGES` beside a message that was itself shortened
   is undecidable — the batch may also have been over the limit — and a loss invented from evidence
   that does not support it is the same defect facing the other way. A carried-over payload that no

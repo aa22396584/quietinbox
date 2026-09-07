@@ -132,4 +132,21 @@ class OnboardingViewModelTest : FunSpec({
             job.cancel()
         }
     }
+
+    test("a retry cancels the earlier wait, so the first timer does not fail the second send") {
+        runTest {
+            Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
+            val vm = viewModel()
+            val job = launch { vm.state.collect { } }
+            vm.sendTest()
+            advanceTimeBy(TEST_TIMEOUT_MS / 2)
+            vm.sendTest()
+            // The first timer would have fired here; the retry must have cancelled it.
+            advanceTimeBy(TEST_TIMEOUT_MS / 2 + 1)
+            vm.state.first().testFailed shouldBe false
+            captured.value = TEST_MESSAGES
+            vm.state.first().testSucceeded shouldBe true
+            job.cancel()
+        }
+    }
 })

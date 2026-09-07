@@ -120,7 +120,7 @@
 
     <!-- Search -->
     <string name="search_hint">저장된 사본 검색</string>
-    <string name="search_empty_hint">검색은 대소문자와 전각·반각을 구분하지 않습니다. 한국어·중국어·일본어 텍스트는 부분 문자열로, 라틴 문자 단어는 단어 전체 또는 3글자 이상의 조각으로 일치합니다.</string>
+    <string name="search_empty_hint">검색은 대소문자와 전각·반각을 구분하지 않습니다. 한국어·중국어·일본어 텍스트는 부분 문자열로, 라틴 문자 단어는 단어 전체 또는 3글자 이상의 조각으로 일치합니다. 이모지와 기호는 색인되지 않으므로 그것만으로 된 검색은 아무것도 찾지 못합니다.</string>
     <string name="search_no_results">‘%1$s’에 대한 결과가 없습니다.</string>
     <string name="search_range_all">전체 기간</string>
     <string name="search_range_today">오늘</string>
@@ -194,8 +194,11 @@
     <string name="health_remove_keep_data">중지하고 사본 유지</string>
     <string name="health_remove_delete_data">중지하고 사본 삭제</string>
     <string name="health_policy_failed_title">%1$s을(를) 변경하지 못했습니다</string>
-    <string name="health_policy_failed_body_settle">아무것도 변경되지 않아 캡처는 계속됩니다. 이 앱의 캡처를 중지하기 전에 대기 중인 알림이 가진 손실을 먼저 기록해야 하는데, 그 쓰기가 실패했습니다. 다시 시도하세요. 계속 실패하면 이 기기의 남은 저장 공간을 확인하세요.</string>
-    <string name="health_policy_failed_body">아무것도 변경되지 않았습니다. 쓰기가 실패했습니다. 다시 시도하고, 계속 실패하면 이 기기의 남은 저장 공간을 확인하세요.</string>
+    <string name="health_policy_failed_body_settle">아무것도 변경되지 않았습니다. 이 앱은 이전 상태 그대로입니다. 이 앱을 끄거나 제거하기 전에 대기 중인 알림이 지닌 손실을 먼저 기록해야 하는데 그 쓰기가 실패했습니다. 다시 시도하고, 계속 실패하면 기기의 여유 공간을 확인하세요.</string>
+    <string name="health_policy_failed_body">아무것도 변경되지 않았습니다. 이 앱은 이전 상태 그대로입니다. 다시 시도하고, 계속 실패하면 기기의 여유 공간을 확인하세요.</string>
+    <string name="health_policy_failed_body_locked">보관소가 잠겨 있어 이 변경은 이루어지지 않았습니다. 잠금을 해제한 뒤 다시 시도하세요.</string>
+    <string name="health_policy_failed_body_reload">변경은 저장되었지만 앱이 소스 목록을 다시 읽지 못해, 보관소가 다음에 열릴 때까지 캡처가 이전 설정을 따를 수 있습니다. 앱을 다시 시작하면 다시 읽습니다.</string>
+    <string name="health_policy_failed_body_unknown">이 변경을 완료할 수 없습니다. 목록에서 이 앱의 현재 설정을 확인한 뒤 다시 시도하세요.</string>
     <string name="health_adapter">어댑터: %1$s</string>
     <string name="health_adapter_standard">범용 파서</string>
     <string name="health_gaps_title">누락 가능성</string>
@@ -322,7 +325,7 @@
     <string name="about_version">버전 %1$s</string>
     <string name="about_offline">인터넷 권한 없음 · 분석 없음 · 충돌 보고 없음</string>
     <string name="about_limitations">알려진 제한</string>
-    <string name="about_limitations_body">• 소스 앱이 시스템에 알림으로 게시한 내용만 관측할 수 있습니다. 놓친 개수를 정확히 알 방법은 없습니다.\n• 미리보기가 제한된 알림은 자리표시자로 기록됩니다.\n• 안정적인 ID가 없는 동명의 연락처는 병합하지 않고 따로 유지합니다.\n• ID와 타임스탬프가 없는 동일한 단일 메시지는 중복 가능성으로 표시합니다.\n• LINE, WhatsApp, Telegram, Instagram, Messenger 어댑터는 합성 픽스처로만 테스트되었습니다.</string>
+    <string name="about_limitations_body">• 소스 앱이 시스템에 알림으로 게시한 내용만 관측할 수 있습니다. 화면에 열려 있는 채팅은 알림을 전혀 게시하지 않을 수 있으며, 놓친 개수를 정확히 알 방법은 없습니다.\n• 미리보기가 제한된 알림은 자리표시자로 기록됩니다.\n• 안정적인 ID가 없는 동명의 연락처는 병합하지 않고 따로 유지합니다.\n• ID와 타임스탬프가 없는 동일한 단일 메시지는 중복 가능성으로 표시합니다.\n• LINE, WhatsApp, Telegram, Instagram, Messenger 어댑터는 합성 픽스처로만 테스트되었습니다.</string>
     <string name="about_licenses">오픈소스 라이선스</string>
     <string name="about_licenses_body">QuietInbox는 GPL-3.0-or-later로 배포됩니다. 서드파티 구성요소: AndroidX(Apache-2.0), Kotlin(Apache-2.0), Dagger/Hilt(Apache-2.0), SQLCipher for Android(BSD), Tink(Apache-2.0), kotlinx 라이브러리(Apache-2.0).</string>
     <string name="about_source">소스 코드 및 문제 신고: github.com/ImL1s/quietinbox</string>
@@ -363,6 +366,7 @@
     <string name="ob_test_failed_body">테스트 알림은 보냈지만 아무것도 수집되지 않았습니다. 알림 접근 권한이 회수되었거나 직장 프로필 정책이 막고 있을 수 있습니다. 계속 진행한 뒤 나중에 캡처 페이지에서 확인할 수 있습니다.</string>
     <string name="ob_test_retry">다시 보내기</string>
     <string name="ob_skip_unverified">확인 없이 계속</string>
+    <string name="ob_finish_to_health">완료하고 캡처 상태 열기</string>
     <string name="ob_extras">미디어 복사, 알림, 암호화 백업은 각각 별개의 선택이며 켜기 전까지 모두 꺼져 있습니다. 설정에 있습니다.</string>
     <string name="ob_preview_title">보게 될 내용</string>
     <string name="ob_preview_body">각 사본에는 소스, 캡처 시각, 그리고 가능한 경우 소스 시각이 표시됩니다. 발신자가 불확실하거나, 미리보기가 숨겨졌거나, 메시지가 중복일 수 있을 때는 라벨로 알려 줍니다.</string>

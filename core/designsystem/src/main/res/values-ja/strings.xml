@@ -120,7 +120,7 @@
 
     <!-- Search -->
     <string name="search_hint">保存したコピーを検索</string>
-    <string name="search_empty_hint">検索は大文字・小文字と全角・半角を区別しません。日本語・中国語・韓国語のテキストは部分一致、ラテン文字の単語は単語全体または 3 文字以上の断片で一致します。</string>
+    <string name="search_empty_hint">検索は大文字・小文字と全角・半角を区別しません。日本語・中国語・韓国語のテキストは部分一致、ラテン文字の単語は単語全体または 3 文字以上の断片で一致します。絵文字と記号は索引に含まれないため、それらだけの検索には何も見つかりません。</string>
     <string name="search_no_results">「%1$s」に一致するものはありません。</string>
     <string name="search_range_all">期間指定なし</string>
     <string name="search_range_today">今日</string>
@@ -194,8 +194,11 @@
     <string name="health_remove_keep_data">停止してコピーは残す</string>
     <string name="health_remove_delete_data">停止してコピーも削除</string>
     <string name="health_policy_failed_title">%1$s を変更できませんでした</string>
-    <string name="health_policy_failed_body_settle">何も変更されていないため、キャプチャは続いています。このアプリのキャプチャを止める前に、保留中の通知が抱える欠落を記録する必要があり、その書き込みに失敗しました。もう一度お試しください。繰り返し失敗する場合は、この端末の空き容量を確認してください。</string>
-    <string name="health_policy_failed_body">何も変更されていません。書き込みに失敗しました。もう一度お試しください。繰り返し失敗する場合は、この端末の空き容量を確認してください。</string>
+    <string name="health_policy_failed_body_settle">何も変更されていません。このアプリは以前のままです。このアプリをオフにしたり削除したりする前に、保留中の通知が抱える欠落を記録する必要がありますが、その書き込みに失敗しました。もう一度お試しください。失敗が続く場合は、端末の空き容量を確認してください。</string>
+    <string name="health_policy_failed_body">何も変更されていません。このアプリは以前のままです。もう一度お試しください。失敗が続く場合は、端末の空き容量を確認してください。</string>
+    <string name="health_policy_failed_body_locked">保管庫がロックされているため、この変更は行われませんでした。ロックを解除してからもう一度お試しください。</string>
+    <string name="health_policy_failed_body_reload">変更は保存されましたが、アプリが送信元の一覧を読み戻せなかったため、保管庫が次に開くまでキャプチャは以前の設定のまま動作する可能性があります。アプリを再起動すると再読み込みされます。</string>
+    <string name="health_policy_failed_body_unknown">この変更を完了できませんでした。一覧でこのアプリの現在の設定を確認してから、もう一度お試しください。</string>
     <string name="health_adapter">アダプター: %1$s</string>
     <string name="health_adapter_standard">汎用パーサー</string>
     <string name="health_gaps_title">欠落の可能性</string>
@@ -322,7 +325,7 @@
     <string name="about_version">バージョン %1$s</string>
     <string name="about_offline">インターネット権限なし · 分析なし · クラッシュレポートなし</string>
     <string name="about_limitations">既知の制限</string>
-    <string name="about_limitations_body">• 送信元がシステムに通知として投稿した内容だけを観測できます。見逃した件数を確実に知る方法はありません。\n• プレビューが制限された通知はプレースホルダーとして記録されます。\n• 安定した ID のない同名の連絡先は統合せず、別々に保持します。\n• ID もタイムスタンプもない同一の単独メッセージには「重複の可能性」の印を付けます。\n• LINE、WhatsApp、Telegram、Instagram、Messenger のアダプターは合成フィクスチャでのみテストしています。</string>
+    <string name="about_limitations_body">• 送信元がシステムに通知として投稿した内容だけを観測できます。画面に開かれているチャットは通知をまったく出さないことがあり、見逃した件数を確実に知る方法はありません。\n• プレビューが制限された通知はプレースホルダーとして記録されます。\n• 安定した ID のない同名の連絡先は統合せず、別々に保持します。\n• ID もタイムスタンプもない同一の単独メッセージには「重複の可能性」の印を付けます。\n• LINE、WhatsApp、Telegram、Instagram、Messenger のアダプターは合成フィクスチャでのみテストしています。</string>
     <string name="about_licenses">オープンソースライセンス</string>
     <string name="about_licenses_body">QuietInbox は GPL-3.0-or-later で提供されています。サードパーティ コンポーネント: AndroidX（Apache-2.0）、Kotlin（Apache-2.0）、Dagger/Hilt（Apache-2.0）、SQLCipher for Android（BSD）、Tink（Apache-2.0）、kotlinx ライブラリ（Apache-2.0）。</string>
     <string name="about_source">ソースコードと問題報告: github.com/ImL1s/quietinbox</string>
@@ -363,6 +366,7 @@
     <string name="ob_test_failed_body">テスト通知は送信しましたが、何も取得できませんでした。通知アクセスが取り消されたか、仕事用プロファイルのポリシーが妨げている可能性があります。このまま進めて、あとで「取得」ページを確認できます。</string>
     <string name="ob_test_retry">もう一度送る</string>
     <string name="ob_skip_unverified">確認せずに続ける</string>
+    <string name="ob_finish_to_health">完了してキャプチャの状態を開く</string>
     <string name="ob_extras">メディアのコピー、リマインダー、暗号化バックアップはそれぞれ別の選択肢で、オンにするまではすべてオフです。設定にあります。</string>
     <string name="ob_preview_title">表示される内容</string>
     <string name="ob_preview_body">各コピーには送信元、キャプチャ時刻、（取得できれば）送信元の時刻が表示されます。送信者が不確かなとき、プレビューが隠されたとき、メッセージが重複している可能性があるときはラベルで示します。</string>

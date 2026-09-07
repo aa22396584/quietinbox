@@ -86,8 +86,8 @@ class JournalLossTransactionTest {
     private fun snapshot(eventId: String) =
         Fixtures.snapshot(Fixtures.base(title = "t", text = "b"), packageName = pkg, eventId = eventId)
 
-    private fun snapshotAt(eventId: String, observedAt: Long) =
-        Fixtures.snapshot(Fixtures.base(title = "t", text = "b"), packageName = pkg, eventId = eventId, observedAt = observedAt)
+    private fun snapshotAt(eventId: String, observedAt: Long, packageName: String = pkg) =
+        Fixtures.snapshot(Fixtures.base(title = "t", text = "b"), packageName = packageName, eventId = eventId, observedAt = observedAt)
 
     private suspend fun messageCount(): Int =
         holder.db().openHelper.writableDatabase.query("SELECT COUNT(*) FROM message").use { it.moveToFirst(); it.getInt(0) }
@@ -750,6 +750,20 @@ class JournalLossTransactionTest {
         }
         ingest.claimEventLoss("evt-3") { recordLoss() } shouldBe LossClaim.DEFERRED
         ingest.claimEventLoss("evt-2") { recordLoss() } shouldBe LossClaim.DEFERRED
+
+        // Round 39 Codex M2: the four values above never called pendingExcluding. A paused source
+        // with 0 and 1 must vanish from that read, and parked 2/3 of the included source stay out.
+        val paused = "com.example.paused"
+        ingest.journal(snapshotAt("evt-p0", 50L, paused), "gen", 60_000) shouldBe true
+        ingest.journal(snapshotAt("evt-p1", 60L, paused), "gen", 60_000) { recordLoss() } shouldBe true
+        listOf("evt-p0", "evt-p1").map { lossState(it) } shouldBe listOf(LOSS_UNSETTLED, LOSS_SETTLED)
+        withClue("without exclusions, every source's 0 and 1 are candidates") {
+            pendingIds() shouldBe listOf("evt-p0", "evt-p1", "evt-0", "evt-1")
+        }
+        withClue("a paused source's 0/1 are absent; parked 2/3 of the included source stay out") {
+            ingest.pendingJournal(excludingPackages = listOf(paused)).map { it.second.eventId } shouldBe
+                listOf("evt-0", "evt-1")
+        }
         Unit
     }
 

@@ -483,8 +483,27 @@ class CaptureCoordinator @Inject constructor(
 
     private suspend fun changeSourcePolicy(block: suspend () -> Unit) {
         pipelineMutex.withLock {
-            block()
-            loadSourcePolicy()
+            try {
+                block()
+            } catch (e: Exception) {
+                // Every change is one repository transaction, so an exception out of the block is a
+                // rollback: the screen may say "nothing was changed", and when the settle walk was
+                // what refused, why. A locked vault throws before any transaction and keeps its
+                // own type (round 39, Codex I1).
+                if (e is CancellationException || e is VaultUnavailableException) throw e
+                throw if (e is SettlementFailedException) PolicyChangeException.SettlementRefused(e) else PolicyChangeException.Refused(e)
+            }
+            try {
+                loadSourcePolicy()
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                // Committed, and the read back failed: the allow-list is stale until the next load.
+                // One more try, then the screen has to say so rather than "nothing was changed".
+                runCatching { loadSourcePolicy() }.onFailure {
+                    if (it is CancellationException) throw it
+                    throw PolicyChangeException.CommittedNotReloaded(it)
+                }
+            }
         }
     }
 
@@ -1011,6 +1030,12 @@ class CaptureCoordinator @Inject constructor(
                 } catch (e: Exception) {
                     if (e is CancellationException) throw e
                     if (journaled) {
+                        // The outcome is not read here on purpose: this entrance only ever handles a
+                        // row it journaled a moment ago (a duplicate eventId returns before this
+                        // point), so its first failure is attempt 1 of MAX_ATTEMPTS and the exhausted
+                        // branch, whose FAILED_DEFERRED the replay entrance turns into a deferred
+                        // settlement, is unreachable from here. The record is still handed in, so a
+                        // future change to that order cannot lose it silently (round 39, subagent M4).
                         guarded { ingest.markJournalRetryable(snapshot.eventId, e::class.java.simpleName, commitFailureLoss(snapshot)) }
                     } else {
                         // The journal insert itself failed (e.g. the vault was busy): there is no row to
@@ -1380,8 +1405,8 @@ class CaptureCoordinator @Inject constructor(
                 // The discard this runs before clears the payload for good, so "not on disk" has
                 // to abort the whole policy change rather than continue: there is no later moment
                 // at which the evidence could be read again.
-                check(recordCarriedOverLoss(snapshot)) {
-                    "a carried-over loss for ${snapshot.eventId} is not recorded; the source may not be discarded"
+                if (!recordCarriedOverLoss(snapshot)) {
+                    throw SettlementFailedException("a carried-over loss for ${snapshot.eventId} is not recorded; the source may not be discarded")
                 }
             }
             after = page.next ?: return

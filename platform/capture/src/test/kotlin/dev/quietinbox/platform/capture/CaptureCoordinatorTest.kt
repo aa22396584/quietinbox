@@ -1265,6 +1265,55 @@ class CaptureCoordinatorTest : FunSpec({
         }
     }
 
+    test("a settlement that refuses the write is a settlement refusal") {
+        val h = Harness()
+        coEvery { h.sources.setEnabled(any(), any(), any()) } throws SettlementFailedException("gap write failed")
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+
+        val thrown = runCatching { coordinator.setSourceEnabled(ENABLED_PKG, false) }.exceptionOrNull()
+        (thrown is PolicyChangeException.SettlementRefused) shouldBe true
+    }
+
+    test("a committed policy whose reload fails is not a rollback") {
+        val h = Harness()
+        val written = java.util.concurrent.atomic.AtomicBoolean(false)
+        coEvery { h.sources.sources() } answers {
+            if (written.get()) error("select failed")
+            h.sourceList.toList()
+        }
+        coEvery { h.sources.setEnabled(any(), any(), any()) } coAnswers {
+            val pkg = firstArg<String>()
+            val enabled = secondArg<Boolean>()
+            val i = h.sourceList.indexOfFirst { it.packageName == pkg }
+            if (i < 0 || h.sourceList[i].enabled == enabled) {
+                false
+            } else {
+                h.sourceList[i] = h.sourceList[i].copy(enabled = enabled)
+                arg<(suspend () -> Unit)?>(2)?.invoke()
+                written.set(true)
+                true
+            }
+        }
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+
+        val thrown = runCatching { coordinator.setSourceEnabled(ENABLED_PKG, false) }.exceptionOrNull()
+        (thrown is PolicyChangeException.CommittedNotReloaded) shouldBe true
+        (thrown is PolicyChangeException.Refused) shouldBe false
+    }
+
+    test("a locked vault is not wrapped as a refused change") {
+        val h = Harness()
+        coEvery { h.sources.setEnabled(any(), any(), any()) } throws VaultUnavailableException(KeyFailure.Unavailable("locked"))
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+
+        val thrown = runCatching { coordinator.setSourceEnabled(ENABLED_PKG, false) }.exceptionOrNull()
+        (thrown is VaultUnavailableException) shouldBe true
+        (thrown is PolicyChangeException) shouldBe false
+    }
+
     test("removing a source closes the gap it left open, and forgets its name when the data goes too") {
         val h = Harness()
         val coordinator = h.coordinator()

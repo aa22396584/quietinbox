@@ -14,6 +14,8 @@ import dev.quietinbox.core.model.SourceConfiguration
 import dev.quietinbox.core.parser.ParserRegistry
 import dev.quietinbox.parsers.apps.AppParsers
 import dev.quietinbox.platform.capture.CaptureCoordinator
+import dev.quietinbox.platform.capture.PolicyChangeException
+import dev.quietinbox.platform.storage.db.VaultUnavailableException
 import dev.quietinbox.platform.capture.CaptureStatus
 import dev.quietinbox.platform.capture.ListenerAccess
 import dev.quietinbox.platform.capture.SyntheticNotifications
@@ -113,14 +115,14 @@ class HealthViewModel @Inject constructor(
     // inside the policy transaction; when that write fails the whole change rolls back and the
     // switch springs back on its own. The failure is surfaced, not swallowed: "stop capturing
     // this app" doing nothing in silence is the one outcome this page must never produce.
-    fun setSourceEnabled(packageName: String, displayName: String, enabled: Boolean) = policyChange(packageName, displayName, settle = !enabled) { coordinator.setSourceEnabled(packageName, enabled) }
+    fun setSourceEnabled(packageName: String, displayName: String, enabled: Boolean) = policyChange(packageName, displayName) { coordinator.setSourceEnabled(packageName, enabled) }
     fun setSourcePaused(packageName: String, displayName: String, paused: Boolean) = policyChange(packageName, displayName) { coordinator.setSourcePaused(packageName, paused) }
 
     fun addSource(app: InstalledApp) = policyChange(app.packageName, displayName = app.label) {
         coordinator.addSource(app.packageName, app.label, registry.adapterFor(app.packageName)?.id, System.currentTimeMillis())
     }
 
-    fun removeSource(packageName: String, displayName: String, deleteData: Boolean) = policyChange(packageName, displayName, settle = true) {
+    fun removeSource(packageName: String, displayName: String, deleteData: Boolean) = policyChange(packageName, displayName) {
         coordinator.removeSource(packageName, deleteData)
     }
 
@@ -130,13 +132,24 @@ class HealthViewModel @Inject constructor(
 
     // The screen passes the name it shows, so the dialog names the app the user tapped rather than
     // whatever the state flow held at that moment.
-    private fun policyChange(packageName: String, displayName: String, settle: Boolean = false, change: suspend () -> Unit) = viewModelScope.launch {
+    private fun policyChange(packageName: String, displayName: String, change: suspend () -> Unit) = viewModelScope.launch {
         try {
             change()
         } catch (e: Exception) {
             // A cancellation is the scope going away, never a refused change (working rule).
             if (e is CancellationException) throw e
-            policyFailure.value = PolicyFailure(packageName, displayName, settle)
+            // What the dialog may promise is decided by what the coordinator threw, never by which
+            // change was asked for: "nothing was changed" is true of a rollback, not of a change
+            // that committed and could not be read back, and a locked vault is neither
+            // (round 39, Codex I1; subagent M3).
+            val kind = when (e) {
+                is VaultUnavailableException -> PolicyFailure.Kind.LOCKED
+                is PolicyChangeException.SettlementRefused -> PolicyFailure.Kind.SETTLEMENT
+                is PolicyChangeException.Refused -> PolicyFailure.Kind.REFUSED
+                is PolicyChangeException.CommittedNotReloaded -> PolicyFailure.Kind.COMMITTED_NOT_RELOADED
+                else -> PolicyFailure.Kind.UNKNOWN
+            }
+            policyFailure.value = PolicyFailure(packageName, displayName, kind)
         }
     }
 

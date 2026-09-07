@@ -122,7 +122,7 @@
 
     <!-- Search -->
     <string name="search_hint">Search saved copies</string>
-    <string name="search_empty_hint">Searches are case- and width-insensitive. Chinese, Japanese and Korean text matches as a substring; Latin words match whole words or 3+ letter fragments.</string>
+    <string name="search_empty_hint">Searches are case- and width-insensitive. Chinese, Japanese and Korean text matches as a substring; Latin words match whole words or 3+ letter fragments. Emoji and symbols are not indexed, so a search made only of them finds nothing.</string>
     <string name="search_no_results">No matches for “%1$s”.</string>
     <string name="search_range_all">Any time</string>
     <string name="search_range_today">Today</string>
@@ -196,8 +196,11 @@
     <string name="health_remove_keep_data">Stop, keep copies</string>
     <string name="health_remove_delete_data">Stop and delete copies</string>
     <string name="health_policy_failed_title">Could not change %1$s</string>
-    <string name="health_policy_failed_body_settle">Nothing was changed, so capture continues. Before capture for this app stops, a loss its pending notifications carry has to be recorded, and that write failed. Try again; if it keeps failing, check the free storage on this device.</string>
-    <string name="health_policy_failed_body">Nothing was changed. The write failed; try again, and if it keeps failing, check the free storage on this device.</string>
+    <string name="health_policy_failed_body_settle">Nothing was changed; the app stays as it was. Before it can be switched off or removed, a loss its pending notifications carry has to be recorded, and that write failed. Try again; if it keeps failing, check the free storage on this device.</string>
+    <string name="health_policy_failed_body">Nothing was changed; the app stays as it was. Try again, and if it keeps failing, check the free storage on this device.</string>
+    <string name="health_policy_failed_body_locked">The vault is locked, so the change was not made. Unlock it and try again.</string>
+    <string name="health_policy_failed_body_reload">The change was saved, but the app could not read its source list back, so capture may still follow the previous setting until the vault next opens. Restarting the app does that.</string>
+    <string name="health_policy_failed_body_unknown">This change could not be completed. Check the app’s current setting in the list and try again.</string>
     <string name="health_adapter">adapter: %1$s</string>
     <string name="health_adapter_standard">generic parser</string>
     <string name="health_gaps_title">Possible gaps</string>
@@ -325,7 +328,7 @@
     <string name="about_version">Version %1$s</string>
     <string name="about_offline">No internet permission · no analytics · no crash reporting</string>
     <string name="about_limitations">Known limitations</string>
-    <string name="about_limitations_body">• Only what a source posts to the system as a notification can be observed; there is no reliable count of what was missed.\n• Preview-restricted notifications are recorded as placeholders.\n• Same-named contacts without a stable id are kept apart, not merged.\n• Identical single messages without ids or timestamps are marked as possible repeats.\n• Adapters for LINE, WhatsApp, Telegram, Instagram and Messenger are tested with synthetic fixtures only.</string>
+    <string name="about_limitations_body">• Only what a source posts to the system as a notification can be observed; a chat that is open on screen may post nothing at all, and there is no reliable count of what was missed.\n• Preview-restricted notifications are recorded as placeholders.\n• Same-named contacts without a stable id are kept apart, not merged.\n• Identical single messages without ids or timestamps are marked as possible repeats.\n• Adapters for LINE, WhatsApp, Telegram, Instagram and Messenger are tested with synthetic fixtures only.</string>
     <string name="about_licenses">Open-source licences</string>
     <string name="about_licenses_body">QuietInbox is licensed under GPL-3.0-or-later. Third-party components: AndroidX (Apache-2.0), Kotlin (Apache-2.0), Dagger/Hilt (Apache-2.0), SQLCipher for Android (BSD), Tink (Apache-2.0), kotlinx libraries (Apache-2.0).</string>
     <string name="about_source">Source code and issues: github.com/ImL1s/quietinbox</string>
@@ -366,6 +369,7 @@
     <string name="ob_test_failed_body">The test notification was posted but nothing was captured. Notification access may have been withdrawn, or a work profile policy may be blocking it. You can continue and check the Capture page later.</string>
     <string name="ob_test_retry">Send it again</string>
     <string name="ob_skip_unverified">Continue without verifying</string>
+    <string name="ob_finish_to_health">Finish and open Capture status</string>
     <string name="ob_extras">Media copies, reminders and encrypted backup are separate choices, all off until you turn them on. They live in Settings.</string>
     <string name="ob_preview_title">What you will see</string>
     <string name="ob_preview_body">Each copy shows its source, capture time and, when available, the source time. Labels tell you when identity is uncertain, when a preview was hidden, or when a message may be a repeat.</string>

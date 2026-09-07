@@ -318,7 +318,9 @@ class BackupService @Inject constructor(
             for (media in s.media) {
                 val oldId = media.messageId ?: continue
                 val bytes = runCatching { Base64.decode(media.dataBase64, Base64.NO_WRAP) }.getOrNull()
-                if (bytes == null || bytes.size > BackupLimits.MAX_MEDIA_BYTES) {
+                // Empty is what Android Base64 returns for a string of invalid characters: it is
+                // not a picture, and must not become a LOCAL_COPY of zero bytes (audit-2 ATOM-3).
+                if (bytes == null || bytes.isEmpty() || bytes.size > BackupLimits.MAX_MEDIA_BYTES) {
                     prepared[oldId] = null
                     continue
                 }

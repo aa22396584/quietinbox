@@ -120,7 +120,7 @@
 
     <!-- Search -->
     <string name="search_hint">搜索已保存的副本</string>
-    <string name="search_empty_hint">搜索不区分大小写与全半角。中日韩文字按子串匹配；英文按整个单词或 3 个字母以上的片段匹配。</string>
+    <string name="search_empty_hint">搜索不区分大小写与全半角。中日韩文字按子串匹配；英文按整个单词或 3 个字母以上的片段匹配。表情符号与符号不会被索引，只有它们的搜索不会有结果。</string>
     <string name="search_no_results">找不到“%1$s”。</string>
     <string name="search_range_all">不限时间</string>
     <string name="search_range_today">今天</string>
@@ -194,8 +194,11 @@
     <string name="health_remove_keep_data">停止并保留副本</string>
     <string name="health_remove_delete_data">停止并删除副本</string>
     <string name="health_policy_failed_title">无法更改 %1$s</string>
-    <string name="health_policy_failed_body_settle">没有任何更改，捕获仍在进行。停止捕获这个 App 之前，必须先记录它待处理通知所带的丢失，而这次写入失败了。请再试一次；若持续失败，请检查设备的可用存储空间。</string>
-    <string name="health_policy_failed_body">没有任何更改。写入失败；请再试一次，若持续失败，请检查设备的可用存储空间。</string>
+    <string name="health_policy_failed_body_settle">没有任何更改；这个应用保持原状。在它能被关闭或移除之前，必须先记录其待处理通知所带的丢失，而那次写入失败了。请再试一次；若持续失败，请检查设备的可用存储空间。</string>
+    <string name="health_policy_failed_body">没有任何更改；这个应用保持原状。请再试一次；若持续失败，请检查设备的可用存储空间。</string>
+    <string name="health_policy_failed_body_locked">保险库已锁定，所以没有做这项更改。请先解锁再试一次。</string>
+    <string name="health_policy_failed_body_reload">更改已保存，但应用无法读回来源列表，因此在保险库下次打开前，捕获可能仍按先前的设置进行。重新启动应用就会重新读取。</string>
+    <string name="health_policy_failed_body_unknown">这项更改未能完成。请确认列表中这个应用当前的设置，再试一次。</string>
     <string name="health_adapter">适配器：%1$s</string>
     <string name="health_adapter_standard">通用解析器</string>
     <string name="health_gaps_title">可能的中断</string>
@@ -322,7 +325,7 @@
     <string name="about_version">版本 %1$s</string>
     <string name="about_offline">无网络权限 · 无分析 · 无崩溃报告</string>
     <string name="about_limitations">已知限制</string>
-    <string name="about_limitations_body">• 只能观测来源应用实际发到系统的通知；没有可靠的方法得知漏掉了多少。\n• 预览受限的通知会以占位文字记录。\n• 没有稳定 ID 的同名联系人会分开保留，不会合并。\n• 没有 ID 与时间戳的相同单条消息会标为“可能重复”。\n• LINE、WhatsApp、Telegram、Instagram、Messenger 的适配器目前只用合成测试数据测试过。</string>
+    <string name="about_limitations_body">• 只能观测来源应用实际发到系统的通知；正打开在屏幕上的聊天可能完全不发通知，也没有可靠的方法得知漏掉了多少。\n• 预览受限的通知会以占位文字记录。\n• 没有稳定 ID 的同名联系人会分开保留，不会合并。\n• 没有 ID 与时间戳的相同单条消息会标为“可能重复”。\n• LINE、WhatsApp、Telegram、Instagram、Messenger 的适配器目前只用合成测试数据测试过。</string>
     <string name="about_licenses">开源许可</string>
     <string name="about_licenses_body">QuietInbox 以 GPL-3.0-or-later 许可发布。第三方组件：AndroidX（Apache-2.0）、Kotlin（Apache-2.0）、Dagger/Hilt（Apache-2.0）、SQLCipher for Android（BSD）、Tink（Apache-2.0）、kotlinx 库（Apache-2.0）。</string>
     <string name="about_source">源代码与问题反馈：github.com/ImL1s/quietinbox</string>
@@ -363,6 +366,7 @@
     <string name="ob_test_failed_body">测试通知已发出，但什么都没被捕获。可能是通知访问权被收回，或工作资料夹策略挡住了。你可以先继续，之后再到“捕获”页查看。</string>
     <string name="ob_test_retry">再发一次</string>
     <string name="ob_skip_unverified">不验证，直接继续</string>
+    <string name="ob_finish_to_health">完成并打开捕获状态</string>
     <string name="ob_extras">媒体复制、提醒与加密备份是三个各自独立的选项，在你打开之前都是关的。它们在“设置”里。</string>
     <string name="ob_preview_title">你会看到什么</string>
     <string name="ob_preview_body">每条副本都标示来源、捕获时间，以及（可获得时）来源时间。标签会告诉你身份是否不确定、预览是否被隐藏、或消息是否可能重复。</string>

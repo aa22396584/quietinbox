@@ -20,6 +20,11 @@ fixture from a real device exists yet. Promoting a row to `REAL_DEVICE_PASSED` r
 T004 / T016 / T017 / T045 scenarios from `TEST_MATRIX.md` with two consenting test accounts and
 synthetic markers in the message bodies; real private messages never enter the repository.
 
+A chat that is open on screen may post no notification at all: several apps suppress the shade
+while the conversation is in front, and QuietInbox cannot tell that case from a muted chat. The
+matrix does not verify it; which apps do this, and on which versions, is real-device evidence for
+issue #17.
+
 Compile/target baseline: compileSdk 37 (required by the AndroidX versions used), targetSdk 36
 (plan §4 baseline). An API 37 target lane is tracked but not yet exercised.
 

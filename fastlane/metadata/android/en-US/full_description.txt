@@ -16,9 +16,10 @@ HOW IT WORKS
 QuietInbox uses Android's standard notification access (Notification Listener). You grant it once in system settings; the app then keeps copies only for the sources you enable, for as long as you choose (1–365 days). You can pause capture, delete a message or a whole conversation, or wipe everything including the keys.
 
 LIMITS, STATED PLAINLY
-• If a source app does not post a notification (muted chat, Do Not Disturb, "hide content" settings), there is nothing to copy.
+• If a source app does not post a notification (muted chat, Do Not Disturb, "hide content" settings, or a chat that is open on screen at the time), there is nothing to copy.
 • Long conversations are captured as the last few messages shown in the notification; older history is not available.
 • Images are copied only when the source app exposes them in the notification and you turn "Copy images" on.
+• The per-app handling for LINE, WhatsApp, Telegram, Instagram and Messenger is tested against synthetic notifications, not verified against the real apps.
 
 OPEN SOURCE
 QuietInbox is free software under the GPL-3.0-or-later licence. The source code and a free build are on GitHub (github.com/ImL1s/quietinbox). Buying it on Google Play gives you automatic updates and supports development; the features are identical.

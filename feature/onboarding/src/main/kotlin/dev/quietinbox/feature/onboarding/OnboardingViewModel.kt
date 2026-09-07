@@ -130,12 +130,16 @@ class OnboardingViewModel @Inject constructor(
         synthetic.postConversation(count = TEST_MESSAGES, iconRes = R.drawable.ic_stat_quiet)
         local.update { it.copy(testSent = true, testSentAtEpochMs = now, testTimedOut = false) }
         // The wait used to have no end: with capture broken the step span for ever and the only way
-        // on was Skip, which said nothing about what had failed.
-        viewModelScope.launch {
+        // on was Skip, which said nothing about what had failed. A retry cancels the earlier wait,
+        // or the first timer could call the second attempt failed seconds after it was sent (audit-2 O8).
+        testTimeout?.cancel()
+        testTimeout = viewModelScope.launch {
             delay(TEST_TIMEOUT_MS)
             if (state.value.capturedMessages < TEST_MESSAGES) local.update { it.copy(testTimedOut = true) }
         }
     }
+
+    private var testTimeout: kotlinx.coroutines.Job? = null
 
     /** Persists the chosen sources first so a test/real notification is accepted immediately. */
     fun persistSources() = viewModelScope.launch {

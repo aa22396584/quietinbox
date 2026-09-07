@@ -111,6 +111,7 @@ class MediaDeletionRaceTest {
         blobCount() shouldBe 0
         holder.db().mediaDao().orphans() shouldBe emptyList()
         mediaFiles() shouldBe emptyList()
+        Unit
     }
 
     @Test
@@ -122,5 +123,6 @@ class MediaDeletionRaceTest {
         val blob = holder.db().mediaDao().get(row.mediaBlobId!!)!!
         mediaFiles() shouldContain blob.fileName
         holder.db().mediaDao().orphans() shouldBe emptyList()
+        Unit
     }
 }

@@ -120,7 +120,7 @@
 
     <!-- Search -->
     <string name="search_hint">搜尋已保存的副本</string>
-    <string name="search_empty_hint">搜尋不分大小寫與全半形。中日韓文字以子字串比對；英文以整個單字或 3 個字母以上的片段比對。</string>
+    <string name="search_empty_hint">搜尋不分大小寫與全半形。中日韓文字以子字串比對；英文以整個單字或 3 個字母以上的片段比對。表情符號與符號不會被索引，只有它們的搜尋不會有結果。</string>
     <string name="search_no_results">找不到「%1$s」。</string>
     <string name="search_range_all">不限時間</string>
     <string name="search_range_today">今天</string>
@@ -194,8 +194,11 @@
     <string name="health_remove_keep_data">停止並保留副本</string>
     <string name="health_remove_delete_data">停止並刪除副本</string>
     <string name="health_policy_failed_title">無法變更 %1$s</string>
-    <string name="health_policy_failed_body_settle">沒有任何變更，擷取仍在進行。停止擷取這個 App 之前，必須先記錄它待處理通知所帶的遺失，而這次寫入失敗了。請再試一次；若持續失敗，請檢查裝置的可用儲存空間。</string>
-    <string name="health_policy_failed_body">沒有任何變更。寫入失敗；請再試一次，若持續失敗，請檢查裝置的可用儲存空間。</string>
+    <string name="health_policy_failed_body_settle">沒有任何變更；這個 App 維持原狀。在它能被關閉或移除之前，必須先記錄其待處理通知所帶的遺失，而那次寫入失敗了。請再試一次；若持續失敗，請檢查裝置的可用儲存空間。</string>
+    <string name="health_policy_failed_body">沒有任何變更；這個 App 維持原狀。請再試一次；若持續失敗，請檢查裝置的可用儲存空間。</string>
+    <string name="health_policy_failed_body_locked">金庫已鎖定，所以沒有做這項變更。請先解鎖再試一次。</string>
+    <string name="health_policy_failed_body_reload">變更已儲存，但 App 無法讀回來源清單，因此在金庫下次開啟前，擷取可能仍依照先前的設定。重新啟動 App 就會重新讀取。</string>
+    <string name="health_policy_failed_body_unknown">這項變更未能完成。請確認清單中這個 App 目前的設定，再試一次。</string>
     <string name="health_adapter">adapter：%1$s</string>
     <string name="health_adapter_standard">通用解析器</string>
     <string name="health_gaps_title">可能中斷</string>
@@ -322,7 +325,7 @@
     <string name="about_version">版本 %1$s</string>
     <string name="about_offline">無網路權限 · 無分析 · 無崩潰回報</string>
     <string name="about_limitations">已知限制</string>
-    <string name="about_limitations_body">• 只能觀測來源 App 實際發到系統的通知；沒有可靠方法得知漏了多少。\n• 預覽受限的通知會以佔位文字記錄。\n• 沒有穩定 ID 的同名聯絡人會分開保留，不會合併。\n• 沒有 ID 與時間戳的相同單則訊息會標為「可能重複」。\n• LINE、WhatsApp、Telegram、Instagram、Messenger 的 adapter 目前只以合成 fixture 測試。</string>
+    <string name="about_limitations_body">• 只能觀測來源 App 實際發到系統的通知；正開在畫面上的聊天室可能完全不發通知，也沒有可靠方法得知漏了多少。\n• 預覽受限的通知會以佔位文字記錄。\n• 沒有穩定 ID 的同名聯絡人會分開保留，不會合併。\n• 沒有 ID 與時間戳的相同單則訊息會標為「可能重複」。\n• LINE、WhatsApp、Telegram、Instagram、Messenger 的 adapter 目前只以合成 fixture 測試。</string>
     <string name="about_licenses">開源授權</string>
     <string name="about_licenses_body">QuietInbox 以 GPL-3.0-or-later 授權。第三方元件：AndroidX（Apache-2.0）、Kotlin（Apache-2.0）、Dagger/Hilt（Apache-2.0）、SQLCipher for Android（BSD）、Tink（Apache-2.0）、kotlinx 函式庫（Apache-2.0）。</string>
     <string name="about_source">原始碼與問題回報：github.com/ImL1s/quietinbox</string>
@@ -363,6 +366,7 @@
     <string name="ob_test_failed_body">測試通知已送出，但什麼都沒被擷取。可能是通知存取權被收回，或工作設定檔政策擋住了。你可以先繼續，之後再到「擷取」頁看。</string>
     <string name="ob_test_retry">再送一次</string>
     <string name="ob_skip_unverified">不驗證，直接繼續</string>
+    <string name="ob_finish_to_health">完成並開啟擷取狀態</string>
     <string name="ob_extras">媒體複製、提醒與加密備份是三個各自獨立的選項，在你打開之前都是關的。它們在「設定」裡。</string>
     <string name="ob_preview_title">你會看到什麼</string>
     <string name="ob_preview_body">每則副本都標示來源、擷取時間，以及（可得時）來源時間。標籤會告訴你身分是否不確定、預覽是否被隱藏、或訊息是否可能重複。</string>

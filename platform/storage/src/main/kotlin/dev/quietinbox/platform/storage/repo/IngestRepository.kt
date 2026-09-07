@@ -179,7 +179,9 @@ class IngestRepository @Inject constructor(
             }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
-            runCatching { db.journalDao().deferLoss(eventId) }
+            // Best effort, but a cancellation landing inside the park is the scope going away and
+            // must not be folded into the write failure (round 39, subagent M2).
+            runCatching { db.journalDao().deferLoss(eventId) }.onFailure { if (it is CancellationException) throw it }
             throw e
         }
     }

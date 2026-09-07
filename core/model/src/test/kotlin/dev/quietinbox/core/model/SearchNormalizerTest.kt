@@ -15,6 +15,12 @@ class SearchNormalizerTest : FunSpec({
         tokens shouldContainAll setOf("明天", "天開", "開會", "hello", "hel", "ell", "llo")
     }
 
+    test("an emoji-only query yields no tokens, which is the limit the empty-search hint states") {
+        // Emoji survive normalisation (above) but neither tokeniser emits them, so an emoji-only
+        // body is never indexed and an emoji-only query finds nothing (audit-2 S3): stated, not fixed.
+        SearchNormalizer.tokens(SearchNormalizer.normalize("😀🎉")).toList() shouldBe emptyList()
+    }
+
     test("single CJK character is indexed on its own") {
         SearchNormalizer.tokens("好") shouldContain "好"
         SearchNormalizer.tokens("明天開會") shouldContain "開"

@@ -16,6 +16,7 @@ import dev.quietinbox.platform.storage.db.VaultMaintenance
 import dev.quietinbox.platform.storage.db.VaultState
 import dev.quietinbox.platform.storage.db.VaultUnavailableException
 import dev.quietinbox.platform.crypto.KeyFailure
+import dev.quietinbox.platform.storage.db.GapIntervalEntity
 import dev.quietinbox.platform.storage.repo.CommitOutcome
 import dev.quietinbox.platform.storage.repo.HealthRepository
 import dev.quietinbox.platform.storage.repo.IngestRepository
@@ -169,17 +170,37 @@ class CaptureCoordinatorTest : FunSpec({
 
         init {
             coEvery { sources.sources() } answers { sourceList.toList() }
-            coEvery { sources.setEnabled(any(), any()) } coAnswers {
+            // The real repository writes the flag and whatever records it in one transaction, and
+            // only when the flag actually moves. The fakes do both: without the transition check a
+            // test about "a repeated disable is not a second gap" would pass on any code at all.
+            coEvery { sources.setEnabled(any(), any(), any()) } coAnswers {
                 val pkg = firstArg<String>()
                 val enabled = secondArg<Boolean>()
                 val i = sourceList.indexOfFirst { it.packageName == pkg }
-                if (i >= 0) sourceList[i] = sourceList[i].copy(enabled = enabled)
+                if (i < 0 || sourceList[i].enabled == enabled) {
+                    false
+                } else {
+                    sourceList[i] = sourceList[i].copy(enabled = enabled)
+                    arg<(suspend () -> Unit)?>(2)?.invoke()
+                    true
+                }
             }
-            coEvery { sources.setPaused(any(), any()) } coAnswers {
+            coEvery { sources.setPaused(any(), any(), any()) } coAnswers {
                 val pkg = firstArg<String>()
                 val paused = secondArg<Boolean>()
                 val i = sourceList.indexOfFirst { it.packageName == pkg }
-                if (i >= 0) sourceList[i] = sourceList[i].copy(paused = paused)
+                if (i < 0 || sourceList[i].paused == paused) {
+                    false
+                } else {
+                    sourceList[i] = sourceList[i].copy(paused = paused)
+                    arg<(suspend () -> Unit)?>(2)?.invoke()
+                    true
+                }
+            }
+            coEvery { sources.remove(any(), any(), any()) } coAnswers {
+                val pkg = firstArg<String>()
+                sourceList.removeAll { it.packageName == pkg }
+                arg<(suspend () -> Unit)?>(2)?.invoke()
             }
         }
 
@@ -936,6 +957,99 @@ class CaptureCoordinatorTest : FunSpec({
         coVerify(timeout = 5_000, exactly = 1) {
             h.health.closeOpenGapsForSource(any(), ENABLED_PKG, GapReason.SOURCE_DISABLED_BY_USER)
         }
+    }
+
+    test("setting a source flag to the value it already has is not a second gap") {
+        val h = Harness()
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+
+        // The health page shows one interval per event. Two "disable" taps, or a screen that
+        // re-submits its state, are one event; the second must change nothing.
+        coordinator.setSourceEnabled(ENABLED_PKG, false)
+        coordinator.setSourceEnabled(ENABLED_PKG, false)
+        coordinator.setSourcePaused(ENABLED_PKG, false)
+
+        awaitUntil {
+            coVerify(exactly = 1) {
+                h.health.openGap(any(), GapReason.SOURCE_DISABLED_BY_USER, any(), any(), ENABLED_PKG)
+            }
+        }
+        stillHolds {
+            coVerify(exactly = 1) {
+                h.health.openGap(any(), GapReason.SOURCE_DISABLED_BY_USER, any(), any(), ENABLED_PKG)
+            }
+            // It was already unpaused, so nothing was written for the pause either way.
+            coVerify(exactly = 0) { h.health.openGap(any(), GapReason.SOURCE_PAUSED_BY_USER, any(), any(), any()) }
+            coVerify(exactly = 0) { h.health.closeOpenGapsForSource(any(), any(), GapReason.SOURCE_PAUSED_BY_USER) }
+        }
+    }
+
+    test("removing a source closes the gap it left open, and forgets its name when the data goes too") {
+        val h = Harness()
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+
+        coordinator.setSourceEnabled(ENABLED_PKG, false)
+        coVerify(timeout = 5_000, exactly = 1) {
+            h.health.openGap(any(), GapReason.SOURCE_DISABLED_BY_USER, any(), any(), ENABLED_PKG)
+        }
+
+        // Removing is the one change nothing can undo: re-adding goes through addSource, which
+        // opens nothing and closes nothing, so an interval left open here would read as "capture
+        // is still missing" for ever.
+        coordinator.removeSource(ENABLED_PKG, deleteData = true)
+
+        coVerify(timeout = 5_000, exactly = 1) {
+            h.health.closeOpenGapsForSource(
+                any(),
+                ENABLED_PKG,
+                GapReason.SOURCE_DISABLED_BY_USER,
+                GapReason.SOURCE_PAUSED_BY_USER,
+            )
+        }
+        // The interval stays — it is the honest record — but it stops naming the app the user
+        // asked to have forgotten.
+        coVerify(timeout = 5_000, exactly = 1) { h.health.forgetGapSource(ENABLED_PKG) }
+    }
+
+    test("removing a source without deleting its data keeps the source's name on the gap") {
+        val h = Harness()
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+
+        // The negative control for the test above: stopping capture and deleting saved copies are
+        // separate decisions, so only the second one takes the name.
+        coordinator.setSourceEnabled(ENABLED_PKG, false)
+        coordinator.removeSource(ENABLED_PKG, deleteData = false)
+
+        coVerify(timeout = 5_000, exactly = 1) {
+            h.health.closeOpenGapsForSource(any(), ENABLED_PKG, GapReason.SOURCE_DISABLED_BY_USER, GapReason.SOURCE_PAUSED_BY_USER)
+        }
+        stillHolds { coVerify(exactly = 0) { h.health.forgetGapSource(any()) } }
+    }
+
+    test("a gap an earlier version left open against its own policy is closed when the policy loads") {
+        val h = Harness()
+        // What a process death between the two writes used to leave behind: the source is enabled,
+        // and a "disabled by the user" interval is still open against it. They are one transaction
+        // now, so this can only be an older row — and the policy, not the row, is what capture does.
+        val stale = GapIntervalEntity(
+            id = 7,
+            startEpochMs = 1_000,
+            endEpochMs = null,
+            reason = GapReason.SOURCE_DISABLED_BY_USER.name,
+            precision = GapPrecision.EXACT.name,
+            createdAtEpochMs = 1_000,
+            packageName = ENABLED_PKG,
+        )
+        coEvery { h.health.openSourceGaps() } returnsMany listOf(listOf(stale), emptyList())
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+
+        coordinator.offerCaptured(capturedWithTruncation("evt-any", emptySet()))
+
+        coVerify(timeout = 5_000, exactly = 1) { h.health.closeGap(7, any()) }
     }
 
     test("pausing one source never closes another source's gap") {

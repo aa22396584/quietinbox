@@ -41,8 +41,37 @@ class SourceRepository @Inject constructor(
         )
     }
 
-    suspend fun setEnabled(packageName: String, enabled: Boolean) = holder.db().sourceDao().setEnabled(packageName, enabled)
-    suspend fun setPaused(packageName: String, paused: Boolean) = holder.db().sourceDao().setPaused(packageName, paused)
+    /**
+     * Flips `enabled` and returns whether it actually moved.
+     *
+     * [alsoInTransaction] runs with the flag change, so the policy and whatever records it — a gap
+     * naming this source — commit together or not at all, and a process death cannot land between
+     * them. It runs only on a real transition: setting a flag to the value it already holds is not
+     * a second event and must not open a second gap.
+     */
+    suspend fun setEnabled(packageName: String, enabled: Boolean, alsoInTransaction: (suspend () -> Unit)? = null): Boolean =
+        setFlag(packageName, alsoInTransaction, { it.enabled == enabled }) { db -> db.sourceDao().setEnabled(packageName, enabled) }
+
+    /** As [setEnabled], for the per-source pause. */
+    suspend fun setPaused(packageName: String, paused: Boolean, alsoInTransaction: (suspend () -> Unit)? = null): Boolean =
+        setFlag(packageName, alsoInTransaction, { it.paused == paused }) { db -> db.sourceDao().setPaused(packageName, paused) }
+
+    private suspend fun setFlag(
+        packageName: String,
+        alsoInTransaction: (suspend () -> Unit)?,
+        unchanged: (SourceConfigurationEntity) -> Boolean,
+        write: suspend (dev.quietinbox.platform.storage.db.QuietInboxDatabase) -> Unit,
+    ): Boolean {
+        val db = holder.db()
+        return db.withTransaction {
+            val current = db.sourceDao().get(packageName) ?: return@withTransaction false
+            if (unchanged(current)) return@withTransaction false
+            write(db)
+            alsoInTransaction?.invoke()
+            true
+        }
+    }
+
     suspend fun setMediaEnabled(packageName: String, enabled: Boolean) = holder.db().sourceDao().setMediaEnabled(packageName, enabled)
 
     suspend fun setRetention(packageName: String, days: Int?, defaultDays: Int) {
@@ -60,11 +89,16 @@ class SourceRepository @Inject constructor(
      * With [deleteData] the whole deletion graph goes in one transaction — conversations (which
      * cascade to messages, revisions, links and index tokens), media rows, suppression tokens,
      * summaries and diagnostics — and the media files right after it (QI-DATA-004).
+     *
+     * [alsoInTransaction] runs inside that transaction. Removing a source is the one policy change
+     * after which nothing can ever put it back: an interval left open here has no path to a close,
+     * and the health page renders an open interval as capture still being missing.
      */
-    suspend fun remove(packageName: String, deleteData: Boolean) {
+    suspend fun remove(packageName: String, deleteData: Boolean, alsoInTransaction: (suspend () -> Unit)? = null) {
         val db = holder.db()
         val files = db.withTransaction {
             db.sourceDao().delete(packageName)
+            alsoInTransaction?.invoke()
             db.checkpointDao().deleteForPackage(packageName)
             db.journalDao().discardPending(packageName)
             if (!deleteData) return@withTransaction emptyList()

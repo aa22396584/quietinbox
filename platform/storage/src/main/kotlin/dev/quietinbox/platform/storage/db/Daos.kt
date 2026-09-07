@@ -496,6 +496,13 @@ interface HealthDao {
     @Query("SELECT * FROM gap_interval WHERE endEpochMs IS NULL AND reason IN (:reasons)")
     suspend fun openGaps(reasons: List<String>): List<GapIntervalEntity>
 
+    /**
+     * "Remove and delete this source's data" takes the name, not the interval: the gap is the
+     * honest record that capture stopped, and deleting it would hide a loss the user was shown.
+     */
+    @Query("UPDATE gap_interval SET packageName = NULL WHERE packageName = :packageName")
+    suspend fun forgetGapSource(packageName: String): Int
+
     @Query("DELETE FROM gap_interval WHERE createdAtEpochMs < :before")
     suspend fun deleteGapsBefore(before: Long): Int
 

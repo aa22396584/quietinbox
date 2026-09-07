@@ -67,6 +67,20 @@ class HealthRepository @Inject constructor(
         }
     }
 
+    /** The open gaps a source policy could contradict, for the reconciliation on policy load. */
+    suspend fun openSourceGaps(): List<GapIntervalEntity> =
+        holder.db().healthDao().openGaps(listOf(GapReason.SOURCE_DISABLED_BY_USER.name, GapReason.SOURCE_PAUSED_BY_USER.name))
+
+    /** Closes one gap by id, for a caller that already decided which. */
+    suspend fun closeGap(id: Long, endEpochMs: Long?) {
+        holder.db().healthDao().closeGap(id, endEpochMs)
+    }
+
+    /** Drops the source's name from its gaps without dropping the gaps: see [HealthDao.forgetGapSource]. */
+    suspend fun forgetGapSource(packageName: String) {
+        holder.db().healthDao().forgetGapSource(packageName)
+    }
+
     suspend fun recordGap(startEpochMs: Long?, endEpochMs: Long?, reason: GapReason, precision: GapPrecision, now: Long, packageName: String? = null) {
         holder.db().healthDao().insertGap(GapIntervalEntity(startEpochMs = startEpochMs, endEpochMs = endEpochMs, reason = reason.name, precision = precision.name, createdAtEpochMs = now, packageName = packageName))
     }

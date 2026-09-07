@@ -70,6 +70,20 @@ were wrong in a way that changed the fix.
   window itself was never recorded. Each now opens a gap of its own that names the source, and
   closes it again on re-enable or resume. Closing is scoped to that source: ending one app's pause
   no longer ends another's.
+  The setting and the gap are one write, under the pipeline lock and in one transaction. Written
+  separately, as the first attempt did, two rapid flips could commit their settings in one order
+  and their gaps in the other — leaving a source enabled with an open "disabled by the user"
+  interval — and a process death between the halves left the same contradiction. Setting a flag to
+  the value it already holds now writes nothing: a second tap is not a second interval. If the gap
+  cannot be written the setting does not move either, so capture is never stopped with nothing on
+  the health page saying so. Rows an earlier version left contradicting their own policy are closed
+  when the policy loads.
+  Removing a source closes the gap it left open, in the removal's own transaction: nothing could
+  ever close it afterwards, since re-adding goes through a path that opens and closes nothing, and
+  the health page renders an interval with no end as capture still being missing. "Remove and
+  delete this source's data" additionally drops the source's name from its gaps — the intervals
+  stay, because deleting them would hide a loss the user had already been shown, but they stop
+  naming an app that was asked to be forgotten.
 - Gaps can say which source they belong to. Most cannot and must not: of the seven places that
   record one, five are process-wide. None can ever name a conversation — identity is resolved during
   the ingest that did not happen — so there is deliberately no conversation column.

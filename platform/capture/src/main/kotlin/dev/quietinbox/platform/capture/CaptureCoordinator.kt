@@ -405,6 +405,31 @@ class CaptureCoordinator @Inject constructor(
      * in-memory policy update happen under the pipeline lock, so an event waiting for the lock
      * sees the new policy in its second fence, never the old one.
      */
+    /**
+     * Closes the source gaps the policy contradicts. Must be called under [pipelineMutex], with
+     * [known] the packages the source table still holds.
+     *
+     * The flag and its gap are written in one transaction now, so this cannot fire for anything
+     * this version wrote. It exists for the rows earlier versions left behind — a gap opened after
+     * its setting had already committed, then a process death — and for a source removed while a
+     * gap of its own was open. The policy is the truth: it is what capture actually does, and an
+     * interval that says otherwise reads on the health page as capture still being missing.
+     */
+    private suspend fun reconcileSourceGaps(known: Set<String>) {
+        val now = System.currentTimeMillis()
+        guarded {
+            for (gap in health.openSourceGaps()) {
+                val pkg = gap.packageName ?: continue
+                val contradicted = when (gap.reason) {
+                    GapReason.SOURCE_DISABLED_BY_USER.name -> pkg in enabledPackages
+                    GapReason.SOURCE_PAUSED_BY_USER.name -> pkg !in pausedPackages
+                    else -> false
+                }
+                if (contradicted || pkg !in known) health.closeGap(gap.id, now)
+            }
+        }
+    }
+
     private suspend fun changeSourcePolicy(block: suspend () -> Unit) {
         pipelineMutex.withLock {
             block()
@@ -421,6 +446,7 @@ class CaptureCoordinator @Inject constructor(
         val list = sources.sources()
         enabledPackages = list.filter { it.enabled }.map { it.packageName }.toSet()
         pausedPackages = list.filter { it.enabled && it.paused }.map { it.packageName }.toSet()
+        reconcileSourceGaps(list.map { it.packageName }.toSet())
         settleColdStartGap()
         releaseHeld()
         sourcesLoaded = true
@@ -607,36 +633,61 @@ class CaptureCoordinator @Inject constructor(
      * not, and nothing recorded the window at all (QI-CAPTURE-018).
      */
     suspend fun setSourceEnabled(packageName: String, enabled: Boolean) {
-        changeSourcePolicy {
-            sources.setEnabled(packageName, enabled)
-            if (!enabled) ingest.discardPendingJournal(packageName)
-        }
         val now = System.currentTimeMillis()
-        guarded {
-            if (enabled) {
-                health.closeOpenGapsForSource(now, packageName, GapReason.SOURCE_DISABLED_BY_USER)
-            } else {
-                health.openGap(now, GapReason.SOURCE_DISABLED_BY_USER, GapPrecision.EXACT, now, packageName)
+        changeSourcePolicy {
+            // The flag and the gap go in one transaction, under this lock. Written after the lock
+            // instead, as they were, two rapid flips could commit their settings in one order and
+            // their gaps in the other, leaving the source enabled with an open "disabled" gap; a
+            // process death between the halves left the same contradiction (round 33).
+            val changed = sources.setEnabled(packageName, enabled) {
+                if (enabled) {
+                    health.closeOpenGapsForSource(now, packageName, GapReason.SOURCE_DISABLED_BY_USER)
+                } else {
+                    health.openGap(now, GapReason.SOURCE_DISABLED_BY_USER, GapPrecision.EXACT, now, packageName)
+                }
             }
+            if (changed && !enabled) ingest.discardPendingJournal(packageName)
         }
     }
 
     suspend fun setSourcePaused(packageName: String, paused: Boolean) {
-        changeSourcePolicy { sources.setPaused(packageName, paused) }
         val now = System.currentTimeMillis()
-        guarded {
-            if (paused) {
-                health.openGap(now, GapReason.SOURCE_PAUSED_BY_USER, GapPrecision.EXACT, now, packageName)
-            } else {
-                health.closeOpenGapsForSource(now, packageName, GapReason.SOURCE_PAUSED_BY_USER)
+        var changed = false
+        changeSourcePolicy {
+            changed = sources.setPaused(packageName, paused) {
+                if (paused) {
+                    health.openGap(now, GapReason.SOURCE_PAUSED_BY_USER, GapPrecision.EXACT, now, packageName)
+                } else {
+                    health.closeOpenGapsForSource(now, packageName, GapReason.SOURCE_PAUSED_BY_USER)
+                }
             }
         }
-        if (!paused) scope.launch { replayJournal() }
+        if (changed && !paused) scope.launch { replayJournal() }
     }
 
-    /** [SourceRepository.remove] discards the pending journal and, with [deleteData], the whole deletion graph. */
-    suspend fun removeSource(packageName: String, deleteData: Boolean) =
-        changeSourcePolicy { sources.remove(packageName, deleteData) }
+    /**
+     * [SourceRepository.remove] discards the pending journal and, with [deleteData], the whole
+     * deletion graph. Its open gaps are closed in the same transaction: once the source is gone
+     * nothing can ever close them, and re-adding it goes through `addSource`, which opens nothing.
+     */
+    suspend fun removeSource(packageName: String, deleteData: Boolean) {
+        val now = System.currentTimeMillis()
+        changeSourcePolicy {
+            sources.remove(packageName, deleteData) {
+                health.closeOpenGapsForSource(
+                    now,
+                    packageName,
+                    GapReason.SOURCE_DISABLED_BY_USER,
+                    GapReason.SOURCE_PAUSED_BY_USER,
+                )
+                // "Remove and delete this source's data" is the user asking for the app to be
+                // forgotten. The intervals stay — they are the honest record that capture stopped,
+                // and deleting them would hide a loss the user was already shown — but they stop
+                // naming it.
+                if (deleteData) health.forgetGapSource(packageName)
+            }
+        }
+    }
 
     // ---- maintenance (QI-SEC-003) -----------------------------------------------------------
 

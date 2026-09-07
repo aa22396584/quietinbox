@@ -6,6 +6,7 @@ import android.service.notification.StatusBarNotification
 import dev.quietinbox.core.model.CaptureOrigin
 import dev.quietinbox.core.model.GapPrecision
 import dev.quietinbox.core.model.GapReason
+import dev.quietinbox.core.model.KnownSources
 import dev.quietinbox.core.model.TruncationFlag
 import dev.quietinbox.core.model.ListenerState
 import dev.quietinbox.core.model.NotificationSnapshot
@@ -695,7 +696,7 @@ class CaptureCoordinatorTest : FunSpec({
         releaseCheckpoint.complete(Unit)
 
         awaitUntil { h.journaled shouldBe listOf("evt-commit") }
-        stillHolds { coVerify(exactly = 0) { h.ingest.commit(any(), any(), any(), any(), any(), any(), any()) } }
+        stillHolds { coVerify(exactly = 0) { h.ingest.commit(any(), any(), any(), any(), any(), any(), any(), any()) } }
         // Not discarded either: it waits in the journal for the resume.
         coVerify(exactly = 0) { h.ingest.markJournal("evt-commit", "DISCARDED", any()) }
     }
@@ -1147,7 +1148,7 @@ class CaptureCoordinatorTest : FunSpec({
     test("bitmaps in flight at the copier still count against the queue bound") {
         val h = Harness()
         val bitmap: android.graphics.Bitmap = mockk(relaxed = true)
-        coEvery { h.ingest.commit(any(), any(), any(), any(), any(), any(), any()) } returns CommitOutcome(1L, listOf(1L), emptyList(), listOf(1L), 0, false)
+        coEvery { h.ingest.commit(any(), any(), any(), any(), any(), any(), any(), any()) } returns CommitOutcome(1L, listOf(1L), emptyList(), listOf(1L), 0, false)
         val copying = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
         val bitmaps = Collections.synchronizedList(ArrayList<android.graphics.Bitmap?>())
@@ -1370,7 +1371,7 @@ class CaptureCoordinatorTest : FunSpec({
         // With a timeout, because the gap is written in the acceptance transaction and the commit
         // comes after it: verifying without one asserts on a point the pipeline has not reached
         // yet, and passes or fails on scheduling (round 36 Codex M1).
-        coVerify(timeout = 5_000, exactly = 1) { h.ingest.commit(any(), any(), any(), any(), any(), any(), any()) }
+        coVerify(timeout = 5_000, exactly = 1) { h.ingest.commit(any(), any(), any(), any(), any(), any(), any(), any()) }
         coVerify(exactly = 0) { h.ingest.markJournal("evt-drop", "SKIPPED", any()) }
     }
 
@@ -1664,7 +1665,7 @@ class CaptureCoordinatorTest : FunSpec({
             // Not committed. The commit is what would have stored the survivors while the record of
             // what they were missing went missing with them, and it writes COMMITTED itself, so
             // `markJournal` never sees it: asserting only on `markJournal` asserts nothing here.
-            coVerify(exactly = 0) { h.ingest.commit(any(), any(), any(), any(), any(), any(), any()) }
+            coVerify(exactly = 0) { h.ingest.commit(any(), any(), any(), any(), any(), any(), any(), any()) }
             coVerify(exactly = 0) { h.ingest.markJournalRetryable(any(), any()) }
             coVerify(exactly = 0) { h.ingest.markJournal("evt-claim-fails", any(), any()) }
             h.gaps.isEmpty() shouldBe true
@@ -1703,7 +1704,7 @@ class CaptureCoordinatorTest : FunSpec({
 
         // The 201st row reached the pipeline and was stored. Nothing else in this test commits:
         // the 200 ahead of it return before the fence.
-        coVerify(timeout = 10_000, atLeast = 1) { h.ingest.commit(any(), any(), any(), any(), any(), any(), any()) }
+        coVerify(timeout = 10_000, atLeast = 1) { h.ingest.commit(any(), any(), any(), any(), any(), any(), any(), any()) }
         // And the blocked rows paid for it with their place on the page, not with their evidence:
         // no attempt was charged to any of them, and none was given up on.
         stillHolds {
@@ -1857,7 +1858,7 @@ class CaptureCoordinatorTest : FunSpec({
         h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
 
         // The other source's event was stored in the same pass that deferred all two hundred.
-        coVerify(timeout = 10_000, atLeast = 1) { h.ingest.commit(any(), any(), any(), any(), any(), any(), any()) }
+        coVerify(timeout = 10_000, atLeast = 1) { h.ingest.commit(any(), any(), any(), any(), any(), any(), any(), any()) }
         stillHolds {
             h.lossDeferred.size shouldBe 200
             coVerify(exactly = 0) { h.ingest.markJournalRetryable(any(), any()) }
@@ -1893,7 +1894,7 @@ class CaptureCoordinatorTest : FunSpec({
 
         coVerify(timeout = 5_000, atLeast = 1) { h.ingest.claimEventLoss("evt-deferred-elsewhere", any()) }
         stillHolds {
-            coVerify(exactly = 0) { h.ingest.commit(any(), any(), any(), any(), any(), any(), any()) }
+            coVerify(exactly = 0) { h.ingest.commit(any(), any(), any(), any(), any(), any(), any(), any()) }
             coVerify(exactly = 0) { h.ingest.markJournal("evt-deferred-elsewhere", any(), any()) }
             h.gaps.isEmpty() shouldBe true
         }
@@ -1960,14 +1961,14 @@ class CaptureCoordinatorTest : FunSpec({
 
         // Pass one spends its three rounds on the prefix and never reaches the tail.
         awaitUntil { h.lossDeferred.size shouldBe 6 }
-        stillHolds { coVerify(exactly = 0) { h.ingest.commit(any(), any(), any(), any(), any(), any(), any()) } }
+        stillHolds { coVerify(exactly = 0) { h.ingest.commit(any(), any(), any(), any(), any(), any(), any(), any()) } }
 
         // A second trigger. The deferred prefix is no longer at the head, so the tail is the first
         // thing the page returns and it is committed — before the prefix is retried at the drain.
         coordinator.setPaused(true)
         coordinator.setPaused(false)
 
-        coVerify(timeout = 10_000, atLeast = 1) { h.ingest.commit(any(), any(), any(), any(), any(), any(), any()) }
+        coVerify(timeout = 10_000, atLeast = 1) { h.ingest.commit(any(), any(), any(), any(), any(), any(), any(), any()) }
     }
 
     test("the pending rows of a source with more than one page are all settled before it is disabled") {
@@ -2025,5 +2026,63 @@ class CaptureCoordinatorTest : FunSpec({
 
         awaitUntil { (maxConcurrent.get() >= 1) shouldBe true }
         stillHolds { maxConcurrent.get() shouldBe 1 }
+    }
+    // ---- Round 35 Codex I1: a whole row the parser proved was cut away is a loss the commit records ----
+
+    /** A WhatsApp group body of exactly 4,096 characters ending on a line separator, plus a row that was cut away. */
+    fun cutOnSeparator(eventId: String): CapturedNotification {
+        val prefix = "Alice: " + "a".repeat(2037) + "\n" + "Bob: " + "b".repeat(2045) + "\n"
+        val raw = prefix + "Carol: gone"
+        return CapturedNotification(
+            Fixtures.snapshot(Fixtures.bigText("Family", raw, bigText = raw), packageName = KnownSources.WHATSAPP, eventId = eventId),
+            null,
+        )
+    }
+
+    test("a whole row the parser proved was cut away is recorded as a gap handed to the commit") {
+        val h = Harness()
+        h.sourceList += sourceConfig(KnownSources.WHATSAPP)
+        val recordedInsideCommit = java.util.concurrent.atomic.AtomicInteger()
+        // The fake does what the repository does: runs the loss callback inside the commit. That
+        // the real one does so in the same transaction is decided on a vault, in
+        // JournalLossTransactionTest; this test decides that the coordinator hands it in at all,
+        // and with the reason and scope the health page will show.
+        coEvery { h.ingest.commit(any(), any(), any(), any(), any(), any(), any(), any()) } coAnswers {
+            arg<(suspend () -> Unit)?>(7)?.let { it(); recordedInsideCommit.incrementAndGet() }
+            CommitOutcome(1L, listOf(1L, 2L), emptyList(), emptyList(), 0, false)
+        }
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+
+        coordinator.offerCaptured(cutOnSeparator("evt-cut"))
+
+        coVerify(timeout = 5_000, exactly = 1) {
+            h.health.recordGap(any(), any(), GapReason.MESSAGES_DROPPED, GapPrecision.BOUNDED, any(), KnownSources.WHATSAPP)
+        }
+        awaitUntil { recordedInsideCommit.get() shouldBe 1 }
+        // Not at acceptance: the snapshot carries no *_DROPPED flag, because the framework dropped
+        // nothing — the parser is the only one who can see this loss.
+        stillHolds { coVerify(exactly = 1) { h.health.recordGap(any(), any(), GapReason.MESSAGES_DROPPED, any(), any(), any()) } }
+    }
+
+    test("a cut inside the last row is that row's own flag, not a gap") {
+        // The negative control for the test above: Bob lost his end and says so on his row;
+        // whether a row followed him is not knowable, and the commit records nothing.
+        val h = Harness()
+        h.sourceList += sourceConfig(KnownSources.WHATSAPP)
+        val committed = CompletableDeferred<Unit>()
+        coEvery { h.ingest.commit(any(), any(), any(), any(), any(), any(), any(), any()) } coAnswers {
+            arg<(suspend () -> Unit)?>(7)?.invoke()
+            committed.complete(Unit)
+            CommitOutcome(1L, listOf(1L, 2L), emptyList(), emptyList(), 0, false)
+        }
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+
+        val raw = "Alice: " + "a".repeat(2037) + "\n" + "Bob: " + "b".repeat(3000)
+        coordinator.offerCaptured(CapturedNotification(Fixtures.snapshot(Fixtures.bigText("Family", raw, bigText = raw), packageName = KnownSources.WHATSAPP, eventId = "evt-inside"), null))
+
+        withTimeout(5_000) { committed.await() }
+        stillHolds { coVerify(exactly = 0) { h.health.recordGap(any(), any(), GapReason.MESSAGES_DROPPED, any(), any(), any()) } }
     }
 })

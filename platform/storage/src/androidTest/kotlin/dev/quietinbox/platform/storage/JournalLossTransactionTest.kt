@@ -5,6 +5,9 @@ import androidx.test.platform.app.InstrumentationRegistry
 import dev.quietinbox.core.model.GapPrecision
 import dev.quietinbox.core.model.GapReason
 import dev.quietinbox.core.testing.Fixtures
+import dev.quietinbox.core.reconcile.Reconciler
+import dev.quietinbox.core.parser.StandardParser
+import dev.quietinbox.core.identity.IdentityResolver
 import dev.quietinbox.platform.crypto.KeyMaterial
 import dev.quietinbox.platform.storage.db.DatabaseHolder
 import dev.quietinbox.platform.storage.db.VaultState
@@ -80,6 +83,9 @@ class JournalLossTransactionTest {
 
     private fun snapshotAt(eventId: String, observedAt: Long) =
         Fixtures.snapshot(Fixtures.base(title = "t", text = "b"), packageName = pkg, eventId = eventId, observedAt = observedAt)
+
+    private suspend fun messageCount(): Int =
+        holder.db().openHelper.writableDatabase.query("SELECT COUNT(*) FROM message").use { it.moveToFirst(); it.getInt(0) }
 
     private suspend fun allGaps() = holder.db().healthDao().observeGaps(100).first()
 
@@ -569,6 +575,62 @@ class JournalLossTransactionTest {
         ingest.journal(snapshotAt("evt-settled-2", 300L), "gen", 60_000) { recordLoss() } shouldBe true
 
         ingest.pendingJournalForPackage(pkg).snapshots.map { it.eventId } shouldBe listOf("evt-carried")
+        Unit
+    }
+    // ---- Round 35 Codex I1: a loss the parser proved is committed with the batch or not at all ----
+
+    private fun groupBody(eventId: String) =
+        Fixtures.snapshot(Fixtures.bigText("Family", "Alice: hi\nBob: hello", bigText = "Alice: hi\nBob: hello"), packageName = pkg, eventId = eventId)
+
+    private suspend fun commitWithLoss(snapshot: dev.quietinbox.core.model.NotificationSnapshot, withIdentity: Boolean, loss: suspend () -> Unit) {
+        val parser = StandardParser()
+        val batch = parser.parse(snapshot)
+        val id = if (withIdentity) IdentityResolver().resolve(snapshot, batch) else null
+        val r = id?.let { Reconciler().reconcile(snapshot.notificationKey, batch.messages, ingest.checkpoint(it.streamKey), lookupById = { null }) }
+        ingest.commit(snapshot, batch, id, r, "gen", null, mediaAllowed = false, lossOnCommit = loss)
+    }
+
+    @Test
+    fun aLossTheParserProvedIsWrittenInTheCommitThatStoresTheBatch() = runBlocking {
+        ready()
+        val s = groupBody("evt-cut")
+        ingest.journal(s, "gen", 60_000) shouldBe true
+
+        commitWithLoss(s, withIdentity = true) { recordLoss() }
+
+        ingest.isJournalPending("evt-cut") shouldBe false
+        messageCount() shouldBe 1
+        allGaps().count { it.reason == GapReason.MESSAGES_DROPPED.name } shouldBe 1
+        Unit
+    }
+
+    /** The exit that stores nothing — no identity, so no messages — still leaves PENDING, and must still record. */
+    @Test
+    fun aLossTheParserProvedIsWrittenOnTheCommitExitThatStoresNothingToo() = runBlocking {
+        ready()
+        val s = groupBody("evt-cut-empty")
+        ingest.journal(s, "gen", 60_000) shouldBe true
+
+        commitWithLoss(s, withIdentity = false) { recordLoss() }
+
+        ingest.isJournalPending("evt-cut-empty") shouldBe false
+        messageCount() shouldBe 0
+        allGaps().count { it.reason == GapReason.MESSAGES_DROPPED.name } shouldBe 1
+        Unit
+    }
+
+    /** The write the record depends on fails: nothing is stored, the row stays PENDING, the replay gets another go. */
+    @Test
+    fun aCommitWhoseLossCannotBeWrittenStoresNothingAndStaysPending() = runBlocking {
+        ready()
+        val s = groupBody("evt-cut-refused")
+        ingest.journal(s, "gen", 60_000) shouldBe true
+
+        runCatching { commitWithLoss(s, withIdentity = true) { error("the gap write failed") } }.isFailure shouldBe true
+
+        withClue("the batch must not be stored without its record") { messageCount() shouldBe 0 }
+        withClue("the row is the replay's to retry") { ingest.isJournalPending("evt-cut-refused") shouldBe true }
+        allGaps().isEmpty() shouldBe true
         Unit
     }
 }

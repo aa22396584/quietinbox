@@ -66,8 +66,17 @@ open class StandardParser : NotificationParser {
             warnings = warnings,
             parserId = id,
             parserVersion = version,
+            wholeMessagesLost = messages.size >= 2 && wholeMessagesLost(shape, messages),
         )
     }
+
+    /**
+     * Whether the body provably lost a whole message before this parser saw it — see
+     * [ParsedBatch.wholeMessagesLost]. The standard parser splits nothing into rows, so it can
+     * never show that; an adapter that does split overrides this with the same analysis it
+     * split by, so the two cannot disagree about which body they looked at.
+     */
+    protected open fun wholeMessagesLost(shape: NotificationShape, messages: List<MessageCandidate>): Boolean = false
 
     protected open fun summaryBatch(snapshot: NotificationSnapshot, warnings: MutableSet<ParseWarning>): ParsedBatch {
         val shape = snapshot.shape

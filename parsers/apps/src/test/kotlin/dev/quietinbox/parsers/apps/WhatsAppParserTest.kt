@@ -104,6 +104,9 @@ class WhatsAppParserTest : FunSpec({
 
         batch.messages.map { it.body } shouldBe listOf("a".repeat(2037), "b".repeat(2045))
         batch.messages.map { it.textTruncated } shouldBe listOf(false, false)
+        // Round 35 Codex I1: two correct falses said nothing about Carol. The loss lives on no row,
+        // so it goes on the batch, and the coordinator records it with the commit.
+        batch.wholeMessagesLost shouldBe true
     }
 
     test("a cut that landed inside the last row still marks it") {
@@ -114,5 +117,28 @@ class WhatsAppParserTest : FunSpec({
 
         batch.messages shouldHaveSize 2
         batch.messages.map { it.textTruncated } shouldBe listOf(false, true)
+        // Bob's own flag is the record here. Whether a row followed Bob's is not knowable, and
+        // the batch does not guess.
+        batch.wholeMessagesLost shouldBe false
+    }
+
+    test("a group body that was not cut loses no row") {
+        val raw = "Alice: hi\nBob: hello\nCarol: hey"
+        val batch = parser.parse(waSnapshot(Fixtures.bigText("Family", raw, bigText = raw)))
+
+        batch.messages shouldHaveSize 3
+        batch.messages.none { it.textTruncated } shouldBe true
+        batch.wholeMessagesLost shouldBe false
+    }
+
+    test("a body the adapter does not split never claims a lost row, cut or not") {
+        // A 1:1 body over the limit: the standard path keeps it as one candidate, marks that
+        // candidate shortened, and has no rows to have lost.
+        val raw = "Alice: " + "a".repeat(5000)
+        val batch = parser.parse(waSnapshot(Fixtures.bigText("Alice", raw, bigText = raw)))
+
+        batch.messages shouldHaveSize 1
+        batch.messages[0].textTruncated shouldBe true
+        batch.wholeMessagesLost shouldBe false
     }
 })

@@ -159,6 +159,22 @@ data class ParsedBatch(
     val warnings: Set<ParseWarning>,
     val parserId: String,
     val parserVersion: String,
+    /**
+     * True when the parser can *prove* that at least one whole message was cut away from the body
+     * before it saw it — as opposed to a message that arrived shortened, which is [MessageCandidate.textTruncated]
+     * on that row, or content the framework dropped before the snapshot, which is a
+     * `TruncationFlag` on the notification and recorded when the event is accepted.
+     *
+     * The one case today: a multi-row group body (`Sender: text` per line) whose bound fell on a
+     * line separator. Every surviving row is complete, so nothing on them may say "shortened", and
+     * the row that began after that separator is simply gone. The loss exists only relative to the
+     * batch that was stored, so the coordinator records it in the commit's transaction: committed
+     * with the messages or not at all. A cut that fell *inside* the last row leaves this false —
+     * that row carries its own flag, and whether a further row followed is not knowable.
+     *
+     * Raised only alongside at least two candidates; a parser never sets it on an empty batch.
+     */
+    val wholeMessagesLost: Boolean = false,
 ) {
     companion object {
         fun empty(parserId: String, parserVersion: String, status: ContentStatus = ContentStatus.EMPTY) = ParsedBatch(

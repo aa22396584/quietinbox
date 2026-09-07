@@ -1093,6 +1093,27 @@ class CaptureCoordinator @Inject constructor(
         // Re-checked right before the write: parsing and the id lookups above took time, and a
         // pause that landed meanwhile must still win (the row stays PENDING for the replay).
         if (commitFenced(snapshot)) return false
+        // A loss the parser proved — a whole row cut away from a group body on a line separator —
+        // is recorded in the commit's own transaction: it exists only relative to the batch being
+        // stored, and the surviving rows are all complete, so no row may carry it (round 35 Codex
+        // I1). Like the acceptance loss it is per event: a repost of the same cut body is a new
+        // event and records it again. A row the user's disable discards before it is ever parsed
+        // drops the batch and this with it, by that same choice.
+        val lossOnCommit: (suspend () -> Unit)? =
+            if (batch.wholeMessagesLost) {
+                {
+                    health.recordGap(
+                        snapshot.postedAtEpochMs ?: snapshot.observedAtEpochMs,
+                        snapshot.observedAtEpochMs,
+                        GapReason.MESSAGES_DROPPED,
+                        GapPrecision.BOUNDED,
+                        now,
+                        snapshot.source.packageName,
+                    )
+                }
+            } else {
+                null
+            }
         val outcome = ingest.commit(
             snapshot = snapshot,
             batch = batch,
@@ -1101,6 +1122,7 @@ class CaptureCoordinator @Inject constructor(
             generation = generation,
             retentionMs = retentionDays * DAY_MS,
             mediaAllowed = appSettings.mediaCopyEnabled && (source?.mediaEnabled ?: true),
+            lossOnCommit = lossOnCommit,
         )
         // Only when rows were actually written. `commit` has a path that journals the event and
         // returns an empty outcome (no identity, or every decision suppressed), and `now` is the

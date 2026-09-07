@@ -280,6 +280,14 @@ class IngestRepository @Inject constructor(
     /**
      * Applies parser + reconciler output atomically. Never deletes; never rewrites source times.
      * A message whose fingerprint the user deleted (suppression) is skipped and counted.
+     *
+     * [lossOnCommit] is a loss the parser found — a whole row cut away from the body, which
+     * exists only relative to the batch being stored ([ParsedBatch.wholeMessagesLost]). It runs
+     * inside this transaction, immediately before the row leaves PENDING, on *both* exits: the
+     * one that stores messages and the one that stores nothing because the identity or every
+     * decision was empty. Either way the event is COMMITTED with its record or the whole write
+     * rolls back and the replay tries again; a record written after the commit could be lost
+     * between the two, and one written before could stand for a commit that never happened.
      */
     suspend fun commit(
         snapshot: NotificationSnapshot,
@@ -289,6 +297,7 @@ class IngestRepository @Inject constructor(
         generation: String,
         retentionMs: Long?,
         mediaAllowed: Boolean,
+        lossOnCommit: (suspend () -> Unit)? = null,
     ): CommitOutcome {
         val db = holder.db()
         val now = snapshot.observedAtEpochMs
@@ -308,6 +317,7 @@ class IngestRepository @Inject constructor(
             }
 
             if (identity == null || reconcile == null || reconcile.decisions.isEmpty()) {
+                lossOnCommit?.invoke()
                 db.journalDao().setState(snapshot.eventId, "COMMITTED", null)
                 return@withTransaction CommitOutcome(null, emptyList(), emptyList(), emptyList(), 0, summaryRecorded)
             }
@@ -518,6 +528,7 @@ class IngestRepository @Inject constructor(
                 )
             }
 
+            lossOnCommit?.invoke()
             db.journalDao().setState(snapshot.eventId, "COMMITTED", null)
             CommitOutcome(conversationId, newIds, ambiguousIds, pendingMedia, suppressed, summaryRecorded, revisedIds)
         }

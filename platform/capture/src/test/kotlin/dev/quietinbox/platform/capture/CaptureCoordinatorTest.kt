@@ -1796,4 +1796,41 @@ class CaptureCoordinatorTest : FunSpec({
         // And the rows really are gone, which is what makes the moment above the last one.
         h.pendingByPackage[ENABLED_PKG] shouldBe null
     }
+
+    test("rows that cannot settle do not starve a second source's rows either") {
+        val h = Harness()
+        // Round 36, Codex I1's fourth required case: fairness between sources. The page is not
+        // per-source, so a source whose rows all refuse to settle fills it for everyone — the
+        // shape `pendingExcluding` already exists to prevent for a paused source. A second source
+        // capturing normally must not stop being replayed because the first one cannot settle.
+        val other = "com.example.other"
+        coEvery { h.sources.sources() } returns listOf(sourceConfig(ENABLED_PKG), sourceConfig(other))
+        h.pendingReplay += (1..200).map { i ->
+            "gen-old" to Fixtures.snapshot(
+                shape = Fixtures.base(title = null, text = null).copy(truncated = setOf(TruncationFlag.LINES)),
+                packageName = ENABLED_PKG,
+                eventId = "evt-blocking-%03d".format(i),
+                observedAt = 1_000L + i,
+            )
+        }
+        h.pendingReplay += "gen-old" to Fixtures.snapshot(
+            shape = Fixtures.messaging(conversationTitle = "Group") { message("Bo", "from the other app") },
+            packageName = other,
+            eventId = "evt-other-source",
+            observedAt = 9_000L,
+        )
+        coEvery { h.ingest.isJournalPending(any()) } returns true
+        h.gapWritesFail = true
+
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+        h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
+
+        // The other source's event was stored in the same pass that deferred all two hundred.
+        coVerify(timeout = 10_000, atLeast = 1) { h.ingest.commit(any(), any(), any(), any(), any(), any(), any()) }
+        stillHolds {
+            h.lossDeferred.size shouldBe 200
+            coVerify(exactly = 0) { h.ingest.markJournalRetryable(any(), any()) }
+        }
+    }
 })

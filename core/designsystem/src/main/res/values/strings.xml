@@ -129,6 +129,7 @@
     <string name="search_range_30d">30 days</string>
     <string name="search_results_count">%1$d results</string>
     <string name="search_results_shown">Newest %1$d shown; there may be more</string>
+    <string name="search_no_results_yet">Nothing matched in the part of the index searched so far.</string>
     <string name="search_load_more">Load more</string>
     <string name="search_all_sources">All sources</string>
 

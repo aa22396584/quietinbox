@@ -41,6 +41,8 @@ data class CommitOutcome(
     val pendingMediaMessageIds: List<Long>,
     val suppressedCount: Int,
     val summaryRecorded: Boolean,
+    /** Messages whose body this event replaced. A revision is a write like any other. */
+    val revisedMessageIds: List<Long> = emptyList(),
 )
 
 @Serializable
@@ -231,6 +233,7 @@ class IngestRepository @Inject constructor(
             val newIds = ArrayList<Long>()
             val ambiguousIds = ArrayList<Long>()
             val pendingMedia = ArrayList<Long>()
+            val revisedIds = ArrayList<Long>()
             var suppressed = 0
             // Decision index -> message id; an explicit null means "observed, but no stored row"
             // (e.g. a window id that no longer exists) so the checkpoint never keeps a dangling id.
@@ -330,6 +333,7 @@ class IngestRepository @Inject constructor(
                             db.messageDao().applyRevision(id, c.body, snapshot.eventId)
                             db.searchDao().deleteForMessage(id)
                             indexTokens(db, id, c.body)
+                            revisedIds += id
                             storedIds[index] = id
                         } else {
                             storedIds[index] = null
@@ -379,7 +383,7 @@ class IngestRepository @Inject constructor(
             }
 
             db.journalDao().setState(snapshot.eventId, "COMMITTED", null)
-            CommitOutcome(conversationId, newIds, ambiguousIds, pendingMedia, suppressed, summaryRecorded)
+            CommitOutcome(conversationId, newIds, ambiguousIds, pendingMedia, suppressed, summaryRecorded, revisedIds)
         }
     }
 

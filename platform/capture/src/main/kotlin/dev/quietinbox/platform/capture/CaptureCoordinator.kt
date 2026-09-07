@@ -880,7 +880,11 @@ class CaptureCoordinator @Inject constructor(
         // returns an empty outcome (no identity, or every decision suppressed), and `now` is the
         // event's *observed* time — a journal replay carries an old one, which would make the page
         // say a copy was saved hours ago, or walk the value backwards.
-        if (outcome.newMessageIds.isNotEmpty() || outcome.summaryRecorded) {
+        // Every outcome that wrote a row counts, not only brand-new messages: an AMBIGUOUS_REPEAT
+        // inserts a real message, and a revision replaces one and stores the body it replaced.
+        if (outcome.newMessageIds.isNotEmpty() || outcome.ambiguousMessageIds.isNotEmpty() ||
+            outcome.revisedMessageIds.isNotEmpty() || outcome.summaryRecorded
+        ) {
             val savedAt = System.currentTimeMillis()
             _status.update { it.copy(lastCommittedAtEpochMs = maxOf(it.lastCommittedAtEpochMs ?: 0L, savedAt)) }
         }

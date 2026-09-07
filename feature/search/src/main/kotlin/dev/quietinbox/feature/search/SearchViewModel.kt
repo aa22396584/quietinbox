@@ -132,8 +132,12 @@ class SearchViewModel @Inject constructor(
         val page = runCatching { search.searchPage(s.query, s.packages, fromMs(s.range), null, limit = PAGE, cursor = null) }
             .getOrDefault(SearchPage(emptyList(), null))
         local.update {
-            // `s` is the snapshot this run was started from; anything newer owns the state now.
-            if (it.generation != s.generation) return@update it
+            // Compare the same fields the pipeline's `distinctUntilChanged` compares, not the
+            // generation. A generation guard here is *stricter* than the pipeline: type "hello",
+            // then while it is in flight add a character and delete it again — the pipeline sees no
+            // change and does not re-run, but the one run in flight would be discarded, leaving
+            // `searching = true` and a spinner that never stops.
+            if (it.query != s.query || it.range != s.range || it.packages != s.packages) return@update it
             it.copy(
                 results = page.hits.toImmutableList(),
                 next = page.next,

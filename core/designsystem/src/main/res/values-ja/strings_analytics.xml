@@ -9,7 +9,7 @@
     <string name="analytics_tab_rankings">ランキング</string>
     <string name="analytics_tab_best_time">最適な時間帯</string>
     <string name="analytics_tab_chattiness">おしゃべり度</string>
-    <string name="analytics_tab_quiet">静かな日</string>
+    <string name="analytics_tab_quiet">静かな日の割合</string>
 
     <string name="analytics_sub_overview">選択した期間に観測したメッセージのみ。</string>
     <string name="analytics_sub_rankings">観測したメッセージのみ。誰が誰に返信したかの順位ではありません。</string>

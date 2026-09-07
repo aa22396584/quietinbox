@@ -133,7 +133,11 @@ fun SearchScreen(
                     icon = Icons.Outlined.Search,
                 )
                 state.vaultOpening || (state.searching && !state.searched) -> Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) { LoadingIndicator() }
-                state.results.isEmpty() -> EmptyState(
+                // "No matches" may only be said once the index really was exhausted. A first page
+                // that verified nothing while a cursor survives means the candidate scan budget ran
+                // out, and the Load more control lives in the branch below — so this branch used to
+                // both make a false claim and hide the only way to continue.
+                state.results.isEmpty() && state.next == null -> EmptyState(
                     title = stringResource(R.string.search_no_results, state.query),
                     body = stringResource(R.string.search_empty_hint),
                     icon = Icons.Outlined.SearchOff,
@@ -143,10 +147,10 @@ fun SearchScreen(
                         // A count is only a count when the index was exhausted. While a cursor
                         // remains, the page has a hundred hits and no idea how many exist.
                         Text(
-                            if (state.next == null) {
-                                stringResource(R.string.search_results_count, state.results.size)
-                            } else {
-                                stringResource(R.string.search_results_shown, state.results.size)
+                            when {
+                                state.next == null -> stringResource(R.string.search_results_count, state.results.size)
+                                state.results.isEmpty() -> stringResource(R.string.search_no_results_yet)
+                                else -> stringResource(R.string.search_results_shown, state.results.size)
                             },
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,

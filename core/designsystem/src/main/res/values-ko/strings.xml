@@ -127,6 +127,7 @@
     <string name="search_range_30d">30일</string>
     <string name="search_results_count">결과 %1$d개</string>
     <string name="search_results_shown">최신 %1$d개 표시 중이며 더 있을 수 있습니다</string>
+    <string name="search_no_results_yet">지금까지 검색한 범위에서는 일치하는 것이 없습니다.</string>
     <string name="search_load_more">더 불러오기</string>
     <string name="search_all_sources">모든 소스</string>
 

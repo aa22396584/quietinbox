@@ -236,9 +236,14 @@ fun ConversationScreen(
                             style = MaterialTheme.typography.labelLarge,
                             modifier = Modifier.padding(horizontal = 12.dp),
                         )
-                        IconButton(onClick = {
-                            copyToClipboard(context, state.messages.filter { it.id in state.selection }.joinToString("\n\n") { it.body })
-                        }) { Icon(Icons.Outlined.ContentCopy, stringResource(R.string.action_copy)) }
+                        val selectedText = state.messages.filter { it.id in state.selection }
+                            .map { it.body }.filter { it.isNotBlank() }.joinToString("\n\n")
+                        IconButton(
+                            onClick = { copyToClipboard(context, selectedText) },
+                            // A selection of media-only messages has nothing to copy; the button
+                            // used to accept the tap and do nothing at all.
+                            enabled = selectedText.isNotBlank(),
+                        ) { Icon(Icons.Outlined.ContentCopy, stringResource(R.string.action_copy)) }
                         IconButton(onClick = { deleteDialog = true }) { Icon(Icons.Outlined.Delete, stringResource(R.string.action_delete)) }
                         IconButton(onClick = viewModel::clearSelection) { Icon(Icons.Outlined.CheckCircle, stringResource(R.string.action_close)) }
                     } else {
@@ -369,8 +374,9 @@ fun ConversationScreen(
 }
 
 @OptIn(ExperimentalFoundationApi::class)
+/** `internal` rather than private so an instrumented test can assert the merged semantics node. */
 @Composable
-private fun MessageBubble(
+internal fun MessageBubble(
     message: Message,
     isGroup: Boolean,
     showSender: Boolean,

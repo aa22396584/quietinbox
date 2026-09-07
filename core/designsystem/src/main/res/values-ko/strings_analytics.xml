@@ -9,7 +9,7 @@
     <string name="analytics_tab_rankings">순위</string>
     <string name="analytics_tab_best_time">최적 시간대</string>
     <string name="analytics_tab_chattiness">수다스러움</string>
-    <string name="analytics_tab_quiet">조용한 날</string>
+    <string name="analytics_tab_quiet">조용한 날 비율</string>
 
     <string name="analytics_sub_overview">선택한 기간에 관측된 메시지만 집계합니다.</string>
     <string name="analytics_sub_rankings">관측된 메시지만 집계하며, 누가 누구에게 답장했는지는 순위에 넣지 않습니다.</string>

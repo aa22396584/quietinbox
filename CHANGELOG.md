@@ -117,7 +117,8 @@ were wrong in a way that changed the fix.
 - In a group chat TalkBack read the sender's name as a node of its own, so the message node never
   said who sent it. Merging from the outside does not fix this — a clickable is itself a merging
   semantics node and nested merging nodes are never absorbed — so the sender's name moved inside the
-  bubble, where it is genuinely part of the same node.
+  bubble, where it is genuinely part of the same node. `MessageBubbleSemanticsTest` asserts it
+  against the merged tree, with the unmerged tree as its negative control.
 - An avatar monogram cut a surrogate pair in half, so a name beginning with an emoji ("😀 Mom") drew a
   lone half-character as tofu. Two call sites, not one.
 - The Traditional Chinese activity tab was labelled 神隱率 — slang for "went dark on you" — which is

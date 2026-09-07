@@ -127,6 +127,7 @@
     <string name="search_range_30d">30 天內</string>
     <string name="search_results_count">%1$d 筆結果</string>
     <string name="search_results_shown">顯示最新 %1$d 筆，可能還有更多</string>
+    <string name="search_no_results_yet">在目前已搜尋過的索引範圍內沒有符合的內容。</string>
     <string name="search_load_more">載入更多</string>
     <string name="search_all_sources">所有來源</string>
 

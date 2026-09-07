@@ -1173,121 +1173,130 @@ class CaptureCoordinator @Inject constructor(
         // opening, a global recovery, a source being unpaused, a maintenance run ending, and a gap
         // write seen to succeed — and two of them overlapping is what makes a stale batch possible
         // at all: the page read is outside the pipeline lock, so one pass can defer a row another
-        // is still holding (round 37 Codex C1). The flag is set before the gate is tried and
-        // re-checked after it is released, so a request that arrives while a pass is finishing is
-        // never dropped; a caller that finds a pass running simply leaves it to that pass.
+        // is still holding (round 37 Codex C1). The flag is set before the gate is taken and only
+        // the gate's holder clears it, so N requests during one pass are one more pass, not N.
+        //
+        // Every caller *waits* for the gate rather than leaving a busy one to its holder. The
+        // holder can be cancelled mid-pass — a maintenance run cancels the work it is inside, a
+        // vault state change cancels the collector that started it — and a request that arrived
+        // meanwhile then had no one left to run it: round 38 Codex I1, reproduced against a real
+        // maintenance run ending on a pass it had just cancelled. A cancelled holder releases the
+        // gate on its way out; the next waiter takes it and finds the request still standing.
+        // Cheap and safe to wait here: no caller holds the pipeline lock (each launches into the
+        // scope), and the wait is cancellable like everything else in it.
         replayRequested = true
-        while (replayRequested && replayGate.tryLock()) {
-            try {
-                while (replayRequested) {
-                    replayRequested = false
-                    replayPass()
+        replayGate.withLock {
+            while (replayRequested) {
+                replayRequested = false
+                if (!replayPass()) {
+                    // Maintenance is active and nothing ran. The request is not served, so it is
+                    // not cleared: the run's end is what triggers it, and a waiter that arrives in
+                    // between finds it standing rather than gone. Never clear what no pass served.
+                    replayRequested = true
+                    return
                 }
-            } finally {
-                replayGate.unlock()
             }
         }
     }
 
-    private suspend fun replayPass() {
-        maintenance.work {
-            withContext(Dispatchers.Default) {
-                guarded {
-                    // Drain in batches until nothing is pending (a long lock-out can leave > 200 rows).
-                    var rounds = 0
-                    var progressed = true
-                    var resumed = false
-                    while (progressed && rounds++ < replayRounds && !paused) {
-                        // Fetch and process under the pipeline mutex so a live event that was journaled
-                        // but not yet committed cannot be replayed concurrently.
-                        // Paused sources are excluded at the query so they cannot occupy the whole page
-                        // and starve everyone else; their rows are replayed when they are unpaused.
-                        val batch = ingest.pendingJournal(limit = replayPageSize, excludingPackages = pausedPackages)
-                        if (batch.isEmpty()) {
-                            // Everything that is not deferred has been dealt with. Only now are the
-                            // deferred rows put back, and only once per pass. Doing it at the *head*
-                            // of the pass put a failing prefix in front of everything on every
-                            // trigger: 20,000 rows whose gap writes keep failing re-exhaust the
-                            // hundred-round budget each time, and row 20,001 is never read, however
-                            // many times a replay runs (round 37 Codex I1). Draining first means the
-                            // rows behind them are committed before the cohort is retried.
-                            if (resumed) break
-                            resumed = true
-                            var putBack = 0
-                            guarded { putBack = ingest.resumeDeferredSettlements() }
-                            if (putBack == 0) break
-                            continue
-                        }
-                        progressed = false
-                        for ((generation, snapshot) in batch) {
-                            if (paused) break
-                            // One event per lock acquisition so live capture is never starved; the
-                            // PENDING re-check inside the lock prevents double processing.
-                            pipelineMutex.withLock {
-                                if (!sourcesLoaded) loadSourcePolicy()
-                                if (!ingest.isJournalPending(snapshot.eventId)) {
-                                    progressed = true
-                                    return@withLock
-                                }
-                                val replay = snapshot.copy(origin = if (snapshot.origin == CaptureOrigin.SYNTHETIC) snapshot.origin else CaptureOrigin.REPLAY)
-                                // Before the fence, so a row discarded for a disabled source keeps
-                                // its record exactly as a live event's does (round 33) — and
-                                // outside the try below, because this is bookkeeping and must not
-                                // spend one of the event's three commit attempts. Inside it, three
-                                // failed gap writes would file the row FAILED and clear its
-                                // payload, losing the survivors *and* the record (round 35
-                                // subagent C2). Nor may a failure fall through to the commit:
-                                // storing the batch while the record of what it lost goes missing
-                                // is round 33's finding. The symmetry with live capture is exact —
-                                // an event whose loss cannot be written is not accepted, and a
-                                // carried-over row whose loss cannot be written is not committed.
-                                val settled = runCatching { recordCarriedOverLoss(replay) }
-                                settled.exceptionOrNull()?.let { if (it is CancellationException) throw it }
-                                // False and failed are the same answer to the only question that
-                                // matters here: is the loss on disk. A page is read outside this
-                                // lock, so between that read and this claim another pass can have
-                                // deferred the row — the claim then takes nothing and returns
-                                // without a gap, and committing on it clears the payload that was
-                                // the record (round 37 Codex C1).
-                                if (settled.getOrDefault(false) != true) {
-                                    // The repository deferred the row, which frees its place on the
-                                    // next page: 200 rows that cannot settle used to sit at the head
-                                    // of every page and starve row 201 for ever (round 36 Codex I1).
-                                    // Progress is claimed only if the row really left the candidate
-                                    // set — a vault that refused the deferral too still holds its
-                                    // place, and saying otherwise would re-read the same page until
-                                    // the round limit.
-                                    if (!ingest.isReplayCandidate(snapshot.eventId)) {
-                                        deferredSettlements = true
-                                        progressed = true
-                                    }
-                                    return@withLock
-                                }
-                                try {
-                                    processJournaled(replay, generation, null)
-                                } catch (e: Exception) {
-                                    if (e is CancellationException) throw e
-                                    ingest.markJournalRetryable(snapshot.eventId, "REPLAY_${e::class.java.simpleName}", commitFailureLoss(replay))
-                                }
-                                // A row left PENDING on purpose (paused source, maintenance) must not spin the loop.
-                                if (!ingest.isJournalPending(snapshot.eventId)) {
-                                    progressed = true
-                                } else if (!ingest.isReplayCandidate(snapshot.eventId)) {
-                                    // Its commit attempts ran out and the record of that could not be
-                                    // written, so the repository parked it (issue #28). Same accounting
-                                    // as a deferred settlement, and the same retry: a *commit* failure
-                                    // waits on a *gap* write succeeding because the gap table is what
-                                    // refused — the commit itself is tried again when the row is back.
+    /** One pass over the pending rows; false when maintenance was active and nothing ran. */
+    private suspend fun replayPass(): Boolean = maintenance.work {
+        withContext(Dispatchers.Default) {
+            guarded {
+                // Drain in batches until nothing is pending (a long lock-out can leave > 200 rows).
+                var rounds = 0
+                var progressed = true
+                var resumed = false
+                while (progressed && rounds++ < replayRounds && !paused) {
+                    // Fetch and process under the pipeline mutex so a live event that was journaled
+                    // but not yet committed cannot be replayed concurrently.
+                    // Paused sources are excluded at the query so they cannot occupy the whole page
+                    // and starve everyone else; their rows are replayed when they are unpaused.
+                    val batch = ingest.pendingJournal(limit = replayPageSize, excludingPackages = pausedPackages)
+                    if (batch.isEmpty()) {
+                        // Everything that is not deferred has been dealt with. Only now are the
+                        // deferred rows put back, and only once per pass. Doing it at the *head*
+                        // of the pass put a failing prefix in front of everything on every
+                        // trigger: 20,000 rows whose gap writes keep failing re-exhaust the
+                        // hundred-round budget each time, and row 20,001 is never read, however
+                        // many times a replay runs (round 37 Codex I1). Draining first means the
+                        // rows behind them are committed before the cohort is retried.
+                        if (resumed) break
+                        resumed = true
+                        var putBack = 0
+                        guarded { putBack = ingest.resumeDeferredSettlements() }
+                        if (putBack == 0) break
+                        continue
+                    }
+                    progressed = false
+                    for ((generation, snapshot) in batch) {
+                        if (paused) break
+                        // One event per lock acquisition so live capture is never starved; the
+                        // PENDING re-check inside the lock prevents double processing.
+                        pipelineMutex.withLock {
+                            if (!sourcesLoaded) loadSourcePolicy()
+                            if (!ingest.isJournalPending(snapshot.eventId)) {
+                                progressed = true
+                                return@withLock
+                            }
+                            val replay = snapshot.copy(origin = if (snapshot.origin == CaptureOrigin.SYNTHETIC) snapshot.origin else CaptureOrigin.REPLAY)
+                            // Before the fence, so a row discarded for a disabled source keeps
+                            // its record exactly as a live event's does (round 33) — and
+                            // outside the try below, because this is bookkeeping and must not
+                            // spend one of the event's three commit attempts. Inside it, three
+                            // failed gap writes would file the row FAILED and clear its
+                            // payload, losing the survivors *and* the record (round 35
+                            // subagent C2). Nor may a failure fall through to the commit:
+                            // storing the batch while the record of what it lost goes missing
+                            // is round 33's finding. The symmetry with live capture is exact —
+                            // an event whose loss cannot be written is not accepted, and a
+                            // carried-over row whose loss cannot be written is not committed.
+                            val settled = runCatching { recordCarriedOverLoss(replay) }
+                            settled.exceptionOrNull()?.let { if (it is CancellationException) throw it }
+                            // False and failed are the same answer to the only question that
+                            // matters here: is the loss on disk. A page is read outside this
+                            // lock, so between that read and this claim another pass can have
+                            // deferred the row — the claim then takes nothing and returns
+                            // without a gap, and committing on it clears the payload that was
+                            // the record (round 37 Codex C1).
+                            if (settled.getOrDefault(false) != true) {
+                                // The repository deferred the row, which frees its place on the
+                                // next page: 200 rows that cannot settle used to sit at the head
+                                // of every page and starve row 201 for ever (round 36 Codex I1).
+                                // Progress is claimed only if the row really left the candidate
+                                // set — a vault that refused the deferral too still holds its
+                                // place, and saying otherwise would re-read the same page until
+                                // the round limit.
+                                if (!ingest.isReplayCandidate(snapshot.eventId)) {
                                     deferredSettlements = true
                                     progressed = true
                                 }
+                                return@withLock
+                            }
+                            try {
+                                processJournaled(replay, generation, null)
+                            } catch (e: Exception) {
+                                if (e is CancellationException) throw e
+                                ingest.markJournalRetryable(snapshot.eventId, "REPLAY_${e::class.java.simpleName}", commitFailureLoss(replay))
+                            }
+                            // A row left PENDING on purpose (paused source, maintenance) must not spin the loop.
+                            if (!ingest.isJournalPending(snapshot.eventId)) {
+                                progressed = true
+                            } else if (!ingest.isReplayCandidate(snapshot.eventId)) {
+                                // Its commit attempts ran out and the record of that could not be
+                                // written, so the repository parked it (issue #28). Same accounting
+                                // as a deferred settlement, and the same retry: a *commit* failure
+                                // waits on a *gap* write succeeding because the gap table is what
+                                // refused — the commit itself is tried again when the row is back.
+                                deferredSettlements = true
+                                progressed = true
                             }
                         }
                     }
                 }
             }
         }
-    }
+    } != null
 
     /**
      * Settles a loss carried in from a release that recorded it nowhere, once.

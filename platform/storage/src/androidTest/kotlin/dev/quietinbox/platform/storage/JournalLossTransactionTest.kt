@@ -413,23 +413,26 @@ class JournalLossTransactionTest {
     }
 
     /**
-     * Round 37 subagent C2-a: the deferral may not walk back a settled row.
-     *
-     * `deferLoss` carries `lossRecorded = 0` for the same reason the claim does. Through
-     * `claimEventLoss` the predicate is unreachable — the catch runs only when the claim had won,
-     * so the row is at 0 there — which is exactly why it is pinned at this layer instead: the
-     * guard is one line, and without a test nothing would notice it going.
+     * Round 37 asked that a settled row never be walked back to deferred, because a resume that
+     * wrote 0 would let the next pass claim the same loss again. Under the two-bit column the row
+     * *can* be parked — a row given up on needs that whatever its arrival loss did (issue #28) —
+     * but the settled bit rides along and comes back with it: the claim is never walked back, and
+     * a second park finds nothing to park.
      */
     @Test
-    fun aSettledRowCannotBeWalkedBackToDeferred() = runBlocking {
+    fun aSettledRowParkedIsNeverWalkedBackToUnsettled() = runBlocking {
         ready()
-        ingest.journal(snapshot("evt-settled-defer"), "gen", 60_000) { recordLoss() } shouldBe true
+        ingest.journal(snapshot("evt-settled-park"), "gen", 60_000) { recordLoss() } shouldBe true
+        lossState("evt-settled-park") shouldBe LOSS_SETTLED
 
-        holder.db().journalDao().deferLoss("evt-settled-defer") shouldBe 0
-        // Still settled, and still out of reach of a second claim — a downgrade to 2 would let a
-        // later pass resume it and record the same loss a second time.
-        ingest.isReplayCandidate("evt-settled-defer") shouldBe true
-        ingest.claimEventLoss("evt-settled-defer") { recordLoss() } shouldBe LossClaim.ALREADY_RECORDED
+        holder.db().journalDao().deferLoss("evt-settled-park") shouldBe 1
+        lossState("evt-settled-park") shouldBe LOSS_DEFERRED_SETTLED
+        withClue("parked twice is parked once") { holder.db().journalDao().deferLoss("evt-settled-park") shouldBe 0 }
+        ingest.claimEventLoss("evt-settled-park") { recordLoss() } shouldBe LossClaim.DEFERRED
+
+        ingest.resumeDeferredSettlements() shouldBe 1
+        lossState("evt-settled-park") shouldBe LOSS_SETTLED
+        ingest.claimEventLoss("evt-settled-park") { recordLoss() } shouldBe LossClaim.ALREADY_RECORDED
         allGaps().count { it.reason == GapReason.MESSAGES_DROPPED.name } shouldBe 1
         Unit
     }

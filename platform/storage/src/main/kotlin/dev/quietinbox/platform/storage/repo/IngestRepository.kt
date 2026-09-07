@@ -137,7 +137,9 @@ class IngestRepository @Inject constructor(
      *
      * [writeGap] runs only for the caller that wins the claim, and in the same transaction as the
      * claim, so the two cannot come apart: a row whose gap write fails keeps its claim unspent and
-     * is tried again by the next pass. Returns whether this call was the one that recorded it.
+     * is tried again by the next pass. The answer is one of four: [LossClaim.RECORDED] (this call
+     * wrote the gap), [LossClaim.ALREADY_RECORDED] (an earlier one did), [LossClaim.DEFERRED] (the
+     * row is parked and the gap does not exist) and [LossClaim.NOT_PENDING] (the row has left).
      *
      * A `Boolean` here was the round-37 Critical. `false` used to carry a guarantee — "another
      * caller already wrote this gap" — so ignoring it and committing was safe. The deferred state
@@ -145,12 +147,17 @@ class IngestRepository @Inject constructor(
      * holding a batch from before another pass deferred the row would commit it and clear the
      * payload, with no gap anywhere. The enum is the guarantee made explicit.
      *
-     * A failure also defers the row — the rollback has already undone the claim, so the deferral is
-     * a write of its own afterwards — and then rethrows, because whether the *caller's* work may
+     * A failure also defers the row and then rethrows, because whether the *caller's* work may
      * continue is the caller's decision: the replay leaves the event uncommitted, and a source
      * policy change aborts, because a policy change that discarded the row would destroy the
-     * evidence the deferral exists to keep. If the deferral cannot be written either, the row stays
-     * in the candidate set and [isReplayCandidate] says so; nothing here pretends otherwise.
+     * evidence the deferral exists to keep. Called at the top level — the replay — the rollback has
+     * already undone the claim by the time the catch runs, so the deferral is a durable write of
+     * its own afterwards. Called *inside* a source policy transaction — the settle walk — it is a
+     * write inside a transaction that is about to roll back with everything else, so nothing is
+     * durably deferred there and the row simply stays as it was; that is the right answer too,
+     * since the source stays switched on and the walk will run again. If the deferral cannot be
+     * written either, the row stays in the candidate set and [isReplayCandidate] says so; nothing
+     * here pretends otherwise.
      */
     suspend fun claimEventLoss(eventId: String, writeGap: suspend () -> Unit): LossClaim {
         val db = holder.db()
@@ -178,11 +185,13 @@ class IngestRepository @Inject constructor(
     }
 
     /**
-     * Puts every deferred settlement back into the replay's candidate set, returning how many.
+     * Puts every deferred row back into the replay's candidate set, returning how many.
      *
-     * Called at the head of the two passes that read pending rows. A deferral is not a verdict: it
-     * says only that the gap table refused the write at the time, and this is what makes the row
-     * try again rather than wait for a user to change a source.
+     * Called by a replay pass once it has drained everything else — not at its head, where a
+     * failing prefix would be re-inserted in front of everything on every trigger — and by a
+     * settle walk before it reads, scoped to its source. A deferral is not a verdict: it says only
+     * that the gap table refused the write at the time, and this is what makes the row try again
+     * rather than wait for a user to change a source.
      */
     suspend fun resumeDeferredSettlements(): Int = holder.db().journalDao().resumeDeferredLosses()
 

@@ -119,7 +119,7 @@ interface JournalDao {
      * Two exits never reach here at all, both on purpose: a payload that will not decode (filed
      * `FAILED` / `DECODE`, with nothing readable to settle) and a row whose commit attempts run out —
      * that one records a loss of its own, the whole event, in the transaction that files it
-     * (`setFailedWithLoss`'s caller, issue #28), and this claim is not the gate for it: a settled
+     * (`fileFailed`'s caller, issue #28), and this claim is not the gate for it: a settled
      * row's own loss being on disk says nothing about whether its commit failure is.
      */
     @Query("UPDATE event_journal SET lossRecorded = 1 WHERE eventId = :eventId AND lossRecorded = 0 AND state = 'PENDING'")
@@ -144,8 +144,10 @@ interface JournalDao {
      *
      * Called once a replay pass has drained everything else, and at the head of a settle walk —
      * those are the only two readers of pending rows. Whatever made the earlier gap write fail may
-     * be gone, and the only way to find out is to try; one attempt per row per pass, because a row
-     * that fails again defers itself again and stops holding a place on the page.
+     * be gone, and the only way to find out is to try. A row that fails again defers itself again
+     * and stops holding a place on the page, so a pass tries each parked row once after its drain
+     * — a row that was not parked when the pass began can fail once before the drain and once
+     * after it, which is two attempts in one pass and still bounded.
      *
      * `state = 'PENDING'` because a row that has left it is owed nothing: a discard can strip a
      * deferred row's payload without touching this column, and resuming that row would count it in

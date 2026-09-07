@@ -2052,13 +2052,22 @@ class CaptureCoordinatorTest : FunSpec({
         // two passes overlapping is what lets one hold a batch the other has already changed. The
         // passes are coalesced instead: a caller that finds one running leaves it to that pass, and
         // the request is re-checked as the gate is released so nothing is dropped.
+        // The overlap is forced, not left to timing: the first pass is parked inside its page read
+        // until the second trigger has been delivered (round 38 subagent M1 — the timed version
+        // let the guard's removal through about one run in eight).
         val concurrent = java.util.concurrent.atomic.AtomicInteger()
         val maxConcurrent = java.util.concurrent.atomic.AtomicInteger()
+        val reads = java.util.concurrent.atomic.AtomicInteger()
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
         coEvery { h.ingest.pendingJournal(any(), any()) } coAnswers {
             val now = concurrent.incrementAndGet()
             maxConcurrent.updateAndGet { m -> maxOf(m, now) }
             try {
-                kotlinx.coroutines.delay(50)
+                if (reads.incrementAndGet() == 1) {
+                    entered.complete(Unit)
+                    release.await()
+                }
                 emptyList()
             } finally {
                 concurrent.decrementAndGet()
@@ -2068,10 +2077,16 @@ class CaptureCoordinatorTest : FunSpec({
         coordinator.onConnected(h.service)
 
         h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
+        withTimeout(5_000) { entered.await() }
         coordinator.setPaused(true)
         coordinator.setPaused(false)
+        // The second trigger has been delivered while the first pass is parked. If passes could
+        // overlap, the second page read would happen now, with the first still inside its own.
+        stillHolds { reads.get() shouldBe 1 }
+        release.complete(Unit)
 
-        awaitUntil { (maxConcurrent.get() >= 1) shouldBe true }
+        // The request was not dropped either: the parked pass finishes and one more runs for it.
+        awaitUntil { reads.get() shouldBe 2 }
         stillHolds { maxConcurrent.get() shouldBe 1 }
     }
     // ---- Round 35 Codex I1: a whole row the parser proved was cut away is a loss the commit records ----
@@ -2259,5 +2274,136 @@ class CaptureCoordinatorTest : FunSpec({
         record.reason shouldBe GapReason.COMMIT_FAILED.name
         record.precision shouldBe GapPrecision.BOUNDED.name
         record.packageName shouldBe ENABLED_PKG
+    }
+    // ---- Round 38: the coalescing gate's hand-off, and the guards nothing was holding ----
+
+    test("a request that arrives while the running pass is cancelled is still served") {
+        val h = Harness()
+        // Round 38 Codex I1. The holder of the gate can be cancelled mid-pass — here the vault
+        // state changing under the collector that started it — and with a "leave it to the holder"
+        // gate, a request that arrived meanwhile had no one left to run it: flag set, gate free,
+        // nobody coming. Callers now wait for the gate, so the next one finds the request standing.
+        val reads = java.util.concurrent.atomic.AtomicInteger()
+        val entered = CompletableDeferred<Unit>()
+        val parked = CompletableDeferred<Unit>()
+        coEvery { h.ingest.pendingJournal(any(), any()) } coAnswers {
+            if (reads.incrementAndGet() == 1) {
+                entered.complete(Unit)
+                parked.await()
+            }
+            emptyList()
+        }
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+
+        // A: the vault opening starts a pass, which parks inside its page read.
+        h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
+        withTimeout(5_000) { entered.await() }
+        // B: a second trigger arrives while A holds the gate.
+        coordinator.setPaused(true)
+        coordinator.setPaused(false)
+        stillHolds { reads.get() shouldBe 1 }
+        // A is cancelled where it is parked — the collector that started it sees a new state.
+        h.vaultState.value = VaultState.Locked(KeyFailure.Unavailable("test"))
+
+        // B's request is served without a third trigger: the pass that runs is B's, not A's.
+        awaitUntil { reads.get() shouldBe 2 }
+        parked.isActive shouldBe true
+    }
+
+    test("a request that finds maintenance active is kept for the run's end, not cleared") {
+        val h = Harness()
+        // The pass did not run, so it did not serve the request; clearing the flag would have
+        // made the run's end the only thing that could bring the rows back, and only if it fired
+        // after the request. It is left standing instead.
+        val reads = java.util.concurrent.atomic.AtomicInteger()
+        coEvery { h.ingest.pendingJournal(any(), any()) } answers { reads.incrementAndGet(); emptyList() }
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+        val inside = CompletableDeferred<Unit>()
+        val finish = CompletableDeferred<Unit>()
+        val run = launch { h.maintenance.exclusive { inside.complete(Unit); finish.await() } }
+        withTimeout(5_000) { inside.await() }
+
+        // A trigger during the run: nothing may read the journal now.
+        coordinator.setPaused(true)
+        coordinator.setPaused(false)
+        stillHolds { reads.get() shouldBe 0 }
+
+        finish.complete(Unit)
+        run.join()
+        // The run's end triggers the pass that serves it.
+        awaitUntil { reads.get() shouldBe 1 }
+    }
+
+    test("switching one source off resumes only that source's deferred rows") {
+        val h = Harness()
+        // Round 38 Codex M1 / subagent I1: the walk's per-source resume had no control at the
+        // layer that chooses it — the global overload, the round-37 defect, stayed green. Two
+        // sources each with a deferred row; disabling one must settle its row and leave the
+        // other's exactly as deferred as it was.
+        val other = "com.example.other"
+        h.sourceList += sourceConfig(other)
+        val mine = Fixtures.snapshot(
+            shape = Fixtures.base(title = null, text = null).copy(truncated = setOf(TruncationFlag.LINES)),
+            packageName = ENABLED_PKG,
+            eventId = "evt-mine-deferred",
+        )
+        val theirs = Fixtures.snapshot(
+            shape = Fixtures.base(title = null, text = null).copy(truncated = setOf(TruncationFlag.LINES)),
+            packageName = other,
+            eventId = "evt-theirs-deferred",
+        )
+        h.pendingByPackage[ENABLED_PKG] = mutableListOf(mine)
+        h.pendingByPackage[other] = mutableListOf(theirs)
+        h.lossDeferred += mine.eventId
+        h.lossDeferred += theirs.eventId
+
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+        coordinator.setSourceEnabled(ENABLED_PKG, false)
+
+        awaitUntil { h.lossClaimed shouldBe setOf("evt-mine-deferred") }
+        stillHolds {
+            h.lossDeferred shouldBe setOf("evt-theirs-deferred")
+            h.gaps.count { it.reason == GapReason.MESSAGES_DROPPED.name } shouldBe 1
+        }
+    }
+
+    test("one deferral episode arms at most one retry, however many gap writes then succeed") {
+        val h = Harness()
+        // Round 37 subagent M2, which round 38 found had dropped off every list. The flag is
+        // cleared before the retry is launched; without that, every gap write seen to succeed
+        // after a deferral would launch a pass of its own for as long as the flag stayed set.
+        h.pendingReplay += "gen-old" to Fixtures.snapshot(
+            shape = Fixtures.base(title = null, text = null).copy(truncated = setOf(TruncationFlag.LINES)),
+            packageName = ENABLED_PKG,
+            eventId = "evt-stuck-3",
+            observedAt = 1_000L,
+        )
+        coEvery { h.ingest.isJournalPending(any()) } returns true
+        h.gapWritesFail = true
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+        h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
+        // The pass defers the row, drains, resumes it once and defers it again — one resume.
+        awaitUntil { coVerify(exactly = 1) { h.ingest.resumeDeferredSettlements() } }
+        awaitUntil { coVerify(exactly = 2) { h.ingest.claimEventLoss("evt-stuck-3", any()) } }
+
+        // Space is back; two events with losses arrive, each writing a gap at acceptance.
+        h.gapWritesFail = false
+        coordinator.offerCaptured(capturedWithTruncation("evt-live-a", setOf(TruncationFlag.MESSAGES_DROPPED)))
+        // The retry pass: drains, resumes the row (the second resume), settles and commits it.
+        awaitUntil { coVerify(exactly = 2) { h.ingest.resumeDeferredSettlements() } }
+        awaitUntil { h.lossClaimed shouldBe setOf("evt-stuck-3") }
+        // Body-less, so the parser yields nothing and the row is filed SKIPPED: that is the pass done with it.
+        awaitUntil { coVerify(exactly = 1) { h.ingest.markJournal("evt-stuck-3", "SKIPPED", any()) } }
+        // A row that arrives after that pass: a third pass would read and commit it, and none may run.
+        h.pendingReplay += pendingWithContent("evt-late", 3_000L)
+        coordinator.offerCaptured(capturedWithTruncation("evt-live-b", setOf(TruncationFlag.MESSAGES_DROPPED)))
+
+        // Nothing was deferred since, so the second success arms nothing: no third pass.
+        awaitUntil { h.gaps.count { it.reason == GapReason.MESSAGES_DROPPED.name } shouldBe 3 }
+        stillHolds { coVerify(exactly = 0) { h.ingest.commit(match { it.eventId == "evt-late" }, any(), any(), any(), any(), any(), any(), any()) } }
     }
 })

@@ -158,9 +158,11 @@ object Fixtures {
             isSelf: Boolean = false,
             mimeType: String? = null,
             dataUri: String? = null,
+            /** This one message's body was cut when the snapshot was taken. */
+            truncated: Boolean = false,
         ) {
             messages += MessagingMessageShape(
-                text = BoundedText.of(text),
+                text = text?.let { BoundedText(it, truncated = truncated) },
                 timestampEpochMs = timestamp,
                 senderName = BoundedText.of(sender),
                 senderKey = senderKey,

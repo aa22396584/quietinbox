@@ -102,7 +102,5 @@ fun diagnosticLabel(code: String): String = when (code) {
 
 /** What a message had to give up before it was stored, or null when it kept everything. */
 @Composable
-fun truncationLabel(flags: Set<TruncationFlag>): Labelled? = when {
-    flags.isEmpty() -> null
-    else -> Labelled(stringResource(R.string.conv_truncated), Icons.Outlined.ContentCut, QualityColors.uncertain)
-}
+fun truncationLabel(bodyTruncated: Boolean): Labelled? =
+    if (bodyTruncated) Labelled(stringResource(R.string.conv_truncated), Icons.Outlined.ContentCut, QualityColors.uncertain) else null

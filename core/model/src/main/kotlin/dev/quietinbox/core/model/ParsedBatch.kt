@@ -129,6 +129,13 @@ data class MessageCandidate(
     val media: MediaReferenceCandidate? = null,
     val contentStatus: ContentStatus = ContentStatus.NOTIFICATION_TEXT,
     val isHistoric: Boolean = false,
+    /**
+     * Whether *this* body was shortened when the snapshot was taken. The snapshot's own
+     * [NotificationShape.truncated] is about the notification, not about any one message in it: a
+     * batch where the second message was cut, or where only the title was, would otherwise mark
+     * every row as shortened. The truth is per message and it is here.
+     */
+    val textTruncated: Boolean = false,
 )
 
 @Serializable

@@ -4,7 +4,9 @@ import dev.quietinbox.core.model.ContentStatus
 import dev.quietinbox.core.model.MessageKind
 import dev.quietinbox.core.model.ParseWarning
 import dev.quietinbox.core.model.TimestampQuality
+import dev.quietinbox.core.model.NotificationSnapshot
 import dev.quietinbox.core.model.TruncationFlag
+import kotlinx.serialization.json.Json
 import dev.quietinbox.core.testing.Fixtures
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldBeEmpty
@@ -15,6 +17,58 @@ import io.kotest.matchers.shouldBe
 
 class StandardParserTest : FunSpec({
     val parser = StandardParser()
+
+    test("only the message that was actually cut is marked as shortened") {
+        // Claude subagent C2, input A. The snapshot's flag set is about the notification; asking
+        // it whether *this* body was shortened marks every row in the batch when any one of them
+        // was. The truth is per message and the parser now carries it.
+        val shape = Fixtures.messaging(conversationTitle = "Team", isGroup = true, shortcutId = "sc-1") {
+            message("Alice", "short", 1_000)
+            message("Bob", "a very long one that did not fit", 2_000, truncated = true)
+            message("Alice", "also short", 3_000)
+        }
+
+        val batch = parser.parse(Fixtures.snapshot(shape))
+
+        batch.messages.map { it.textTruncated } shouldBe listOf(false, true, false)
+    }
+
+    test("a batch whose messages all survived intact marks none of them") {
+        // Input B, and the harder half: nothing here was cut, yet the notification as a whole
+        // could still carry a flag — a shortened title, for one — which used to be read as every
+        // body having been shortened.
+        val shape = Fixtures.messaging(conversationTitle = "Team", isGroup = true, shortcutId = "sc-1") {
+            message("Alice", "one", 1_000)
+            message("Bob", "two", 2_000)
+            message("Alice", "three", 3_000)
+        }
+        val withCutTitle = shape.copy(truncated = setOf(TruncationFlag.TITLE, TruncationFlag.TEXT))
+
+        val batch = parser.parse(Fixtures.snapshot(withCutTitle))
+
+        batch.messages.map { it.textTruncated } shouldBe listOf(false, false, false)
+    }
+
+    test("a v0.1.3 payload's ambiguous MESSAGES flag decides nothing") {
+        // Codex C4. `TruncationFlag` is persisted — the journal serialises the whole snapshot — and
+        // in 0.1.3 `MESSAGES` meant either "a message was dropped" or "a message's text was cut".
+        // A row still pending at upgrade therefore cannot be read under the new, narrower meaning.
+        // It is not read at all: the per-message truth is in the payload as well, on each message's
+        // own BoundedText, and that is what is consulted. The old flag survives the round trip and
+        // changes nothing.
+        val shape = Fixtures.messaging(conversationTitle = "Team", isGroup = true, shortcutId = "sc-1") {
+            message("Alice", "kept whole", 1_000)
+            message("Bob", "this one lost its tail", 2_000, truncated = true)
+        }.copy(truncated = setOf(TruncationFlag.MESSAGES, TruncationFlag.HISTORIC_MESSAGES))
+        val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+        val wire = json.encodeToString(NotificationSnapshot.serializer(), Fixtures.snapshot(shape))
+
+        val replayed = json.decodeFromString(NotificationSnapshot.serializer(), wire)
+        val batch = parser.parse(replayed)
+
+        replayed.shape.truncated shouldContain TruncationFlag.MESSAGES
+        batch.messages.map { it.textTruncated } shouldBe listOf(false, true)
+    }
 
     test("MessagingStyle with three messages yields three candidates in order") {
         val shape = Fixtures.messaging(conversationTitle = "Team", isGroup = true, shortcutId = "sc-1") {

@@ -259,8 +259,9 @@ interface MessageDao {
     @Query("UPDATE message SET observationCount = observationCount + 1 WHERE id = :id")
     suspend fun incrementObservation(id: Long)
 
-    @Query("UPDATE message SET body = :body, revisionCount = revisionCount + 1, eventId = :eventId WHERE id = :id")
-    suspend fun applyRevision(id: Long, body: String, eventId: String)
+    /** A revision replaces the body, so it replaces what that body lost as well. */
+    @Query("UPDATE message SET body = :body, revisionCount = revisionCount + 1, eventId = :eventId, truncationFlags = :truncationFlags WHERE id = :id")
+    suspend fun applyRevision(id: Long, body: String, eventId: String, truncationFlags: String?)
 
     @Query("UPDATE message SET mediaState = :state, mediaBlobId = :blobId WHERE id = :id")
     suspend fun setMedia(id: Long, state: String, blobId: Long?)

@@ -53,7 +53,8 @@ data class Message(
      * A body that was shortened is shown as complete unless this says otherwise, which is the one
      * thing the honesty rules cannot allow.
      */
-    val truncationFlags: Set<TruncationFlag> = emptySet(),
+    /** This message's own body was shortened when the notification was captured. */
+    val bodyTruncated: Boolean = false,
     /** Deterministic ordering key: source time if present, else post time, else observed time. */
     val sortKey: Long,
 )

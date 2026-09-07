@@ -150,6 +150,7 @@ open class StandardParser : NotificationParser {
             timestampQuality = quality,
             kind = kind,
             media = if (hasMedia) MediaReferenceCandidate(mimeType = m.dataMimeType, uri = m.dataUri) else null,
+            textTruncated = m.text?.truncated == true,
             contentStatus = if (placeholder) ContentStatus.PREVIEW_RESTRICTED_SUSPECTED else ContentStatus.FULL_STRUCTURED,
             isHistoric = historic,
         )
@@ -186,13 +187,15 @@ open class StandardParser : NotificationParser {
                 sourceTimestampEpochMs = ts,
                 timestampQuality = quality,
                 contentStatus = if (placeholder) ContentStatus.PREVIEW_RESTRICTED_SUSPECTED else ContentStatus.FULL_STRUCTURED,
+                textTruncated = line.truncated,
             )
         }
     }
 
     protected open fun singleCandidate(snapshot: NotificationSnapshot, warnings: MutableSet<ParseWarning>): List<MessageCandidate> {
         val shape = snapshot.shape
-        val body = pickBody(shape) ?: return emptyList()
+        val bounded = pickBodyBounded(shape) ?: return emptyList()
+        val body = bounded.value
         if (TextHeuristics.looksLikeSystemNotice(body) || TextHeuristics.looksLikeSystemNotice(shape.title?.value) || shape.isOngoing) {
             warnings += ParseWarning.POSSIBLE_SYSTEM_NOTICE
         }
@@ -219,17 +222,21 @@ open class StandardParser : NotificationParser {
                 timestampQuality = quality,
                 kind = if (hasPicture) MessageKind.MEDIA else MessageKind.TEXT,
                 media = if (hasPicture) MediaReferenceCandidate(uri = shape.pictureUri, fromNotificationBitmap = shape.pictureUri == null) else null,
+                textTruncated = bounded.truncated,
                 contentStatus = if (placeholder) ContentStatus.PREVIEW_RESTRICTED_SUSPECTED else ContentStatus.NOTIFICATION_TEXT,
             ),
         )
     }
 
-    protected fun pickBody(shape: NotificationShape): String? {
-        val big = shape.bigText?.value
-        val text = shape.text?.value
+    protected fun pickBody(shape: NotificationShape): String? = pickBodyBounded(shape)?.value
+
+    /** The bounded text [pickBody] chose, so a caller can also read whether it was cut. */
+    protected fun pickBodyBounded(shape: NotificationShape): BoundedText? {
+        val big = shape.bigText
+        val text = shape.text
         return when {
-            !big.isNullOrBlank() -> big
-            !text.isNullOrBlank() -> text
+            !big?.value.isNullOrBlank() -> big
+            !text?.value.isNullOrBlank() -> text
             else -> null
         }
     }

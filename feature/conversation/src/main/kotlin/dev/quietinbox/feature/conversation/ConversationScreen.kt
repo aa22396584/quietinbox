@@ -502,7 +502,7 @@ private fun MetaLine(message: Message, contentColor: androidx.compose.ui.graphic
         if (message.revisionCount > 0) QualityTag(stringResource(R.string.conv_revision, message.revisionCount), Icons.Outlined.Edit, QualityColors.inferred)
         if (message.observationCount > 1) QualityTag(stringResource(R.string.conv_observed_times, message.observationCount), Icons.Outlined.History, QualityColors.inferred)
         // A body that was cut used to be drawn exactly like a complete one.
-        truncationLabel(message.truncationFlags)?.let { QualityTag(it.text, it.icon, it.tint) }
+        truncationLabel(message.bodyTruncated)?.let { QualityTag(it.text, it.icon, it.tint) }
         mediaLabel(message.mediaState)?.let { QualityTag(it.text, it.icon, it.tint) }
         originLabel(message.origin)?.let { QualityTag(it, Icons.Outlined.Science, QualityColors.inferred) }
     }

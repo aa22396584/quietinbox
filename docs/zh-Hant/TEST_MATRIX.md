@@ -8,7 +8,7 @@
 | 層級 | 判準（Oracle） | 現有內容 | 執行方式 |
 | --- | --- | --- | --- |
 | L0 契約與 fixture | 手寫的預期值 | `core:testing` Fixtures DSL；每個解析器測試都是一個帶有明確預期批次的合成 fixture | JVM |
-| L1 JVM 重播 | 純 Kotlin 的 parser／identity／reconcile／analytics | `core:*` 76 個測試（model 5、parser 10、identity 5、reconcile 22（含 `ReconcilerIdAlignmentTest`）、analytics 34）、`parsers:apps` 43 個、`app` 5 個（提醒，含 `ReminderPolicy`）；兩個 1,000 次迭代的性質測試（property test）：不同的內容必須恰好被接受一次（seed 20260905）、沒有 id 的重複內容絕不可重複，且重播絕不可縮小視窗（seed 20260906） | `./gradlew :core:model:test :core:parser:test :core:identity:test :core:reconcile:test :core:analytics:test :parsers:apps:test` |
+| L1 JVM 重播 | 純 Kotlin 的 parser／identity／reconcile／analytics | `core:*` 79 個測試（model 5、parser 13、identity 5、reconcile 22（含 `ReconcilerIdAlignmentTest`）、analytics 34）、`parsers:apps` 43 個、`app` 5 個（提醒，含 `ReminderPolicy`）；兩個 1,000 次迭代的性質測試（property test）：不同的內容必須恰好被接受一次（seed 20260905）、沒有 id 的重複內容絕不可重複，且重播絕不可縮小視窗（seed 20260906） | `./gradlew :core:model:test :core:parser:test :core:identity:test :core:reconcile:test :core:analytics:test :parsers:apps:test` |
 | L2 Android 發布器 | 透過自家 package 產生的真實通知回呼 | `SyntheticNotifications`（MessagingStyle、BigText）；引導流程步驟 4 | 裝置、手動 |
 | L3 真實來源 App | 兩個知情同意的測試帳號、錄影紀錄 | **未執行** | — |
 | L4 故障與效能 | 終止 process、Doze、首次解鎖、撤銷、磁碟上限 | **未執行**（程式中已有 commit 圍籬（generation）；尚無注入故障的測試） | — |

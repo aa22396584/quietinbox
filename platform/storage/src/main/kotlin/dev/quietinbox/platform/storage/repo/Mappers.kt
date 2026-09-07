@@ -63,12 +63,9 @@ fun MessageEntity.toDomain(): Message = Message(
     observationCount = observationCount,
     mediaState = mediaState.toEnumOr(MediaState.NONE),
     mediaBlobId = mediaBlobId,
-    // An unknown name from a newer build degrades to "not flagged" rather than crashing, the same
-    // tolerance every other enum column here has.
-    truncationFlags = truncationFlags.orEmpty()
-        .split(',')
-        .mapNotNull { name -> enumValues<TruncationFlag>().firstOrNull { it.name == name } }
-        .toSet(),
+    // Any non-empty value means this body was cut; the column's exact contents are the storage
+    // layer's business and a name a newer build wrote is still "cut", not a crash.
+    bodyTruncated = !truncationFlags.isNullOrBlank(),
     sortKey = sortKey,
 )
 

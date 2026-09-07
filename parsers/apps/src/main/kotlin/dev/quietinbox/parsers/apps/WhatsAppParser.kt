@@ -50,7 +50,9 @@ class WhatsAppParser : AppParser() {
         warnings: MutableSet<ParseWarning>,
     ): List<MessageCandidate> {
         val shape = snapshot.shape
-        val body = pickBody(shape) ?: return super.appSingleCandidates(snapshot, warnings)
+        val bounded = pickBodyBounded(shape) ?: return super.appSingleCandidates(snapshot, warnings)
+        val body = bounded.value
+        val truncatedBody = bounded.truncated
         val lines = body.split('\n').map(String::trim).filter(String::isNotEmpty)
         if (lines.size < 2) return super.appSingleCandidates(snapshot, warnings)
 
@@ -75,6 +77,10 @@ class WhatsAppParser : AppParser() {
                 sourceTimestampEpochMs = timestamp,
                 timestampQuality = quality,
                 contentStatus = ContentStatus.NOTIFICATION_TEXT,
+                // Several rows are split out of one bounded body. Truncation takes the tail, so
+                // only the last of them can be the one that lost text; saying it of all of them
+                // would be the same over-reporting this release exists to remove.
+                textTruncated = truncatedBody && index == pairs.lastIndex,
             )
         }
     }

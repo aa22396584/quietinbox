@@ -35,15 +35,14 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /** Result of a committed snapshot; ids are used to kick off media work. */
-/** Flags that mean "text this message kept was shortened", as opposed to content dropped wholesale. */
-private val TEXT_TRUNCATION = setOf(
-    TruncationFlag.TEXT,
-    TruncationFlag.BIG_TEXT,
-    TruncationFlag.TITLE,
-    TruncationFlag.MESSAGES,
-    TruncationFlag.HISTORIC_MESSAGES,
-    TruncationFlag.LINES,
-)
+/**
+ * What `message.truncationFlags` holds: one name when this row's own body was shortened, null
+ * otherwise. The column keeps its name and type — schema 4 is unchanged — but it stopped being a
+ * copy of the notification's flag set, which is what made a truncated title mark every message in
+ * the batch (round 33).
+ */
+private fun truncationColumn(textTruncated: Boolean): String? =
+    if (textTruncated) TruncationFlag.TEXT.name else null
 
 data class CommitOutcome(
     val conversationId: Long?,
@@ -327,13 +326,10 @@ class IngestRepository @Inject constructor(
                                 mediaMimeType = c.media?.mimeType,
                                 fingerprint = decision.fingerprint,
                                 eventId = snapshot.eventId,
-                                // Only the flags that describe this message's own text. The
-                                // dropped-message flags belong to the batch, not to a row that
-                                // survived, and they are recorded as a gap instead.
-                                truncationFlags = snapshot.shape.truncated
-                                    .filter { it in TEXT_TRUNCATION }
-                                    .takeIf { it.isNotEmpty() }
-                                    ?.joinToString(",") { it.name },
+                                // This message's own body, not the notification's. The snapshot
+                                // flag is about the notification: a batch in which only the second
+                                // message was cut — or only the title — used to mark every row.
+                                truncationFlags = truncationColumn(c.textTruncated),
                                 sortKey = sortKey(c, snapshot),
                                 expiresAtEpochMs = retentionMs?.let { now + it },
                             ),
@@ -367,7 +363,7 @@ class IngestRepository @Inject constructor(
                         val old = db.messageDao().get(id)
                         if (old != null) {
                             db.revisionDao().insert(MessageRevisionEntity(messageId = id, body = old.body, observedAtEpochMs = now, eventId = snapshot.eventId))
-                            db.messageDao().applyRevision(id, c.body, snapshot.eventId)
+                            db.messageDao().applyRevision(id, c.body, snapshot.eventId, truncationColumn(c.textTruncated))
                             db.searchDao().deleteForMessage(id)
                             indexTokens(db, id, c.body)
                             revisedIds += id

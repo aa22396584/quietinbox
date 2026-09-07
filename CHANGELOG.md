@@ -61,9 +61,26 @@ were wrong in a way that changed the fix.
   exactly once however often the event is delivered.
   Making that possible needed a flag split first. `TruncationFlag.MESSAGES` was raised by two
   different losses in the same function — whole messages discarded, and a kept message whose text
-  was shortened — so a gap keyed on it would have manufactured gaps that never happened.
+  was shortened — so a gap keyed on it would have manufactured gaps that never happened. The split
+  describes the capture side; nothing downstream decides anything from it any more, which is what
+  makes an upgrade safe. The flag set is persisted — the journal holds the whole snapshot — so a
+  row still pending when 0.1.3 becomes 0.1.4 carries the old, ambiguous `MESSAGES`. Reading it
+  under the narrower new meaning would have told the user a discarded message was merely a
+  shortened one. It is not read: whether a body was cut is answered per message, from evidence the
+  same payload already carries, and the dropped half of an old row is simply not claimed. Recording
+  nothing for a case the evidence cannot settle is the honest outcome; inventing a label for it is
+  not.
 - **A message whose body was shortened was shown as if it were complete.** The truncation was
-  computed at capture and thrown away; it is stored per message now and the bubble says so.
+  computed at capture and thrown away at the parser boundary: each message's own `BoundedText`
+  knows whether it was cut, and only its text was carried forward. It is stored per message now and
+  the bubble says so.
+  The first attempt stored the notification's flag set on every row it produced instead, which is
+  the same defect one layer down: a batch of three messages in which only the second was cut marked
+  all three, and a notification whose *title* was too long marked messages that had lost nothing at
+  all. A row now records what its own body lost, and nothing else. Where several rows are split out
+  of one body — the WhatsApp group heuristic — only the last can be the one that lost text, because
+  truncation takes the tail. A revision recomputes it: replacing a body without replacing what that
+  body lost left a shortened label on text that was now complete.
 - **Switching a source off, or pausing it, recorded nothing.** Events dropped for it landed in
   `droppedAfterRevoke`, one counter that also holds a revoked permission, a rotated generation and a
   maintenance run — so the one cause the user chose looked exactly like three they did not, and the

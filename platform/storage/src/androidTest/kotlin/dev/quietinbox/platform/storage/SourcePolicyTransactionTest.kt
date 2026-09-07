@@ -28,6 +28,8 @@ import java.io.File
  * the gap to the repository rather than writing it itself. What that hand-off is worth is decided
  * here, on a real SQLCipher vault: whether the two rows really commit together, and whether setting
  * a flag to the value it already holds really writes nothing.
+ *
+ * The last test is the other half of the same promise — what may later delete those rows.
  */
 @RunWith(AndroidJUnit4::class)
 class SourcePolicyTransactionTest {
@@ -153,6 +155,29 @@ class SourcePolicyTransactionTest {
         val open = openGaps()
         open.count { it.reason == GapReason.SOURCE_DISABLED_BY_USER.name } shouldBe 1
         open.none { it.packageName == pkg } shouldBe true
+        Unit
+    }
+
+    @Test
+    fun retentionExpiresClosedGapsAndKeepsTheOnesStillHappening() = runBlocking {
+        ready()
+        addSource()
+        val db = holder.db()
+        // A source the user disabled long ago: old enough for the sweep, and still not captured.
+        health.openGap(1_000, GapReason.SOURCE_DISABLED_BY_USER, GapPrecision.EXACT, 1_000, pkg)
+        // A window that opened and closed just as long ago: over, and safe to forget.
+        health.recordGap(1_000, 2_000, GapReason.UNKNOWN, GapPrecision.EXACT, 1_000, pkg)
+
+        db.healthDao().deleteGapsBefore(before = 10_000)
+
+        // Deleting the open one would take the only thing on the health page saying capture is
+        // still missing for that source — a gap hidden by housekeeping.
+        val left = db.healthDao().openGaps(listOf(GapReason.SOURCE_DISABLED_BY_USER.name))
+        left.count { it.packageName == pkg } shouldBe 1
+        // ...and the closed one really was swept, so this is not simply a sweep that does nothing.
+        val all = db.healthDao().observeGaps(100).first()
+        all.size shouldBe 1
+        all.single().endEpochMs shouldBe null
         Unit
     }
 }

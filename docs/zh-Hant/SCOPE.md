@@ -11,7 +11,7 @@
 | 授權 onboarding | 完成 | SM-S9280 / Android 16 實機走過（畫面：範圍 → 來源 → 授權 → 測試 → 預覽） |
 | 合成測試通知發送器（L2） | 完成 | `SyntheticNotifications`；實機擷取 3/3 則訊息 |
 | NotificationListenerService 擷取、有界 snapshot | 完成 | `platform:capture`；callback 執行緒上沒有 DB／網路／解碼 |
-| 多訊息 parser（MessagingStyle / Inbox / BigText / summary） | 完成 | `core:parser` 10 個 JVM 測試 |
+| 多訊息 parser（MessagingStyle / Inbox / BigText / summary） | 完成 | `core:parser` 13 個 JVM 測試 |
 | 不跨串流合併的身分判定 | 完成 | `core:identity` 5 個 JVM 測試 |
 | 去重（`AMBIGUOUS_REPEAT`、revision、過期視窗處理、resync 視為重貼） | 完成 | `core:reconcile` 22 個 JVM 測試，含兩個 1,000 次迭代的 property test（§7.2 的六個例子加上關閉視窗的歧義重複都是字面測試案例） |
 | 加密金庫（Room + SQLCipher、每次安裝隨機金鑰、Keystore 包裝） | 完成 | 真機測試 `VaultRoundTripTest` + `MigrationTest`（1→2、2→3）+ `KeystoreWrapperTest`（序列化的 KEK 建立）；`KeystoreWrapper` 設定 `setUserAuthenticationRequired(false)` |

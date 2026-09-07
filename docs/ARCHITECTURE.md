@@ -66,7 +66,7 @@ Single SQLCipher database `quietinbox.vault` (WAL) with the tables of §8: `sour
 `capture_session`, `gap_interval`, `event_journal`, `notification_checkpoint`, `conversation`,
 `message`, `message_revision`, `observation_link`, `media_blob`, `deletion_suppression`,
 `search_token`, `summary_observation`, `local_diagnostic_event`. Schema is exported to
-`platform/storage/schemas/` (v3) and `fallbackToDestructiveMigration()` is not used.
+`platform/storage/schemas/` (v4) and `fallbackToDestructiveMigration()` is not used.
 
 Deletion graph (QI-DATA-004 / 007): a journal row's payload is cleared the moment it leaves
 `PENDING`; deleting messages or a conversation removes their `media_blob` rows in the same

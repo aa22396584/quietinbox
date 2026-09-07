@@ -1080,7 +1080,17 @@ class CaptureCoordinator @Inject constructor(
         private const val MAX_QUEUED_BITMAPS = 8
 
         /** Truncation that means content was discarded, not merely shortened. */
-        private val DROPPED_MESSAGES = setOf(TruncationFlag.MESSAGES_DROPPED, TruncationFlag.HISTORIC_MESSAGES_DROPPED)
+        /**
+         * Flags that mean content existed and was discarded before the parser saw it — a gap.
+         * `LINES` belongs here for the same reason the other two do: an InboxStyle notification
+         * with more lines than the snapshot may hold loses the oldest ones outright. It is not a
+         * shortened body; each surviving line carries its own truncation separately.
+         */
+        private val DROPPED_MESSAGES = setOf(
+            TruncationFlag.MESSAGES_DROPPED,
+            TruncationFlag.HISTORIC_MESSAGES_DROPPED,
+            TruncationFlag.LINES,
+        )
 
         /** In-flight media copies. Bitmaps are bounded by their bytes; URI copies by their jobs. */
         private const val MAX_QUEUED_MEDIA_COPIES = 32

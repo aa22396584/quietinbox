@@ -13,7 +13,7 @@ records what the repository **actually delivers today** and what it does **not**
 | Authorisation onboarding | Done | Device walkthrough on SM-S9280 / Android 16 (screens: scope → sources → access → test → preview) |
 | Synthetic test notification publisher (L2) | Done | `SyntheticNotifications`; captured 3/3 messages on device |
 | NotificationListenerService capture, bounded snapshot | Done | `platform:capture`; no DB/network/decoding on callback thread |
-| Multi-message parser (MessagingStyle / Inbox / BigText / summary) | Done | 10 JVM tests in `core:parser` |
+| Multi-message parser (MessagingStyle / Inbox / BigText / summary) | Done | 13 JVM tests in `core:parser` |
 | Identity without cross-stream merging | Done | 5 JVM tests in `core:identity` |
 | Dedup with `AMBIGUOUS_REPEAT`, revisions, stale-window handling, resync-as-repost | Done | 22 JVM tests in `core:reconcile` including two 1,000-iteration property tests (the six §7.2 examples plus the closed-window ambiguous repeat are literal test cases) |
 | Encrypted vault (Room + SQLCipher, per-install random key, Keystore-wrapped) | Done | Instrumented tests `VaultRoundTripTest` + `MigrationTest` (1→2, 2→3) + `KeystoreWrapperTest` (serialised KEK creation) on device; `KeystoreWrapper` sets `setUserAuthenticationRequired(false)` |

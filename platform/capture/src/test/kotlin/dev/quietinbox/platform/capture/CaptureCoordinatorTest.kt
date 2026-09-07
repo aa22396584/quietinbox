@@ -1135,6 +1135,22 @@ class CaptureCoordinatorTest : FunSpec({
         }
     }
 
+    test("lines an InboxStyle notification could not hold are a gap, not a shortened body") {
+        val h = Harness()
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+
+        // Codex I3. More lines arrived than the snapshot may hold, so the oldest were discarded
+        // outright. That is content that existed and is gone — the same loss as a dropped message,
+        // and nothing else would ever have said so. Each surviving line still carries its own
+        // truncation separately, which is a different thing entirely.
+        coordinator.offerCaptured(capturedWithTruncation("evt-lines", setOf(TruncationFlag.LINES)))
+
+        coVerify(timeout = 5_000, exactly = 1) {
+            h.health.recordGap(any(), any(), GapReason.MESSAGES_DROPPED, GapPrecision.BOUNDED, any(), ENABLED_PKG)
+        }
+    }
+
     test("a message whose text was merely shortened is not a gap") {
         val h = Harness()
         val coordinator = h.coordinator()

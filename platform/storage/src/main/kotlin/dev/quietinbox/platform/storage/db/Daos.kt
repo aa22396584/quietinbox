@@ -504,7 +504,12 @@ interface HealthDao {
     @Query("UPDATE gap_interval SET packageName = NULL WHERE packageName = :packageName")
     suspend fun forgetGapSource(packageName: String): Int
 
-    @Query("DELETE FROM gap_interval WHERE createdAtEpochMs < :before")
+    /**
+     * Expires closed gaps only. An interval with no end is still happening — a source the user
+     * disabled months ago is still not being captured — and deleting it would take the one thing
+     * on the health page that says so.
+     */
+    @Query("DELETE FROM gap_interval WHERE createdAtEpochMs < :before AND endEpochMs IS NOT NULL")
     suspend fun deleteGapsBefore(before: Long): Int
 
     @Query("DELETE FROM capture_session WHERE startedAtEpochMs < :before AND endedAtEpochMs IS NOT NULL")

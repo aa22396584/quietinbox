@@ -74,8 +74,14 @@ sealed interface BackupRecord {
         val sortKey: Long,
         val expiresAtEpochMs: Long?,
         /**
-         * Appended, and defaulted, on purpose: an older reader ignores it (`ignoreUnknownKeys`) and
-         * a newer reader restoring an older file gets null. A new field anywhere but the end would
+         * Appended, and defaulted, on purpose: a newer reader restoring an older file gets null.
+         *
+         * That is the only direction this promises. `ignoreUnknownKeys` would let an older reader
+         * skip the field, but it never gets that far: `BackupStager` rejects the whole archive at
+         * the manifest when its `schemaVersion` is newer than the database it is being restored
+         * into, so a 0.1.4 backup is refused by 0.1.3 with `UNSUPPORTED_VERSION` and no record is
+         * read at all. Restoring backwards across a schema bump is not supported and the field
+         * layout is not what would make it so. A new field anywhere but the end would
          * also have silently shifted every argument at the one construction site that was
          * positional — that site is named now.
          */

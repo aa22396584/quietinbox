@@ -102,8 +102,13 @@ were wrong in a way that changed the fix.
   stay, because deleting them would hide a loss the user had already been shown, but they stop
   naming an app that was asked to be forgotten.
 - Gaps can say which source they belong to. Most cannot and must not: of the seven places that
-  record one, five are process-wide. None can ever name a conversation — identity is resolved during
-  the ingest that did not happen — so there is deliberately no conversation column.
+  record one, five are process-wide. None can name a conversation, so there is deliberately no
+  conversation column. The first version of this argument was wrong about one site: a batch that
+  lost messages *is* ingested — the survivors are committed and their conversation resolved — so
+  "the ingest that did not happen" was not true of it. The gap for that loss is now written when
+  the event is accepted, before the parser runs and long before identity is resolved, so at the
+  moment it is written there is still no conversation to name. The claim holds, for a better
+  reason than the one first given.
 - **Search called its first page a total.** The screen asked for 100 hits and rendered "%d results",
   so a query matching five thousand messages said "100 results" — the repository's own kdoc admitted
   it showed the first page only. It now says "Newest 100 shown; there may be more" while a cursor

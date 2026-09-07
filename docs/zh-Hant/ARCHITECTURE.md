@@ -59,7 +59,7 @@ StatusBarNotification
 `capture_session`、`gap_interval`、`event_journal`、`notification_checkpoint`、`conversation`、
 `message`、`message_revision`、`observation_link`、`media_blob`、`deletion_suppression`、
 `search_token`、`summary_observation`、`local_diagnostic_event`。schema 會匯出到
-`platform/storage/schemas/`（v3），且不使用 `fallbackToDestructiveMigration()`。
+`platform/storage/schemas/`（v4），且不使用 `fallbackToDestructiveMigration()`。
 
 刪除圖（QI-DATA-004 / 007）：journal 列一離開 `PENDING` 就清空 payload；刪除訊息或會話時，`media_blob` 列在同一交易刪除、
 檔案在交易後刪除；移除來源並刪資料時，抑制 token、摘要、診斷與 PENDING journal 一併清除；`ConversationDao.rebuildProjection`

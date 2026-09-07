@@ -31,6 +31,8 @@
 
 兩邊套件名相同但簽章不同（Play 由 Google Play App Signing 重新簽章），因此無法互相覆蓋安裝，請擇一使用。沒有訂閱、沒有內購、沒有廣告、沒有功能鎖，理由見 [ADR-0006](docs/adr/0006-distribution-and-monetisation.md)。
 
+用免費的 GitHub 版、又想支持開發的話，可以[請我喝杯咖啡](https://buymeacoffee.com/iml1s)（單次或每月都行）。這件事完全在 App 之外：APK 裡沒有任何贊助入口，也沒有連外的路徑——它連 `INTERNET` 權限都沒有。
+
 ### 這是什麼
 
 靜讀讀取你選擇的通訊 App 發到通知列的內容，把副本存進**本機加密資料庫**，讓你之後不用打開聊天室也能讀，對方也不會看到已讀。它：
@@ -135,6 +137,8 @@ adb shell cmd notification post -S messaging -t "Alice" tag "hello from shell"
 | [GitHub Releases](https://github.com/ImL1s/quietinbox/releases) | free (GPL-3.0-or-later) | install the APK directly; SHA-256 checksums attached |
 
 Both use the same package name but different signatures (Play re-signs with Google Play App Signing), so one cannot update over the other: pick one. No subscription, no in-app purchases, no ads, no locked features; the reasoning is in [ADR-0006](docs/adr/0006-distribution-and-monetisation.md).
+
+If you use the free GitHub build and would like to support the work, you can [buy me a coffee](https://buymeacoffee.com/iml1s) — one-off or monthly. It lives entirely outside the app: there is no donation prompt in the APK and no way out of it, which is what having no `INTERNET` permission means.
 
 ### What it is
 

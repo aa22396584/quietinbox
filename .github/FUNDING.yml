@@ -1,0 +1,4 @@
+# Renders the "Sponsor" button at the top of the repository and in its sidebar.
+# Nothing here reaches the app: QuietInbox has no INTERNET permission and never will, so there is
+# no in-app donation prompt and no link out of it (ADR-0006).
+buy_me_a_coffee: iml1s

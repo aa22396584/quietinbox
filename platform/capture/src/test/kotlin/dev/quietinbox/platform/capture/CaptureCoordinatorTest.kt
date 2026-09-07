@@ -47,6 +47,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Collections
 
 private const val APP_PKG = "dev.quietinbox.app"
@@ -991,6 +992,7 @@ class CaptureCoordinatorTest : FunSpec({
         val openStarted = CompletableDeferred<Unit>()
         val releaseOpen = CompletableDeferred<Unit>()
         val openReturned = java.util.concurrent.atomic.AtomicBoolean(false)
+        val settledDuringWrite = java.util.concurrent.atomic.AtomicBoolean(false)
         coEvery { h.health.openGap(any(), GapReason.UNKNOWN, any(), any()) } coAnswers {
             openStarted.complete(Unit)
             releaseOpen.await()
@@ -998,8 +1000,7 @@ class CaptureCoordinatorTest : FunSpec({
             throw locked
         }
         coEvery { h.health.closeOpenGaps(any(), GapReason.UNKNOWN) } coAnswers {
-            // Without the pipeline lock this runs while openGap is still parked and the test
-            // fails here (round 41, Codex I1). With the lock it cannot run until we release.
+            if (!openReturned.get()) settledDuringWrite.set(true)
             check(openReturned.get()) { "Ready settled the lock-out while its gap write was still in flight" }
         }
         val coordinator = h.coordinator()
@@ -1008,6 +1009,13 @@ class CaptureCoordinatorTest : FunSpec({
         coordinator.offerCaptured(captured("evt-locked"))
         withTimeout(5_000) { openStarted.await() }
         h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
+        // Give an unlocked collector time to run while openGap is still parked. With the pipeline
+        // lock it cannot; this wait times out and we then release the writer (round 42, Codex I1).
+        val raced = withTimeoutOrNull(1_000) {
+            while (!settledDuringWrite.get()) kotlinx.coroutines.yield()
+            true
+        }
+        raced shouldBe null
         releaseOpen.complete(Unit)
 
         coVerify(timeout = 5_000, exactly = 1) { h.health.recordGap(any(), any(), GapReason.UNKNOWN, GapPrecision.BOUNDED, any()) }

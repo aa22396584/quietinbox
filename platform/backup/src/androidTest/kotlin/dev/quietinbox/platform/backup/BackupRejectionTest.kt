@@ -194,11 +194,12 @@ class BackupRejectionTest {
         ready()
         val before = vaultFingerprint()
         holder.db().openHelper.writableDatabase.execSQL("UPDATE message SET body='mutated'")
-        vaultFingerprint() shouldNotBe before
+        val afterBody = vaultFingerprint()
+        afterBody shouldNotBe before
         holder.db().openHelper.writableDatabase.execSQL(
             "INSERT INTO local_diagnostic_event (code, detail, packageName, atEpochMs) VALUES ('x','y',null,1)",
         )
-        vaultFingerprint() shouldNotBe before
+        vaultFingerprint() shouldNotBe afterBody
         Unit
     }
 

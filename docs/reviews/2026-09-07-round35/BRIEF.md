@@ -5,7 +5,7 @@ given. Do not activate orchestration or workflow modes.
 
 ## Subject
 
-`022b99a..HEAD` — the commit answering round 34, whose three reviewers all returned
+`022b99a..f7a09ed` — the commit answering round 34, whose three reviewers all returned
 REQUEST CHANGES. Read `docs/reviews/2026-09-07-round34/` for the findings first,
 then `git show` the range. `022b99a` (already reviewed as part of round 34's own
 fix set) closed the shared Critical; the commit under review closes Codex's second

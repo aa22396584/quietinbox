@@ -126,6 +126,11 @@ adb shell pm grant dev.quietinbox.app.debug android.permission.POST_NOTIFICATION
 adb shell cmd notification post -S messaging -t "Title" tag "body"
 ```
 
+Schema 4 is amended in place while it is unreleased, so a debug vault created under an earlier
+version of it fails Room's identity-hash check on the next launch. Start any device walkthrough with
+`adb -s <emulator> shell pm clear dev.quietinbox.app.debug`; a user's phone is never in this
+position, because no released build ships schema 4.
+
 Onboarding enables installed sources; on a real phone the reconnect resync will copy the user's own
 notifications into the debug vault. Use an emulator for screenshots. On foldable AVDs strip the
 "Multiple displays" warning that `screencap -p` prepends to the PNG.

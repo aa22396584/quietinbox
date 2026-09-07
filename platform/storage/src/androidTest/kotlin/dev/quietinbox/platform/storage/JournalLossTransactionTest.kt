@@ -10,9 +10,12 @@ import dev.quietinbox.platform.storage.db.DatabaseHolder
 import dev.quietinbox.platform.storage.db.VaultState
 import dev.quietinbox.platform.storage.repo.HealthRepository
 import dev.quietinbox.platform.storage.repo.IngestRepository
+import dev.quietinbox.platform.storage.db.PENDING_FOR_PACKAGE_AFTER
 import dev.quietinbox.platform.storage.repo.JournalCursor
+import dev.quietinbox.platform.storage.repo.LossClaim
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
@@ -115,12 +118,12 @@ class JournalLossTransactionTest {
         // release recorded none.
         ingest.journal(snapshot("evt-legacy"), "gen", 60_000) shouldBe true
 
-        ingest.claimEventLoss("evt-legacy") { recordLoss() } shouldBe true
+        ingest.claimEventLoss("evt-legacy") { recordLoss() } shouldBe LossClaim.RECORDED
         // Every later pass — a replay that comes round again, or the discard that follows a
         // disabled source — finds the claim spent. This is the whole idempotency boundary: without
         // it a row replayed n times lists one loss n times on the health page.
-        ingest.claimEventLoss("evt-legacy") { recordLoss() } shouldBe false
-        ingest.claimEventLoss("evt-legacy") { recordLoss() } shouldBe false
+        ingest.claimEventLoss("evt-legacy") { recordLoss() } shouldBe LossClaim.ALREADY_RECORDED
+        ingest.claimEventLoss("evt-legacy") { recordLoss() } shouldBe LossClaim.ALREADY_RECORDED
 
         allGaps().count { it.reason == GapReason.MESSAGES_DROPPED.name } shouldBe 1
         Unit
@@ -143,9 +146,9 @@ class JournalLossTransactionTest {
         // two passes that read pending rows resume before they read, and only then can it be
         // claimed. A claim that reached a deferred row directly would be a pass that had not
         // decided whether the refusal still holds.
-        ingest.claimEventLoss("evt-legacy-2") { recordLoss() } shouldBe false
+        ingest.claimEventLoss("evt-legacy-2") { recordLoss() } shouldBe LossClaim.DEFERRED
         ingest.resumeDeferredSettlements() shouldBe 1
-        ingest.claimEventLoss("evt-legacy-2") { recordLoss() } shouldBe true
+        ingest.claimEventLoss("evt-legacy-2") { recordLoss() } shouldBe LossClaim.RECORDED
         allGaps().count { it.reason == GapReason.MESSAGES_DROPPED.name } shouldBe 1
         Unit
     }
@@ -159,7 +162,7 @@ class JournalLossTransactionTest {
         // The upgrade path must not touch it. The insert set the column, so this cannot depend on
         // reading the payload's flags right — which is what makes a new row and an old one carrying
         // the same flags distinguishable at all.
-        ingest.claimEventLoss("evt-modern") { recordLoss() } shouldBe false
+        ingest.claimEventLoss("evt-modern") { recordLoss() } shouldBe LossClaim.ALREADY_RECORDED
 
         allGaps().count { it.reason == GapReason.MESSAGES_DROPPED.name } shouldBe 1
         Unit
@@ -173,7 +176,7 @@ class JournalLossTransactionTest {
 
         // Its payload was cleared when it left PENDING, so anything claiming it now is working
         // from a snapshot decoded before that — too late to be recording anything about it.
-        ingest.claimEventLoss("evt-settled") { recordLoss() } shouldBe false
+        ingest.claimEventLoss("evt-settled") { recordLoss() } shouldBe LossClaim.NOT_PENDING
 
         allGaps().isEmpty() shouldBe true
         Unit
@@ -214,7 +217,7 @@ class JournalLossTransactionTest {
             withClue("pass $pass") {
                 ingest.resumeDeferredSettlements() shouldBe if (pass == 0) 0 else 1
                 runCatching { ingest.claimEventLoss("evt-retry") { error("the gap write failed") } }.isFailure shouldBe true
-                ingest.claimEventLoss("evt-retry") { recordLoss() } shouldBe false
+                ingest.claimEventLoss("evt-retry") { recordLoss() } shouldBe LossClaim.DEFERRED
                 ingest.isJournalPending("evt-retry") shouldBe true
                 allGaps().isEmpty() shouldBe true
             }
@@ -226,7 +229,7 @@ class JournalLossTransactionTest {
         ingest.pendingJournalForPackage(pkg).snapshots.map { it.eventId } shouldBe listOf("evt-retry")
 
         // And when it can finally be written, it is written once.
-        ingest.claimEventLoss("evt-retry") { recordLoss() } shouldBe true
+        ingest.claimEventLoss("evt-retry") { recordLoss() } shouldBe LossClaim.RECORDED
         allGaps().count { it.reason == GapReason.MESSAGES_DROPPED.name } shouldBe 1
         Unit
     }
@@ -248,7 +251,7 @@ class JournalLossTransactionTest {
         ingest.isJournalPending("evt-exhausted") shouldBe false
         // The payload is gone, so the claim can no longer be taken and no gap can ever be written.
         ingest.pendingJournalForPackage(pkg).snapshots.isEmpty() shouldBe true
-        ingest.claimEventLoss("evt-exhausted") { recordLoss() } shouldBe false
+        ingest.claimEventLoss("evt-exhausted") { recordLoss() } shouldBe LossClaim.NOT_PENDING
         allGaps().isEmpty() shouldBe true
         Unit
     }
@@ -304,8 +307,11 @@ class JournalLossTransactionTest {
         ready()
         val ids = listOf("evt-p1", "evt-p2", "evt-p3", "evt-p4", "evt-p5")
         for ((i, id) in ids.withIndex()) ingest.journal(snapshotAt(id, 100L * (i + 1)), "gen", 60_000) shouldBe true
-        // The whole of the second page, at this page size.
-        for (id in listOf("evt-p2", "evt-p3")) {
+        // The whole of the second page *as the correct paging produces it*: raw pages at limit 2
+        // are [p1,p2], [p3,p4], [p5]. Corrupting p2 and p3 instead leaves every correct page with
+        // something decodable in it, so a walk that stops on an empty page would still pass
+        // (round 37 Codex I4).
+        for (id in listOf("evt-p3", "evt-p4")) {
             holder.db().openHelper.writableDatabase
                 .execSQL("UPDATE event_journal SET payload = 'not json at all' WHERE eventId = ?", arrayOf<Any>(id))
         }
@@ -318,7 +324,116 @@ class JournalLossTransactionTest {
             visited += page.snapshots.map { it.eventId }
             after = page.next ?: break
         }
-        visited shouldBe listOf("evt-p1", "evt-p4", "evt-p5")
+        visited shouldBe listOf("evt-p1", "evt-p2", "evt-p5")
+        Unit
+    }
+
+    /**
+     * The same page, stated directly: it yields nothing and still says there is more.
+     *
+     * This is the property the walk depends on, and asserting only the visited list leaves it to
+     * inference — the list would also be explained by the page never having been read.
+     */
+    @Test
+    fun aPageOfUndecodableRowsIsEmptyAndStillPointsOn() = runBlocking {
+        ready()
+        val ids = listOf("evt-q1", "evt-q2", "evt-q3", "evt-q4", "evt-q5")
+        for ((i, id) in ids.withIndex()) ingest.journal(snapshotAt(id, 100L * (i + 1)), "gen", 60_000) shouldBe true
+        for (id in listOf("evt-q3", "evt-q4")) {
+            holder.db().openHelper.writableDatabase
+                .execSQL("UPDATE event_journal SET payload = 'not json at all' WHERE eventId = ?", arrayOf<Any>(id))
+        }
+
+        val first = ingest.pendingJournalForPackage(pkg, JournalCursor.START, limit = 2)
+        first.snapshots.map { it.eventId } shouldBe listOf("evt-q1", "evt-q2")
+        val second = ingest.pendingJournalForPackage(pkg, first.next!!, limit = 2)
+        second.snapshots.isEmpty() shouldBe true
+        // Non-null although nothing decoded: the cursor comes from the rows, so the page after it
+        // is still reachable.
+        second.next shouldNotBe null
+        ingest.pendingJournalForPackage(pkg, second.next!!, limit = 2).snapshots.map { it.eventId } shouldBe listOf("evt-q5")
+        Unit
+    }
+
+    /**
+     * Round 37 Codex C1, at the layer that decides it: a claim that takes nothing says *why*.
+     *
+     * Before this, both "the gap is already on disk" and "the row is deferred and no gap exists"
+     * came back as `false`, and the caller could not tell a settled row from one whose evidence
+     * still had to be written. Committing on the second is how the payload was lost.
+     */
+    @Test
+    fun aClaimSaysWhetherTheGapIsOnDiskOrOnlyThatItTookNothing() = runBlocking {
+        ready()
+        ingest.journal(snapshot("evt-claim-kind"), "gen", 60_000) shouldBe true
+
+        // Deferred: the gap is not written, and the claim must not be read as success.
+        runCatching { ingest.claimEventLoss("evt-claim-kind") { error("the gap write failed") } }.isFailure shouldBe true
+        ingest.claimEventLoss("evt-claim-kind") { recordLoss() } shouldBe LossClaim.DEFERRED
+        allGaps().isEmpty() shouldBe true
+
+        // Recorded, then already recorded: both mean the gap is on disk.
+        ingest.resumeDeferredSettlements() shouldBe 1
+        ingest.claimEventLoss("evt-claim-kind") { recordLoss() } shouldBe LossClaim.RECORDED
+        ingest.claimEventLoss("evt-claim-kind") { recordLoss() } shouldBe LossClaim.ALREADY_RECORDED
+        allGaps().count { it.reason == GapReason.MESSAGES_DROPPED.name } shouldBe 1
+
+        // And a row that has left PENDING owes nothing: its payload is gone.
+        ingest.journal(snapshot("evt-claim-gone"), "gen", 60_000) shouldBe true
+        ingest.markJournal("evt-claim-gone", "COMMITTED")
+        ingest.claimEventLoss("evt-claim-gone") { recordLoss() } shouldBe LossClaim.NOT_PENDING
+        Unit
+    }
+
+    /**
+     * Round 37, agy and the subagent independently: the walk's resume is one source's business.
+     *
+     * It runs inside that source's policy transaction. A global reset there puts another app's
+     * deferred rows back — and takes them away again if the transaction rolls back — so a source
+     * being switched off silently changes the replay schedule of every other source on the device.
+     */
+    @Test
+    fun resumingOneSourcesDeferredRowsLeavesAnothersAlone() = runBlocking {
+        ready()
+        val other = "com.example.other"
+        ingest.journal(snapshot("evt-mine"), "gen", 60_000) shouldBe true
+        ingest.journal(
+            Fixtures.snapshot(Fixtures.base(title = "t", text = "b"), packageName = other, eventId = "evt-theirs"),
+            "gen",
+            60_000,
+        ) shouldBe true
+        for (id in listOf("evt-mine", "evt-theirs")) {
+            runCatching { ingest.claimEventLoss(id) { error("the gap write failed") } }.isFailure shouldBe true
+        }
+        ingest.isReplayCandidate("evt-mine") shouldBe false
+        ingest.isReplayCandidate("evt-theirs") shouldBe false
+
+        ingest.resumeDeferredSettlements(pkg) shouldBe 1
+
+        ingest.isReplayCandidate("evt-mine") shouldBe true
+        ingest.isReplayCandidate("evt-theirs") shouldBe false
+        Unit
+    }
+
+    /**
+     * Round 37 subagent C2-a: the deferral may not walk back a settled row.
+     *
+     * `deferLoss` carries `lossRecorded = 0` for the same reason the claim does. Through
+     * `claimEventLoss` the predicate is unreachable — the catch runs only when the claim had won,
+     * so the row is at 0 there — which is exactly why it is pinned at this layer instead: the
+     * guard is one line, and without a test nothing would notice it going.
+     */
+    @Test
+    fun aSettledRowCannotBeWalkedBackToDeferred() = runBlocking {
+        ready()
+        ingest.journal(snapshot("evt-settled-defer"), "gen", 60_000) { recordLoss() } shouldBe true
+
+        holder.db().journalDao().deferLoss("evt-settled-defer") shouldBe 0
+        // Still settled, and still out of reach of a second claim — a downgrade to 2 would let a
+        // later pass resume it and record the same loss a second time.
+        ingest.isReplayCandidate("evt-settled-defer") shouldBe true
+        ingest.claimEventLoss("evt-settled-defer") { recordLoss() } shouldBe LossClaim.ALREADY_RECORDED
+        allGaps().count { it.reason == GapReason.MESSAGES_DROPPED.name } shouldBe 1
         Unit
     }
 
@@ -333,23 +448,24 @@ class JournalLossTransactionTest {
     @Test
     fun theSettleWalkSeeksToItsCursorInsideTheIndex() = runBlocking {
         ready()
-        val sql = """
-            EXPLAIN QUERY PLAN
-            SELECT * FROM event_journal
-            WHERE state = 'PENDING' AND packageName = ? AND lossRecorded = 0
-              AND (receivedAtEpochMs, eventId) > (?, ?)
-            ORDER BY receivedAtEpochMs, eventId LIMIT ?
-        """.trimIndent()
+        // The DAO's own statement, not a copy of it: a copy keeps its pretty plan while the real
+        // one degrades. Room's `:name` bindings become positional `?` and nothing else changes.
+        val sql = "EXPLAIN QUERY PLAN " + PENDING_FOR_PACKAGE_AFTER.replace(Regex(":\\w+"), "?")
         val plan = holder.db().openHelper.writableDatabase
             .query(sql, arrayOf<Any>(pkg, 100L, "evt-a", 200))
             .use { c ->
                 buildString { while (c.moveToNext()) appendLine(c.getString(c.columnCount - 1)) }
             }
 
-        plan shouldContain "index_event_journal_packageName_state_lossRecorded_receivedAtEpochMs_eventId"
-        // The two findings, each named: a scan reads rows the cursor has already passed, and a
-        // temp B-tree means the index did not supply the order and every candidate was sorted.
         withClue(plan) {
+            plan shouldContain "index_event_journal_packageName_state_lossRecorded_receivedAtEpochMs_eventId"
+            // The cursor itself has to be part of the index range, not a filter applied after it.
+            // Asserting only the index name and the absence of a scan lets a statement through that
+            // seeks on the three equality columns and then re-reads every row the cursor has already
+            // passed — correct, and quadratic (round 37 Codex I3).
+            plan shouldContain "(receivedAtEpochMs,eventId)>(?,?)"
+            // A scan reads rows the cursor has passed; a temp B-tree means the index did not supply
+            // the order and every candidate was sorted.
             plan.contains("SCAN event_journal") shouldBe false
             plan.contains("TEMP B-TREE") shouldBe false
         }
@@ -384,7 +500,7 @@ class JournalLossTransactionTest {
         ingest.resumeDeferredSettlements() shouldBe 1
         ingest.isReplayCandidate("evt-defer") shouldBe true
         ingest.pendingJournal().map { it.second.eventId } shouldBe listOf("evt-defer")
-        ingest.claimEventLoss("evt-defer") { recordLoss() } shouldBe true
+        ingest.claimEventLoss("evt-defer") { recordLoss() } shouldBe LossClaim.RECORDED
         allGaps().count { it.reason == GapReason.MESSAGES_DROPPED.name } shouldBe 1
         Unit
     }

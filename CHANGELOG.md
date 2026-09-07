@@ -105,13 +105,32 @@ were wrong in a way that changed the fix.
   left the row at the head of every replay page: two hundred rows whose gap writes keep failing then
   starve the two hundred and first for ever, however often a replay runs. A refused settlement is
   therefore *deferred* — out of the two passes that read pending rows, still `PENDING`, payload and
-  unspent claim untouched — and every such pass begins by putting deferred rows back, so the retry
-  costs each row one attempt per pass and no more. It is also not left waiting for the user: the
+  unspent claim untouched — and a pass puts them back once it has drained everything else, so the
+  retry costs each row one attempt per pass and no more. Doing it at the *head* of a pass instead
+  re-inserted a failing prefix in front of everything on every trigger: twenty thousand rows whose
+  gap writes keep failing re-exhaust the hundred-round budget each time, and the row behind them is
+  never even read, however many replays run. It is also not left waiting for the user: the
   four things that trigger a replay are all a user or a lifecycle event, so a device that got its
   disk space back could have waited days, and the retry is now armed by proof instead — an event
   accepted *with* a loss wrote a gap in its acceptance transaction, which is exactly the table that
   had refused. An acceptance that wrote no gap arms nothing, so a vault that keeps refusing cannot
   turn a stream of events into a stream of replays.
+  Adding a third value to that column also gave a `false` claim a second meaning where the code read
+  only one, and closing that was the round after's Critical. A claim that took nothing used to mean
+  exactly "another pass already wrote this gap", so a caller could ignore the answer and go on to
+  commit; a deferred row answers the same way, and there the gap does *not* exist. A replay holding
+  a page read before another pass deferred the row would therefore store the survivors and clear the
+  payload that was the only record of what they were missing. The claim now says which of four
+  things it found — it wrote the gap, the gap was already there, the row is deferred, or the row has
+  left `PENDING` — and only the first two let a row go on to a terminal state; the settle walk
+  aborts the whole policy change on the other two, because the discard that follows would clear the
+  evidence for good.
+  Replay passes are coalesced rather than run side by side, which is what made that interleaving
+  possible: a page is read outside the pipeline lock, and five things can start a pass. A caller
+  that finds one running leaves it to that pass, and the request is re-checked as the gate is
+  released, so nothing is dropped and no two passes hold overlapping pages. The walk's resume is
+  scoped to the one source whose policy transaction it runs in, rather than resetting every app's
+  deferred rows and undoing that again if the transaction rolls back.
   Three cases deliberately record nothing. `MESSAGES` beside a message that was itself shortened
   is undecidable — the batch may also have been over the limit — and a loss invented from evidence
   that does not support it is the same defect facing the other way. A carried-over payload that no

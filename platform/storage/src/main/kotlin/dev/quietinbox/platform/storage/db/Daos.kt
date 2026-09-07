@@ -38,6 +38,20 @@ interface SourceDao {
     suspend fun delete(packageName: String)
 }
 
+/**
+ * The settle walk's statement, hoisted so the query-plan test explains the statement the DAO runs
+ * rather than a copy of it. A copy can keep its pretty plan while the real one degrades: Codex
+ * demonstrated it with `(receivedAtEpochMs + 0, eventId) > (?, ?)`, which walks correctly, keeps
+ * every plan assertion true, and costs 2,152,898 VM instructions where the real statement costs
+ * 177,461 (round 37 I3). Room needs a compile-time constant here, so this is one.
+ */
+internal const val PENDING_FOR_PACKAGE_AFTER = """
+    SELECT * FROM event_journal
+    WHERE state = 'PENDING' AND packageName = :packageName AND lossRecorded = 0
+      AND (receivedAtEpochMs, eventId) > (:afterTime, :afterId)
+    ORDER BY receivedAtEpochMs, eventId LIMIT :limit
+"""
+
 @Dao
 interface JournalDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
@@ -91,14 +105,7 @@ interface JournalDao {
      * settled its loss with the insert, and one an earlier page settled is done; neither needs
      * reading, and skipping them in the index costs nothing.
      */
-    @Query(
-        """
-        SELECT * FROM event_journal
-        WHERE state = 'PENDING' AND packageName = :packageName AND lossRecorded = 0
-          AND (receivedAtEpochMs, eventId) > (:afterTime, :afterId)
-        ORDER BY receivedAtEpochMs, eventId LIMIT :limit
-        """,
-    )
+    @Query(PENDING_FOR_PACKAGE_AFTER)
     suspend fun pendingForPackageAfter(packageName: String, afterTime: Long, afterId: String, limit: Int): List<EventJournalEntity>
 
     /**
@@ -132,13 +139,36 @@ interface JournalDao {
     /**
      * Puts every deferred row back into the candidate set, for the pass that is about to run.
      *
-     * Called at the head of a replay and of a settle walk, which are the only two readers of
-     * pending rows: whatever made the earlier gap write fail may be gone, and the only way to find
-     * out is to try. One attempt per row per pass — a row that fails again defers itself again and
-     * stops holding a place on the page.
+     * Called once a replay pass has drained everything else, and at the head of a settle walk —
+     * those are the only two readers of pending rows. Whatever made the earlier gap write fail may
+     * be gone, and the only way to find out is to try; one attempt per row per pass, because a row
+     * that fails again defers itself again and stops holding a place on the page.
+     *
+     * `state = 'PENDING'` because a row that has left it is owed nothing: a discard can strip a
+     * deferred row's payload without touching this column, and resuming that row would count it in
+     * the number returned and say a pass had work to do when it has none (round 37 agy).
      */
-    @Query("UPDATE event_journal SET lossRecorded = 0 WHERE lossRecorded = 2")
+    @Query("UPDATE event_journal SET lossRecorded = 0 WHERE lossRecorded = 2 AND state = 'PENDING'")
     suspend fun resumeDeferredLosses(): Int
+
+    /**
+     * The same, for one source. The settle walk runs inside that source's policy transaction, and
+     * a transaction opened to switch one app off has no business putting another app's deferred
+     * rows back — nor taking them away again when it rolls back (round 37, Codex and the subagent
+     * independently).
+     */
+    @Query("UPDATE event_journal SET lossRecorded = 0 WHERE lossRecorded = 2 AND state = 'PENDING' AND packageName = :packageName")
+    suspend fun resumeDeferredLossesForPackage(packageName: String): Int
+
+    /**
+     * The row's settlement state while it is still PENDING; null once it has left.
+     *
+     * Read inside the claim's own transaction when the claim finds nothing to take, because a
+     * conditional update that changed no row does not say *why*. The two reasons are opposite: the
+     * gap is already on disk, or it is not written at all and the row is waiting to try again.
+     */
+    @Query("SELECT lossRecorded FROM event_journal WHERE eventId = :eventId AND state = 'PENDING'")
+    suspend fun pendingLossState(eventId: String): Int?
 
     /** Whether the replay would pick this row up: exactly [pending]'s predicate, for one row. */
     @Query("SELECT COUNT(*) FROM event_journal WHERE eventId = :eventId AND state = 'PENDING' AND lossRecorded != 2")

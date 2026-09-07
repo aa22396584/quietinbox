@@ -58,10 +58,19 @@ That column holds three values, because a settlement the vault refuses is neithe
 merely unsettled. Charging the failure to the event's commit attempts destroys the payload after
 three tries; leaving the row in the replay's candidate set puts it at the head of every page, where
 enough of them starve everything behind. A refused settlement is *deferred* instead: still
-`PENDING`, payload and claim untouched, out of both readers until the pass that runs next puts it
-back — which every replay and every settle walk does before it reads. The retry is armed by proof
-rather than by a timer: an event accepted with a loss of its own has just written a gap, so the
-table that refused is taking writes again; an acceptance that wrote no gap arms nothing.
+`PENDING`, payload and claim untouched, out of both readers until a pass puts it back. A replay does
+that once it has drained everything else — at the head of a pass, a failing prefix is re-inserted in
+front of everything on every trigger and the rows behind it are never read — and a settle walk does
+it for its own source only, since it runs inside that source's policy transaction. The retry is
+armed by proof rather than by a timer: an event accepted with a loss of its own has just written a
+gap, so the table that refused is taking writes again; an acceptance that wrote no gap arms nothing.
+
+A claim answers with which of four things it found — it wrote the gap, the gap was already there,
+the row is deferred, or the row has left `PENDING` — because only the first two mean the loss is on
+disk. A Boolean conflated the second and the third, and a replay holding a page read before another
+pass deferred a row would then commit it and clear the evidence. Passes are coalesced for the same
+reason: a page is read outside the pipeline lock, so two overlapping passes are what make a stale
+page possible at all.
 
 Both readers are bounded and both are paged. The settle walk runs inside the source policy
 transaction, under the pipeline lock, so its cost is live capture's: it seeks to a

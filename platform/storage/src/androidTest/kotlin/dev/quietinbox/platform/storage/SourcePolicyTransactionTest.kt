@@ -17,6 +17,7 @@ import dev.quietinbox.platform.storage.db.SummaryObservationEntity
 import dev.quietinbox.platform.storage.db.VaultState
 import dev.quietinbox.platform.storage.repo.HealthRepository
 import dev.quietinbox.platform.storage.repo.IngestRepository
+import dev.quietinbox.platform.storage.repo.LossClaim
 import dev.quietinbox.platform.storage.repo.SourceRepository
 import dev.quietinbox.platform.storage.retention.MediaDirectory
 import io.kotest.matchers.shouldBe
@@ -255,7 +256,7 @@ class SourcePolicyTransactionTest {
         sources.get(pkg)!!.enabled shouldBe true
         ingest.isJournalPending("evt-carried-2") shouldBe true
         allGaps().isEmpty() shouldBe true
-        ingest.claimEventLoss("evt-carried-2") { recordLoss() } shouldBe true
+        ingest.claimEventLoss("evt-carried-2") { recordLoss() } shouldBe LossClaim.RECORDED
         Unit
     }
 

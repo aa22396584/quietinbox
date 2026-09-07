@@ -126,11 +126,19 @@ class IngestRepository @Inject constructor(
     suspend fun discardPendingJournal(packageName: String): Int = holder.db().journalDao().discardPending(packageName)
 
     /**
-     * Records a loss an event carried in from a release that recorded it nowhere, exactly once.
+     * Records a loss an event carried in from a release that recorded it nowhere, exactly once,
+     * and says what it found — which of the four is the caller's whole basis for deciding whether
+     * the row may now go on to a terminal state.
      *
      * [writeGap] runs only for the caller that wins the claim, and in the same transaction as the
      * claim, so the two cannot come apart: a row whose gap write fails keeps its claim unspent and
      * is tried again by the next pass. Returns whether this call was the one that recorded it.
+     *
+     * A `Boolean` here was the round-37 Critical. `false` used to carry a guarantee — "another
+     * caller already wrote this gap" — so ignoring it and committing was safe. The deferred state
+     * gave `false` a second, opposite meaning, and every caller kept the old reading: a replay
+     * holding a batch from before another pass deferred the row would commit it and clear the
+     * payload, with no gap anywhere. The enum is the guarantee made explicit.
      *
      * A failure also defers the row — the rollback has already undone the claim, so the deferral is
      * a write of its own afterwards — and then rethrows, because whether the *caller's* work may
@@ -139,13 +147,23 @@ class IngestRepository @Inject constructor(
      * evidence the deferral exists to keep. If the deferral cannot be written either, the row stays
      * in the candidate set and [isReplayCandidate] says so; nothing here pretends otherwise.
      */
-    suspend fun claimEventLoss(eventId: String, writeGap: suspend () -> Unit): Boolean {
+    suspend fun claimEventLoss(eventId: String, writeGap: suspend () -> Unit): LossClaim {
         val db = holder.db()
         try {
             return db.withTransaction {
-                val won = db.journalDao().claimLoss(eventId) == 1
-                if (won) writeGap()
-                won
+                if (db.journalDao().claimLoss(eventId) == 1) {
+                    writeGap()
+                    LossClaim.RECORDED
+                } else {
+                    // The claim took nothing, and the reasons are opposite. Read them apart in the
+                    // same transaction: anything else is a guess about a row another pass may have
+                    // moved since.
+                    when (db.journalDao().pendingLossState(eventId)) {
+                        null -> LossClaim.NOT_PENDING
+                        LOSS_SETTLED -> LossClaim.ALREADY_RECORDED
+                        else -> LossClaim.DEFERRED
+                    }
+                }
             }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
@@ -162,6 +180,10 @@ class IngestRepository @Inject constructor(
      * try again rather than wait for a user to change a source.
      */
     suspend fun resumeDeferredSettlements(): Int = holder.db().journalDao().resumeDeferredLosses()
+
+    /** The same, scoped to one source — what a source policy transaction is entitled to change. */
+    suspend fun resumeDeferredSettlements(packageName: String): Int =
+        holder.db().journalDao().resumeDeferredLossesForPackage(packageName)
 
     /** Whether the replay would still pick this row up — the honest test for "did it move on". */
     suspend fun isReplayCandidate(eventId: String): Boolean = holder.db().journalDao().isReplayCandidate(eventId) > 0
@@ -512,6 +534,30 @@ class IngestRepository @Inject constructor(
         snapshot.postedAtEpochMs != null -> snapshot.postedAtEpochMs!!
         else -> snapshot.observedAtEpochMs
     }
+}
+
+/**
+ * What a claim for an event's carried-over loss found.
+ *
+ * Only [RECORDED] and [ALREADY_RECORDED] mean the gap is on disk. The other two mean it is not,
+ * and a caller that treats them as success destroys the payload that was the only evidence of it.
+ */
+enum class LossClaim {
+    /** This call wrote the gap, in the claim's own transaction. */
+    RECORDED,
+
+    /** Another pass wrote it; the row is settled and no one may write it again. */
+    ALREADY_RECORDED,
+
+    /** The gap is not written and the row is waiting for a pass that can write it. */
+    DEFERRED,
+
+    /** The row has left PENDING since it was read; its payload is gone and nothing is owed. */
+    NOT_PENDING,
+    ;
+
+    /** Whether the loss is recorded — the only question a caller about to commit may ask. */
+    val gapIsDurable: Boolean get() = this == RECORDED || this == ALREADY_RECORDED
 }
 
 /** Where a paged walk over one source's pending journal rows has got to. */

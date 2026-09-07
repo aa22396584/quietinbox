@@ -21,6 +21,7 @@ import dev.quietinbox.platform.storage.repo.CommitOutcome
 import dev.quietinbox.platform.storage.repo.HealthRepository
 import dev.quietinbox.platform.storage.repo.IngestRepository
 import dev.quietinbox.platform.storage.repo.JournalCursor
+import dev.quietinbox.platform.storage.repo.LossClaim
 import dev.quietinbox.platform.storage.repo.JournalPage
 import dev.quietinbox.platform.storage.repo.SourceRepository
 import dev.quietinbox.platform.storage.repo.VaultRepository
@@ -199,6 +200,14 @@ class CaptureCoordinatorTest : FunSpec({
         @Volatile
         var gapWritesFail: Boolean = false
 
+        /**
+         * Makes the deferral fail as well — the vault refusing every write, not only the gap table.
+         * The row then stays a replay candidate, and a pass that claimed progress anyway would
+         * re-read the same page until its round limit (round 37 subagent C2-b).
+         */
+        @Volatile
+        var deferralsFail: Boolean = false
+
         private fun installGapStore() {
             coEvery { health.openGap(any(), any(), any(), any(), any()) } answers {
                 if (gapWritesFail) throw IllegalStateException("no space left on device")
@@ -258,18 +267,26 @@ class CaptureCoordinatorTest : FunSpec({
         private fun installLossClaim() {
             coEvery { ingest.claimEventLoss(any(), any()) } coAnswers {
                 val eventId = firstArg<String>()
-                val won = lossClaimed.add(eventId)
-                if (won) {
-                    try {
-                        arg<suspend () -> Unit>(1).invoke()
-                    } catch (e: Throwable) {
-                        lossClaimed.remove(eventId)
-                        // The repository's deferral, after the rollback undid the claim.
-                        lossDeferred += eventId
-                        throw e
+                // Eligibility is the SQL's: the claim takes a row only at 0. A deferred row answers
+                // DEFERRED, not "already recorded" — the gap does not exist there, and a fake that
+                // conflated the two is why round 37's Critical passed every test (Codex C1).
+                when {
+                    eventId in lossDeferred -> LossClaim.DEFERRED
+                    eventId in lossClaimed -> LossClaim.ALREADY_RECORDED
+                    else -> {
+                        lossClaimed += eventId
+                        try {
+                            arg<suspend () -> Unit>(1).invoke()
+                            LossClaim.RECORDED
+                        } catch (e: Throwable) {
+                            lossClaimed.remove(eventId)
+                            // The repository's deferral, after the rollback undid the claim — and
+                            // like every other write, it can fail too.
+                            if (!deferralsFail) lossDeferred += eventId
+                            throw e
+                        }
                     }
                 }
-                won
             }
             installPendingJournal()
             installPendingReplay()
@@ -305,6 +322,19 @@ class CaptureCoordinatorTest : FunSpec({
                     val resumed = lossDeferred.size
                     lossDeferred.clear()
                     resumed
+                }
+            }
+            // The per-source overload, scoped the way the query is: a policy transaction for one
+            // app may not put another app's deferred rows back.
+            coEvery { ingest.resumeDeferredSettlements(any<String>()) } answers {
+                val pkg = firstArg<String>()
+                synchronized(lossDeferred) {
+                    val mine = lossDeferred.filter { id ->
+                        pendingByPackage[pkg]?.any { it.eventId == id } == true ||
+                            pendingReplay.any { it.second.eventId == id && it.second.source.packageName == pkg }
+                    }
+                    lossDeferred.removeAll(mine.toSet())
+                    mine.size
                 }
             }
         }
@@ -1832,5 +1862,168 @@ class CaptureCoordinatorTest : FunSpec({
             h.lossDeferred.size shouldBe 200
             coVerify(exactly = 0) { h.ingest.markJournalRetryable(any(), any()) }
         }
+    }
+
+    test("a row another pass deferred is not committed by a batch that predates the deferral") {
+        val h = Harness()
+        // Round 37 Codex C1, and it is mine: the tri-state gave a `false` claim a second meaning.
+        // It used to mean only "someone else already wrote this gap", which is why the caller could
+        // ignore it and commit. A deferred row answers `false` too, and there the gap does *not*
+        // exist — so committing on it stores the survivors and clears the payload that was the only
+        // record of what they were missing. Reachable because a replay's page read is outside the
+        // pipeline lock: one pass can defer a row while another still holds it in an older batch.
+        val legacy = Fixtures.snapshot(
+            shape = Fixtures.messaging(conversationTitle = "Group") { message("Ana", "the newest one") }
+                .copy(truncated = setOf(TruncationFlag.LINES)),
+            packageName = ENABLED_PKG,
+            eventId = "evt-deferred-elsewhere",
+        )
+        var served = 0
+        coEvery { h.ingest.pendingJournal(any(), any()) } coAnswers {
+            if (served++ < 1) listOf("gen-old" to legacy) else emptyList()
+        }
+        coEvery { h.ingest.isJournalPending(any()) } returns true
+        // Exactly what the repository answers for a row a concurrent pass has just deferred: no
+        // exception, and no gap written.
+        coEvery { h.ingest.claimEventLoss(any(), any()) } returns LossClaim.DEFERRED
+
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+        h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
+
+        coVerify(timeout = 5_000, atLeast = 1) { h.ingest.claimEventLoss("evt-deferred-elsewhere", any()) }
+        stillHolds {
+            coVerify(exactly = 0) { h.ingest.commit(any(), any(), any(), any(), any(), any(), any()) }
+            coVerify(exactly = 0) { h.ingest.markJournal("evt-deferred-elsewhere", any(), any()) }
+            h.gaps.isEmpty() shouldBe true
+        }
+    }
+
+    test("a replay that cannot even defer a row does not claim it made progress") {
+        val h = Harness()
+        // Round 37 subagent C2-b. The progress guard exists because a deferral that also fails
+        // leaves the row exactly where it was: saying "the page moved on" then re-reads the same
+        // page until the round limit — a hundred passes over the same rows for nothing.
+        h.pendingReplay += "gen-old" to Fixtures.snapshot(
+            shape = Fixtures.base(title = null, text = null).copy(truncated = setOf(TruncationFlag.LINES)),
+            packageName = ENABLED_PKG,
+            eventId = "evt-cannot-defer",
+            observedAt = 1_000L,
+        )
+        coEvery { h.ingest.isJournalPending(any()) } returns true
+        h.gapWritesFail = true
+        h.deferralsFail = true
+
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+        h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
+
+        coVerify(timeout = 5_000, atLeast = 1) { h.ingest.claimEventLoss("evt-cannot-defer", any()) }
+        stillHolds {
+            // One page read, and the pass stops. Claiming progress here would have read it a
+            // hundred times; the row is still a candidate, so nothing moved.
+            coVerify(atMost = 2) { h.ingest.pendingJournal(any(), any()) }
+            h.lossDeferred.isEmpty() shouldBe true
+            h.gaps.isEmpty() shouldBe true
+        }
+    }
+
+    test("a failing prefix longer than a whole pass does not keep the rows behind it from ever being read") {
+        val h = Harness()
+        // Round 37 Codex I1, at the boundary that matters: `pageSize × roundLimit`. Putting the
+        // deferred rows back at the *head* of every pass re-inserted the failing prefix in front of
+        // everything each time, so the budget was spent on the same rows on every trigger and the
+        // row behind them was never even selected. Six blockers at a page of two and a limit of
+        // three rounds is the same shape as twenty thousand at 200 × 100.
+        val coordinator = h.coordinator()
+        coordinator.replayPageSize = 2
+        coordinator.replayRounds = 3
+        h.pendingReplay += (1..6).map { i ->
+            "gen-old" to Fixtures.snapshot(
+                shape = Fixtures.base(title = null, text = null).copy(truncated = setOf(TruncationFlag.LINES)),
+                packageName = ENABLED_PKG,
+                eventId = "evt-prefix-$i",
+                observedAt = 1_000L + i,
+            )
+        }
+        h.pendingReplay += "gen-old" to Fixtures.snapshot(
+            shape = Fixtures.messaging(conversationTitle = "Group") { message("Ana", "behind the prefix") },
+            packageName = ENABLED_PKG,
+            eventId = "evt-tail",
+            observedAt = 9_000L,
+        )
+        coEvery { h.ingest.isJournalPending(any()) } returns true
+        h.gapWritesFail = true
+
+        coordinator.onConnected(h.service)
+        h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
+
+        // Pass one spends its three rounds on the prefix and never reaches the tail.
+        awaitUntil { h.lossDeferred.size shouldBe 6 }
+        stillHolds { coVerify(exactly = 0) { h.ingest.commit(any(), any(), any(), any(), any(), any(), any()) } }
+
+        // A second trigger. The deferred prefix is no longer at the head, so the tail is the first
+        // thing the page returns and it is committed — before the prefix is retried at the drain.
+        coordinator.setPaused(true)
+        coordinator.setPaused(false)
+
+        coVerify(timeout = 10_000, atLeast = 1) { h.ingest.commit(any(), any(), any(), any(), any(), any(), any()) }
+    }
+
+    test("the pending rows of a source with more than one page are all settled before it is disabled") {
+        val h = Harness()
+        // Round 37 Codex I2 and subagent C2-a: the walk's `while` had no test that crossed a page
+        // boundary through the real entry point, so mutating it to read one page only left the
+        // whole suite green — while the discard that follows would clear every payload past the
+        // first page, losing exactly the evidence this walk exists to keep.
+        h.pendingByPackage[ENABLED_PKG] = (1..201).map { i ->
+            Fixtures.snapshot(
+                shape = Fixtures.base(title = null, text = null).copy(truncated = setOf(TruncationFlag.LINES)),
+                packageName = ENABLED_PKG,
+                eventId = "evt-page-%03d".format(i),
+                observedAt = 1_000L + i,
+            )
+        }.toMutableList()
+
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+        h.awaitConnected()
+
+        coordinator.setSourceEnabled(ENABLED_PKG, false)
+
+        // Every one of them, including the two hundred and first — and all before the discard,
+        // which is what empties the list.
+        h.lossClaimed.size shouldBe 201
+        h.gaps.count { it.reason == GapReason.MESSAGES_DROPPED.name && it.packageName == ENABLED_PKG } shouldBe 201
+        h.pendingByPackage[ENABLED_PKG] shouldBe null
+    }
+
+    test("two triggers arriving together run one replay pass, not two") {
+        val h = Harness()
+        // Round 37 Codex C1's structural half. A pass reads its page outside the pipeline lock, so
+        // two passes overlapping is what lets one hold a batch the other has already changed. The
+        // passes are coalesced instead: a caller that finds one running leaves it to that pass, and
+        // the request is re-checked as the gate is released so nothing is dropped.
+        val concurrent = java.util.concurrent.atomic.AtomicInteger()
+        val maxConcurrent = java.util.concurrent.atomic.AtomicInteger()
+        coEvery { h.ingest.pendingJournal(any(), any()) } coAnswers {
+            val now = concurrent.incrementAndGet()
+            maxConcurrent.updateAndGet { m -> maxOf(m, now) }
+            try {
+                kotlinx.coroutines.delay(50)
+                emptyList()
+            } finally {
+                concurrent.decrementAndGet()
+            }
+        }
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+
+        h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
+        coordinator.setPaused(true)
+        coordinator.setPaused(false)
+
+        awaitUntil { (maxConcurrent.get() >= 1) shouldBe true }
+        stillHolds { maxConcurrent.get() shouldBe 1 }
     }
 })

@@ -61,6 +61,18 @@ class SearchViewModel @Inject constructor(
     private val local = MutableStateFlow(SearchUiState())
     private var generation = 0
 
+    /**
+     * What the pipeline last actually ran. Typing a character and deleting it again leaves the
+     * three compared fields unchanged, so `distinctUntilChanged` suppresses the re-run — and a
+     * `searching` flag set optimistically by the setter would then never be cleared. It has no
+     * visual effect today (the results are still on screen and `searched` is true), but a flag
+     * that says work is in flight when none is has no business being there.
+     */
+    private var lastRun: Triple<String, SearchRange, Set<String>>? = null
+
+    private fun SearchUiState.willRun(): Boolean =
+        query.isNotBlank() && Triple(query, range, packages) != lastRun
+
     val state: StateFlow<SearchUiState> = combine(local, inbox.observePackagesWithData().catch { emit(emptyList()) }, vault.state) { s, p, v ->
         s.copy(availablePackages = p.toImmutableList(), vaultLocked = v is VaultState.Locked, vaultOpening = v is VaultState.Opening)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SearchUiState())
@@ -76,8 +88,8 @@ class SearchViewModel @Inject constructor(
 
     fun retryVault() = viewModelScope.launch { runCatching { vault.retryOpen() } }
 
-    fun setQuery(q: String) = local.update { it.copy(query = q, searching = q.isNotBlank(), generation = ++generation) }
-    fun setRange(r: SearchRange) = local.update { it.copy(range = r, generation = ++generation) }
+    fun setQuery(q: String) = local.update { val n = it.copy(query = q, generation = ++generation); n.copy(searching = n.willRun()) }
+    fun setRange(r: SearchRange) = local.update { val n = it.copy(range = r, generation = ++generation); n.copy(searching = n.willRun()) }
 
     /**
      * Appends the next page. The screen used to show the first 100 hits and call them "%d results",
@@ -111,8 +123,12 @@ class SearchViewModel @Inject constructor(
             }
         }
     }
-    fun togglePackage(p: String) = local.update { it.copy(packages = if (p in it.packages) it.packages - p else it.packages + p, generation = ++generation) }
-    fun clearPackages() = local.update { it.copy(packages = emptySet(), generation = ++generation) }
+    fun togglePackage(p: String) = local.update {
+        val n = it.copy(packages = if (p in it.packages) it.packages - p else it.packages + p, generation = ++generation)
+        n.copy(searching = n.willRun())
+    }
+
+    fun clearPackages() = local.update { val n = it.copy(packages = emptySet(), generation = ++generation); n.copy(searching = n.willRun()) }
 
     private fun fromMs(range: SearchRange): Long? {
         val now = System.currentTimeMillis()
@@ -126,9 +142,11 @@ class SearchViewModel @Inject constructor(
 
     private suspend fun run(s: SearchUiState) {
         if (s.query.isBlank()) {
+            lastRun = null
             local.update { it.copy(results = persistentListOf(), next = null, searching = false, searched = false) }
             return
         }
+        lastRun = Triple(s.query, s.range, s.packages)
         val page = runCatching { search.searchPage(s.query, s.packages, fromMs(s.range), null, limit = PAGE, cursor = null) }
             .getOrDefault(SearchPage(emptyList(), null))
         local.update {

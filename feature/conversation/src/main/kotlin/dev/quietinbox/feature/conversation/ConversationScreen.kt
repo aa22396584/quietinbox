@@ -236,8 +236,10 @@ fun ConversationScreen(
                             style = MaterialTheme.typography.labelLarge,
                             modifier = Modifier.padding(horizontal = 12.dp),
                         )
-                        val selectedText = state.messages.filter { it.id in state.selection }
-                            .map { it.body }.filter { it.isNotBlank() }.joinToString("\n\n")
+                        val selectedText = remember(state.selection, state.messages) {
+                            state.messages.filter { it.id in state.selection }
+                                .map { it.body }.filter { it.isNotBlank() }.joinToString("\n\n")
+                        }
                         IconButton(
                             onClick = { copyToClipboard(context, selectedText) },
                             // A selection of media-only messages has nothing to copy; the button
@@ -294,7 +296,6 @@ fun ConversationScreen(
                         }
                         MessageBubble(
                             message = m,
-                            isGroup = conversation?.isGroup == true,
                             showSender = m.senderName != null && (previous == null || previous.senderName != m.senderName || newDay),
                             selected = m.id in state.selection,
                             highlighted = m.id == highlighted,
@@ -374,11 +375,9 @@ fun ConversationScreen(
 }
 
 @OptIn(ExperimentalFoundationApi::class)
-/** `internal` rather than private so an instrumented test can assert the merged semantics node. */
 @Composable
 internal fun MessageBubble(
     message: Message,
-    isGroup: Boolean,
     showSender: Boolean,
     selected: Boolean,
     /** Briefly tinted after landing here from a search hit, so the match is findable by eye. */

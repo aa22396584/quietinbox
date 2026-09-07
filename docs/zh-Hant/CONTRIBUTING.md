@@ -21,7 +21,7 @@
    `./gradlew :core:model:test :core:parser:test :core:identity:test :core:reconcile:test :core:analytics:test :parsers:apps:test :platform:crypto:testDebugUnitTest :platform:storage:testDebugUnitTest :platform:backup:testDebugUnitTest :platform:capture:testDebugUnitTest :feature:analytics:testDebugUnitTest :feature:search:testDebugUnitTest :feature:conversation:testDebugUnitTest :app:testDebugUnitTest`
 3. `./gradlew :app:assembleDebug && tools/check-permissions.sh app/build/outputs/apk/debug/app-debug.apk`
 4. 儲存、加密或備份相關的變更：在裝置上執行 CI 會跑的那三套
-   `./gradlew :platform:storage:connectedDebugAndroidTest :platform:crypto:connectedDebugAndroidTest :platform:backup:connectedDebugAndroidTest`。
+   `ANDROID_SERIAL=<模擬器> ./gradlew :platform:storage:connectedDebugAndroidTest :platform:crypto:connectedDebugAndroidTest :platform:backup:connectedDebugAndroidTest :feature:conversation:connectedDebugAndroidTest`。
 5. 開一個填好檢查清單的 PR。加密、schema 以及身分／去重的變更需要第二位審查者，並且要更新 ADR。
 
 ## 風格

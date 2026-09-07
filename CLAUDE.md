@@ -24,8 +24,12 @@ Hard product rules (from the plan; never trade these away):
 export ANDROID_HOME=$HOME/Library/Android/sdk
 ./gradlew test :app:assembleDebug --console=plain            # all JVM tests + debug APK
 ./gradlew :core:reconcile:test                                # the dedup core (fast)
-./gradlew :platform:storage:connectedDebugAndroidTest \
-          :platform:crypto:connectedDebugAndroidTest          # SQLCipher, migration, key fsync (device)
+ANDROID_SERIAL=<emulator> ./gradlew \
+          :platform:storage:connectedDebugAndroidTest \
+          :platform:crypto:connectedDebugAndroidTest \
+          :platform:backup:connectedDebugAndroidTest \
+          :feature:conversation:connectedDebugAndroidTest    # SQLCipher, migration, key fsync, backup, merged semantics
+# Bind ANDROID_SERIAL: connectedDebugAndroidTest otherwise runs on every attached device.
 ./gradlew :app:assembleRelease                                # R8; no keystore in repo
 tools/check-permissions.sh                                    # merged-manifest permission gate
 ```

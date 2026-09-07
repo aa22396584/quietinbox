@@ -82,9 +82,11 @@
 ```bash
 export ANDROID_HOME=$HOME/Library/Android/sdk
 ./gradlew test :app:assembleDebug                                   # 全部 JVM 測試 + debug APK
-./gradlew :platform:storage:connectedDebugAndroidTest \
+ANDROID_SERIAL=<模擬器> ./gradlew \
+          :platform:storage:connectedDebugAndroidTest \
           :platform:crypto:connectedDebugAndroidTest \
-          :platform:backup:connectedDebugAndroidTest                # SQLCipher、migration、金鑰 fsync、備份容器（需裝置）
+          :platform:backup:connectedDebugAndroidTest \
+          :feature:conversation:connectedDebugAndroidTest           # SQLCipher、migration、金鑰 fsync、備份容器、合併語意（需裝置）
 tools/check-permissions.sh app/build/outputs/apk/debug/app-debug.apk
 ```
 
@@ -185,7 +187,7 @@ Requirements: JDK 17, Android SDK (compileSdk 37, build-tools 36); the Gradle wr
 ```bash
 export ANDROID_HOME=$HOME/Library/Android/sdk
 ./gradlew test :app:assembleDebug
-./gradlew :platform:storage:connectedDebugAndroidTest :platform:crypto:connectedDebugAndroidTest :platform:backup:connectedDebugAndroidTest   # device required
+ANDROID_SERIAL=<emulator> ./gradlew :platform:storage:connectedDebugAndroidTest :platform:crypto:connectedDebugAndroidTest :platform:backup:connectedDebugAndroidTest :feature:conversation:connectedDebugAndroidTest   # device required
 tools/check-permissions.sh app/build/outputs/apk/debug/app-debug.apk
 ```
 

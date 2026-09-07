@@ -127,6 +127,10 @@ were wrong in a way that changed the fix.
   which attributes the silence to the other person in the same way, and is now 安静率. The word also reached the live Play store description.
 
 ### Changed
+- CI's instrumented lane and every documented device-test command now include
+  `:feature:conversation:connectedDebugAndroidTest`, and bind `ANDROID_SERIAL` —
+  `connectedDebugAndroidTest` otherwise runs on every attached device. `CLAUDE.md` had also been
+  missing `:platform:backup` since it was added.
 - ADR-0005 said the recovery key "is shown once". It is re-showable on demand, and has been all
   along — a key seen once and mistranscribed is only discovered on the day a restore is attempted.
   The ADR now describes what ships, in both languages.

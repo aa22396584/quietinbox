@@ -55,7 +55,6 @@ class MessageBubbleSemanticsTest {
         QuietInboxTheme {
             MessageBubble(
                 message = message,
-                isGroup = true,
                 showSender = true,
                 selected = false,
                 highlighted = false,
@@ -75,6 +74,13 @@ class MessageBubbleSemanticsTest {
         // the sender. Two nodes here is the defect.
         rule.onAllNodes(hasText(SENDER, substring = true) and hasText(BODY, substring = true))
             .assertCountEquals(1)
+    }
+
+    @Test
+    fun theSenderIsReadOnceAndNotTwice() {
+        show()
+        // A merge that duplicated the name would also "contain both"; this pins the count.
+        rule.onAllNodes(hasText(SENDER, substring = true)).assertCountEquals(1)
     }
 
     @Test

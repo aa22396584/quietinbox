@@ -22,7 +22,7 @@ Thanks for helping. A few rules keep this project honest and its users safe.
    `./gradlew :core:model:test :core:parser:test :core:identity:test :core:reconcile:test :core:analytics:test :parsers:apps:test :platform:crypto:testDebugUnitTest :platform:storage:testDebugUnitTest :platform:backup:testDebugUnitTest :platform:capture:testDebugUnitTest :feature:analytics:testDebugUnitTest :feature:search:testDebugUnitTest :feature:conversation:testDebugUnitTest :app:testDebugUnitTest`
 3. `./gradlew :app:assembleDebug && tools/check-permissions.sh app/build/outputs/apk/debug/app-debug.apk`
 4. For storage, crypto or backup changes, on a device — the three suites CI runs:
-   `./gradlew :platform:storage:connectedDebugAndroidTest :platform:crypto:connectedDebugAndroidTest :platform:backup:connectedDebugAndroidTest`
+   `ANDROID_SERIAL=<emulator> ./gradlew :platform:storage:connectedDebugAndroidTest :platform:crypto:connectedDebugAndroidTest :platform:backup:connectedDebugAndroidTest :feature:conversation:connectedDebugAndroidTest`
 5. Open a PR with the checklist filled in. Crypto, schema and identity/dedup changes need a second
    reviewer and an ADR update.
 

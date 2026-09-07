@@ -1,22 +1,22 @@
 [
   {
     "language": "en-US",
-    "text": "0.1.4 records losses instead of hiding them. Dropped messages, shortened text, a save that failed after retries, and the time you paused or stopped an app are now gaps or labels. Search no longer calls the first page a total, and a hit opens at that message. On a medium-width screen the conversation keeps a back arrow. Media copies time out instead of hanging Delete everything or Restore; a restore that lost files says so. A refused source change is a dialog, not a silent no-op."
+    "text": "0.1.4 records the losses it used to hide. Dropped messages, shortened text, a save that failed after retries, and the time you paused or stopped an app are now gaps or labels. Search no longer calls the first page a total, and a hit opens at that message. On a medium-width screen the conversation keeps a back arrow. Media copies time out instead of hanging Delete everything or Restore; a restore that lost files says so. A refused source change is a dialog, not a silent no-op."
   },
   {
     "language": "zh-TW",
-    "text": "0.1.4 把以前會藏起來的損失記下來。通知塞太多而丟掉的訊息、被截短的內文、多次儲存失敗、以及你暫停或停止某個來源的那段時間，現在都有缺口或標籤。搜尋不再把第一頁當成全部，點進一筆會落到那則訊息。中等寬度視窗的對話畫面有返回箭頭。媒體複製會逾時，不再卡住「全部刪除」或還原；還原若有檔案失敗會明說。來源變更被保險庫拒絕時會跳出對話框，不再默默沒動。"
+    "text": "0.1.4 把以前會藏起來的損失記下來。一則通知裡塞太多訊息而丟掉的訊息、被截短的內文、多次儲存失敗、以及你暫停或停止某個來源的那段時間，現在都有中斷紀錄或標籤。搜尋不再把第一頁當成全部，點進一筆會落到那則訊息。中等寬度視窗的對話畫面有返回箭頭。媒體複製會逾時，不再卡住「刪除所有資料」或還原；還原若有檔案失敗會明說。來源變更被金庫拒絕時會跳出對話框，不再默默沒動。"
   },
   {
     "language": "zh-CN",
-    "text": "0.1.4 把以前会藏起来的损失记下来。通知塞太多而丢掉的消息、被截短的正文、多次保存失败、以及你暂停或停止某个来源的那段时间，现在都有缺口或标签。搜索不再把第一页当成全部，点进一条会落到那则消息。中等宽度窗口的对话画面有返回箭头。媒体复制会超时，不再卡住「全部删除」或还原；还原若有文件失败会明说。来源变更被保险库拒绝时会弹出对话框，不再默默没动。"
+    "text": "0.1.4 把以前会藏起来的损失记下来。一条通知里塞太多消息而丢掉的消息、被截短的正文、多次保存失败、以及你暂停或停止某个来源的那段时间，现在都有中断记录或标签。搜索不再把第一页当成全部，点进一条会落到那则消息。中等宽度窗口的对话画面有返回箭头。媒体复制会超时，不再卡住「删除所有数据」或恢复；恢复若有文件失败会明说。来源变更被保险库拒绝时会弹出对话框，不再默默没动。"
   },
   {
     "language": "ja-JP",
-    "text": "0.1.4 は、これまで隠していた損失を記録します。通知が多すぎて落ちたメッセージ、短く切られた本文、何度試しても保存できなかったこと、アプリを一時停止または停止していた時間は、欠落またはラベルとして見えます。検索は最初のページを総数と呼びません。ヒットはそのメッセージの位置で開きます。中幅の画面では会話に戻る矢印があります。メディアのコピーはタイムアウトし、「すべて削除」や復元を止めません。復元でファイルを失ったときは完了とは言いません。保管庫が拒否したソース変更は無言ではなくダイアログになります。"
+    "text": "0.1.4 は、これまで隠していた損失を記録します。1 つの通知に読み切れない数のメッセージが入って落ちたメッセージ、短く切られた本文、何度試しても保存できなかったこと、アプリを一時停止または停止していた時間は、欠落またはラベルとして見えます。検索は最初のページを総数と呼びません。ヒットはそのメッセージの位置で開きます。中幅の画面では会話に戻る矢印があります。メディアのコピーはタイムアウトし、「すべて削除」や復元を止めません。復元できなかったメディアがあれば、その旨を明記します。保管庫が拒否したソース変更は無言ではなくダイアログになります。"
   },
   {
     "language": "ko-KR",
-    "text": "0.1.4는 숨기던 손실을 기록합니다. 알림이 너무 많아 떨어진 메시지, 잘린 본문, 여러 번 저장에 실패한 경우, 앱을 일시중지하거나 끈 구간은 이제 공백이나 라벨로 보입니다. 검색은 첫 페이지를 전체 건수로 부르지 않으며, 결과는 그 메시지 위치로 엽니다. 중간 너비 화면의 대화에는 뒤로 화살표가 있습니다. 미디어 복사는 시간 제한으로 「모두 삭제」나 복원을 멈추지 않으며, 파일을 잃은 복원은 완료라고 하지 않습니다. 금고가 거절한 소스 변경은 침묵이 아니라 대화상자입니다."
+    "text": "0.1.4는 숨기던 손실을 기록합니다. 한 알림에 다 읽을 수 없는 수의 메시지가 들어 있어 놓친 메시지, 잘린 본문, 여러 번 저장에 실패한 경우, 앱을 일시중지하거나 끈 구간은 이제 공백이나 라벨로 보입니다. 검색은 첫 페이지를 전체 건수로 부르지 않으며, 결과는 그 메시지 위치로 엽니다. 중간 너비 화면의 대화에는 뒤로 화살표가 있습니다. 미디어 복사는 시간 제한으로 「모두 삭제」나 복원을 멈추지 않으며, 복원하지 못한 미디어가 있으면 이를 명확히 알립니다. 보관소가 거절한 소스 변경은 침묵이 아니라 대화상자입니다."
   }
 ]

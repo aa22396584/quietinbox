@@ -1,6 +1,7 @@
 package dev.quietinbox.feature.search
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -19,6 +20,7 @@ import androidx.compose.material.icons.outlined.SyncProblem
 import androidx.compose.material.icons.outlined.SearchOff
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -51,6 +53,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.quietinbox.core.designsystem.R
 import dev.quietinbox.core.designsystem.components.EmptyState
 import dev.quietinbox.core.designsystem.components.MonogramAvatar
+import dev.quietinbox.core.designsystem.components.QualityTag
+import dev.quietinbox.core.designsystem.components.mediaLabel
 import dev.quietinbox.core.designsystem.components.SourceBadge
 import dev.quietinbox.core.designsystem.components.relativeTime
 import dev.quietinbox.core.designsystem.components.rememberAppLabel
@@ -59,7 +63,7 @@ import dev.quietinbox.platform.storage.repo.SearchHit
 
 @Composable
 fun SearchScreen(
-    onOpenConversation: (Long) -> Unit,
+    onOpenConversation: (Long, Long?) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: SearchViewModel = hiltViewModel(),
 ) {
@@ -136,16 +140,33 @@ fun SearchScreen(
                 )
                 else -> LazyColumn(contentPadding = PaddingValues(bottom = padding.calculateBottomPadding() + 96.dp)) {
                     item {
+                        // A count is only a count when the index was exhausted. While a cursor
+                        // remains, the page has a hundred hits and no idea how many exist.
                         Text(
-                            stringResource(R.string.search_results_count, state.results.size),
+                            if (state.next == null) {
+                                stringResource(R.string.search_results_count, state.results.size)
+                            } else {
+                                stringResource(R.string.search_results_shown, state.results.size)
+                            },
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
                         )
                     }
                     items(state.results, key = { it.message.id }) { hit ->
-                        HitRow(hit, state.query, onClick = { onOpenConversation(hit.message.conversationId) })
+                        HitRow(hit, state.query, onClick = { onOpenConversation(hit.message.conversationId, hit.message.id) })
                         HorizontalDivider(Modifier.padding(start = 72.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                    }
+                    if (state.next != null) {
+                        item {
+                            Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                                if (state.loadingMore) {
+                                    LoadingIndicator()
+                                } else {
+                                    FilledTonalButton(onClick = viewModel::loadMore) { Text(stringResource(R.string.search_load_more)) }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -180,7 +201,14 @@ private fun HitRow(hit: SearchHit, query: String, onClick: () -> Unit) {
             }
         },
         headlineContent = { Text(annotated, maxLines = 3, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium) },
-        supportingContent = { hit.message.senderName?.let { Text(it, style = MaterialTheme.typography.labelSmall) } },
+        supportingContent = {
+            // A hit on a photo's caption used to render as plain text, with no sign that the
+            // message carries an image at all (S9).
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                hit.message.senderName?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
+                mediaLabel(hit.message.mediaState)?.let { QualityTag(it.text, it.icon, it.tint) }
+            }
+        },
         trailingContent = { Text(relativeTime(hit.message.sortKey), style = MaterialTheme.typography.labelSmall) },
         colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
     )

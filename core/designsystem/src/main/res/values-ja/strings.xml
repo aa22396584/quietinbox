@@ -124,6 +124,8 @@
     <string name="search_range_7d">7 日間</string>
     <string name="search_range_30d">30 日間</string>
     <string name="search_results_count">%1$d 件の結果</string>
+    <string name="search_results_shown">新しい %1$d 件を表示中。まだあるかもしれません</string>
+    <string name="search_load_more">さらに読み込む</string>
     <string name="search_all_sources">すべてのソース</string>
 
     <!-- Analytics -->
@@ -132,7 +134,7 @@
     <string name="analytics_range_30d">30 日間</string>
     <string name="analytics_range_90d">90 日間</string>
     <string name="analytics_range_all">すべて</string>
-    <string name="analytics_sample_line">サンプル: 識別済み %1$d 件、曖昧 %2$d 件、要約のみ %3$d 件。</string>
+    <string name="analytics_sample_line">サンプル: 識別済み %1$d 件、曖昧 %2$d 件、要約のみ %3$d 件、プレビュー非表示 %4$d 件。</string>
     <string name="analytics_range_line">%1$s – %2$s · %3$s</string>
     <string name="analytics_empty_title">観測データが不足しています</string>
     <string name="analytics_empty_body">統計は QuietInbox が観測した内容だけを表します。実際のメッセージ総数を推定するものではありません。</string>

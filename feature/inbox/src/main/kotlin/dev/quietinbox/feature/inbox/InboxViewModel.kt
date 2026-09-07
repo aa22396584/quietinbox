@@ -25,12 +25,20 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import androidx.lifecycle.SavedStateHandle
 import javax.inject.Inject
 
-data class InboxFilter(val packages: Set<String> = emptySet(), val archived: Boolean = false)
+data class InboxFilter(
+    val packages: Set<String> = emptySet(),
+    val archived: Boolean = false,
+    /** Only conversations with something not yet viewed here. The label for it was already
+     *  translated in all five catalogues and had no caller (#24 `inbox-unviewed-vs-all`). */
+    val unviewed: Boolean = false,
+)
 
 data class InboxUiState(
     val loading: Boolean = true,
@@ -53,13 +61,25 @@ class InboxViewModel @Inject constructor(
     private val coordinator: CaptureCoordinator,
     private val synthetic: SyntheticNotifications,
     private val listenerAccess: ListenerAccess,
+    private val saved: SavedStateHandle,
     vault: VaultRepository,
 ) : ViewModel() {
-    private val filter = MutableStateFlow(InboxFilter())
+    // Plain in-memory state meant the chosen filter was gone after a process death, so the list
+    // silently came back showing everything. No ViewModel in the project saved anything; this is
+    // the first (#24 `filter-and-scroll-across-process-death`).
+    private val filter = MutableStateFlow(
+        InboxFilter(
+            packages = saved.get<Array<String>>(KEY_PACKAGES)?.toSet() ?: emptySet(),
+            archived = saved.get<Boolean>(KEY_ARCHIVED) ?: false,
+            unviewed = saved.get<Boolean>(KEY_UNVIEWED) ?: false,
+        ),
+    )
     private val testSent = MutableStateFlow(false)
 
     private val conversations = filter.flatMapLatest { f ->
-        inbox.observeConversations(f.archived, f.packages).catch { emit(emptyList()) }
+        inbox.observeConversations(f.archived, f.packages)
+            .map { list -> if (f.unviewed) list.filter { it.hasUnviewed } else list }
+            .catch { emit(emptyList()) }
     }
 
     val state: StateFlow<InboxUiState> = combine(
@@ -83,13 +103,23 @@ class InboxViewModel @Inject constructor(
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), InboxUiState())
 
-    fun togglePackage(packageName: String) = filter.update { f ->
+    fun togglePackage(packageName: String) = updateFilter { f ->
         f.copy(packages = if (packageName in f.packages) f.packages - packageName else f.packages + packageName)
     }
 
-    fun clearPackages() = filter.update { it.copy(packages = emptySet()) }
+    fun clearPackages() = updateFilter { it.copy(packages = emptySet()) }
 
-    fun setArchived(archived: Boolean) = filter.update { it.copy(archived = archived) }
+    fun setArchived(archived: Boolean) = updateFilter { it.copy(archived = archived) }
+
+    fun setUnviewedOnly(unviewed: Boolean) = updateFilter { it.copy(unviewed = unviewed) }
+
+    /** Every filter change is written through, so process death restores what the user chose. */
+    private fun updateFilter(block: (InboxFilter) -> InboxFilter) {
+        filter.update(block)
+        saved[KEY_PACKAGES] = filter.value.packages.toTypedArray()
+        saved[KEY_ARCHIVED] = filter.value.archived
+        saved[KEY_UNVIEWED] = filter.value.unviewed
+    }
 
     fun setPinned(id: Long, pinned: Boolean) = viewModelScope.launch { runCatching { inbox.setPinned(id, pinned) } }
 
@@ -113,5 +143,8 @@ class InboxViewModel @Inject constructor(
 
     companion object {
         const val SUPPRESSION_TTL_MS: Long = 30L * 24 * 60 * 60 * 1000
+        private const val KEY_PACKAGES = "inbox.filter.packages"
+        private const val KEY_ARCHIVED = "inbox.filter.archived"
+        private const val KEY_UNVIEWED = "inbox.filter.unviewed"
     }
 }

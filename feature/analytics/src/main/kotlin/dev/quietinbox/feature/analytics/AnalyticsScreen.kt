@@ -108,6 +108,9 @@ fun AnalyticsScreen(
                                 report.sampleSize - report.ambiguousCount,
                                 report.ambiguousCount,
                                 report.summaryOnlyCount,
+                                // Computed on every report and never shown: the one dimension that
+                                // says "this source hides its previews" was dropped here (A8).
+                                report.previewRestrictedCount,
                             ),
                             style = MaterialTheme.typography.bodySmall,
                             maxLines = 2,

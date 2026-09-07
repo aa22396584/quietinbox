@@ -53,7 +53,11 @@ import kotlinx.serialization.Serializable
 @Serializable data object AnalyticsRoute : NavKey
 @Serializable data object HealthRoute : NavKey
 @Serializable data object SettingsRoute : NavKey
-@Serializable data class ConversationRoute(val id: Long) : NavKey
+@Serializable data class ConversationRoute(
+    val id: Long,
+    /** A search hit to land on, instead of the newest message. Null for every other entry point. */
+    val messageId: Long? = null,
+) : NavKey
 
 private data class TopLevel(val route: NavKey, val label: Int, val icon: ImageVector, val selectedIcon: ImageVector)
 
@@ -130,12 +134,13 @@ fun MainNavigation() {
                 entry<ConversationRoute>(metadata = ListDetailSceneStrategy.detailPane()) { key ->
                     ConversationScreen(
                         conversationId = key.id,
+                        messageId = key.messageId,
                         onBack = { backStack.removeLastOrNull() },
                         showBackButton = !twoPane,
                     )
                 }
                 entry<SearchRoute> {
-                    SearchScreen(onOpenConversation = { backStack.add(ConversationRoute(it)) })
+                    SearchScreen(onOpenConversation = { conversationId, messageId -> backStack.add(ConversationRoute(conversationId, messageId)) })
                 }
                 entry<AnalyticsRoute> {
                     AnalyticsScreen(onOpenConversation = { backStack.add(ConversationRoute(it)) })

@@ -48,6 +48,28 @@ were wrong in a way that changed the fix.
   still led out, so nobody was trapped — but the only visible exit was gone. The two decisions are
   now separate, and so are they in `tools/demo-screenshots.sh`, which had inherited the same
   assumption.
+- **Search called its first page a total.** The screen asked for 100 hits and rendered "%d results",
+  so a query matching five thousand messages said "100 results" — the repository's own kdoc admitted
+  it showed the first page only. It now says "Newest 100 shown; there may be more" while a cursor
+  remains, offers Load more, and only calls a number a count once the index is exhausted. A cursor
+  means more *candidates*, not more hits, so a page that verifies nothing ends the run rather than
+  leaving a button that can never produce anything.
+- **A search hit opened the conversation at today's newest message.** The hit's message id was
+  dropped at the navigation boundary, so a match from six months ago left the reader at the bottom
+  of the chat with no indication of where it was. The route carries the id now, the screen lands on
+  it and tints it briefly. If the message is no longer there — deleted or expired between the search
+  and the tap — it stays where it is rather than silently pretending the newest message is the match.
+- That same effect had two more defects behind it: it re-ran on every size change and so overwrote a
+  restored scroll position, and its index was off by one (an info item precedes the messages; only
+  the clamp hid it). It now lands once, then follows new messages only when the reader is already at
+  the end.
+- The inbox filter was plain in-memory state, so a process death silently brought back the unfiltered
+  list. It survives now — the first `SavedStateHandle` in the project.
+- The inbox has an "Unviewed" filter. The label had been translated in all five catalogues and had
+  no caller at all.
+- A search hit on a photo's caption rendered as plain text with no sign the message carried an image.
+- The activity page's sample line reports preview-restricted observations. The count was computed on
+  every report and shown nowhere, dropping the one dimension that says "this source hides previews".
 - **Onboarding could report a successful capture test without having captured anything.** The step
   watched the vault's total message count, so a second run of onboarding, a restored backup or a
   seeded demo vault started above zero and the step said "captured and saved" immediately. It also

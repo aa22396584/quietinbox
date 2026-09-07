@@ -124,6 +124,8 @@
     <string name="search_range_7d">7일</string>
     <string name="search_range_30d">30일</string>
     <string name="search_results_count">결과 %1$d개</string>
+    <string name="search_results_shown">최신 %1$d개 표시 중이며 더 있을 수 있습니다</string>
+    <string name="search_load_more">더 불러오기</string>
     <string name="search_all_sources">모든 소스</string>
 
     <!-- Analytics -->
@@ -132,7 +134,7 @@
     <string name="analytics_range_30d">30일</string>
     <string name="analytics_range_90d">90일</string>
     <string name="analytics_range_all">전체</string>
-    <string name="analytics_sample_line">표본: 식별 가능 %1$d개, 모호함 %2$d개, 요약만 %3$d개.</string>
+    <string name="analytics_sample_line">표본: 식별 가능 %1$d개, 모호함 %2$d개, 요약만 %3$d개, 미리보기 가려짐 %4$d개.</string>
     <string name="analytics_range_line">%1$s – %2$s · %3$s</string>
     <string name="analytics_empty_title">관측된 데이터가 충분하지 않습니다</string>
     <string name="analytics_empty_body">통계는 QuietInbox가 관측한 내용만 설명합니다. 실제 메시지 총량을 추정하지 않습니다.</string>

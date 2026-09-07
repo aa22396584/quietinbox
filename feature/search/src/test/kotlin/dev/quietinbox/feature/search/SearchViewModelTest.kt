@@ -3,7 +3,9 @@ package dev.quietinbox.feature.search
 import dev.quietinbox.platform.crypto.KeyFailure
 import dev.quietinbox.platform.storage.db.VaultState
 import dev.quietinbox.platform.storage.repo.InboxRepository
+import dev.quietinbox.platform.storage.repo.SearchCursor
 import dev.quietinbox.platform.storage.repo.SearchHit
+import dev.quietinbox.platform.storage.repo.SearchPage
 import dev.quietinbox.platform.storage.repo.SearchRepository
 import dev.quietinbox.platform.storage.repo.VaultRepository
 import io.kotest.core.spec.style.FunSpec
@@ -45,7 +47,9 @@ class SearchViewModelTest : FunSpec({
         init {
             every { inbox.observePackagesWithData() } returns flowOf(emptyList())
             every { vault.state } returns vaultState
-            coEvery { search.search(any(), any(), any(), any(), any()) } returns listOf(hit)
+            // The screen pages now: it asks for a page and keeps the cursor, instead of calling the
+            // one-shot helper that threw `next` away.
+            coEvery { search.searchPage(any(), any(), any(), any(), any(), any(), any()) } returns SearchPage(listOf(hit), null)
         }
 
         fun viewModel() = SearchViewModel(search, inbox, vault)
@@ -60,7 +64,7 @@ class SearchViewModelTest : FunSpec({
 
         awaitUntil { vm.state.value.vaultLocked shouldBe true }
         delay(400)
-        coVerify(exactly = 0) { h.search.search(any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { h.search.searchPage(any(), any(), any(), any(), any(), any(), any()) }
         vm.state.value.searched shouldBe false
         vm.state.value.results.size shouldBe 0
         collector.cancel()
@@ -72,7 +76,7 @@ class SearchViewModelTest : FunSpec({
         val collector: Job = launch { vm.state.collect {} }
         vm.setQuery("hello")
         delay(400)
-        coVerify(exactly = 0) { h.search.search(any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { h.search.searchPage(any(), any(), any(), any(), any(), any(), any()) }
         vm.state.value.vaultOpening shouldBe true
 
         h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
@@ -85,7 +89,40 @@ class SearchViewModelTest : FunSpec({
         vm.state.value.results.size shouldBe 0
         h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
         awaitUntil { vm.state.value.results.size shouldBe 1 }
-        coVerify(exactly = 2) { h.search.search(any(), any(), any(), any(), any()) }
+        coVerify(exactly = 2) { h.search.searchPage(any(), any(), any(), any(), any(), any(), any()) }
+        collector.cancel()
+    }
+
+    test("a full page keeps its cursor, so the header can never call it a total") {
+        val h = Harness()
+        val cursor = SearchCursor(sortKey = 5, id = 5)
+        coEvery { h.search.searchPage(any(), any(), any(), any(), any(), any(), any()) } returns
+            SearchPage(List(100) { h.hit }, cursor)
+        val vm = h.viewModel()
+        val collector = launch { vm.state.collect {} }
+        h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
+        vm.setQuery("hello")
+        awaitUntil { vm.state.value.results.size shouldBe 100 }
+        vm.state.value.next shouldBe cursor
+        collector.cancel()
+    }
+
+    test("a page that verifies nothing ends the run instead of leaving a button that cannot help") {
+        val h = Harness()
+        val cursor = SearchCursor(sortKey = 5, id = 5)
+        coEvery { h.search.searchPage(any(), any(), any(), any(), any(), isNull(), any()) } returns
+            SearchPage(List(100) { h.hit }, cursor)
+        // More candidates remained, but none of them verified: there is nothing further to show.
+        coEvery { h.search.searchPage(any(), any(), any(), any(), any(), eq(cursor), any()) } returns
+            SearchPage(emptyList(), SearchCursor(sortKey = 4, id = 4))
+        val vm = h.viewModel()
+        val collector = launch { vm.state.collect {} }
+        h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
+        vm.setQuery("hello")
+        awaitUntil { vm.state.value.next shouldBe cursor }
+        vm.loadMore()
+        awaitUntil { vm.state.value.next shouldBe null }
+        vm.state.value.results.size shouldBe 100
         collector.cancel()
     }
 })

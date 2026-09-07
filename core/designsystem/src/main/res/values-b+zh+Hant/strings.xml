@@ -124,6 +124,8 @@
     <string name="search_range_7d">7 天內</string>
     <string name="search_range_30d">30 天內</string>
     <string name="search_results_count">%1$d 筆結果</string>
+    <string name="search_results_shown">顯示最新 %1$d 筆，可能還有更多</string>
+    <string name="search_load_more">載入更多</string>
     <string name="search_all_sources">所有來源</string>
 
     <!-- Analytics -->
@@ -132,7 +134,7 @@
     <string name="analytics_range_30d">30 天</string>
     <string name="analytics_range_90d">90 天</string>
     <string name="analytics_range_all">全部</string>
-    <string name="analytics_sample_line">樣本：%1$d 則可辨識、%2$d 筆歧義、%3$d 筆僅摘要。</string>
+    <string name="analytics_sample_line">樣本：%1$d 則可辨識、%2$d 筆歧義、%3$d 筆僅摘要、%4$d 筆預覽被遮蔽。</string>
     <string name="analytics_range_line">%1$s – %2$s · %3$s</string>
     <string name="analytics_empty_title">已觀測資料不足</string>
     <string name="analytics_empty_body">統計只描述 QuietInbox 實際觀測到的副本，不推估真實訊息總量。</string>

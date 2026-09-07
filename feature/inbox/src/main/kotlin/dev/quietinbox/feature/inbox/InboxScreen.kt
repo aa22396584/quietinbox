@@ -153,9 +153,11 @@ fun InboxScreen(
                     packages = state.availablePackages,
                     selected = state.filter.packages,
                     archived = state.filter.archived,
+                    unviewed = state.filter.unviewed,
                     onToggle = viewModel::togglePackage,
                     onAll = viewModel::clearPackages,
                     onArchived = viewModel::setArchived,
+                    onUnviewed = viewModel::setUnviewedOnly,
                 )
             }
             if (state.conversations.isEmpty()) {
@@ -286,9 +288,11 @@ private fun SourceFilters(
     packages: List<String>,
     selected: Set<String>,
     archived: Boolean,
+    unviewed: Boolean,
     onToggle: (String) -> Unit,
     onAll: () -> Unit,
     onArchived: (Boolean) -> Unit,
+    onUnviewed: (Boolean) -> Unit,
 ) {
     LazyRow(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
@@ -296,9 +300,16 @@ private fun SourceFilters(
     ) {
         item {
             FilterChip(
-                selected = selected.isEmpty() && !archived,
-                onClick = { onAll(); onArchived(false) },
+                selected = selected.isEmpty() && !archived && !unviewed,
+                onClick = { onAll(); onArchived(false); onUnviewed(false) },
                 label = { Text(stringResource(R.string.inbox_filter_all)) },
+            )
+        }
+        item {
+            FilterChip(
+                selected = unviewed,
+                onClick = { onUnviewed(!unviewed) },
+                label = { Text(stringResource(R.string.inbox_unviewed)) },
             )
         }
         items(packages, key = { it }) { pkg ->

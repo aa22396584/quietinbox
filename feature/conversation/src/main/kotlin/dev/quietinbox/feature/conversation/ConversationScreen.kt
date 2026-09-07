@@ -61,6 +61,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -101,12 +102,15 @@ import dev.quietinbox.core.model.MediaState
 import dev.quietinbox.core.model.Message
 import dev.quietinbox.core.model.TimestampQuality
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ConversationScreen(
     conversationId: Long,
+    /** A search hit to land on. Null means land on the newest message, as every other entry does. */
+    messageId: Long? = null,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     showBackButton: Boolean = true,
@@ -123,8 +127,36 @@ fun ConversationScreen(
     var deleteDialog by remember { mutableStateOf(false) }
     var deleteConversationDialog by remember { mutableStateOf(false) }
 
-    LaunchedEffect(state.messages.size) {
-        if (state.messages.isNotEmpty()) listState.animateScrollToItem(state.messages.size - 1)
+    // Three separate defects met on this one effect. It re-ran on every size change and jumped to
+    // the newest message unconditionally, so (a) a search hit could not be landed on, (b) a restored
+    // scroll position was overwritten on the next composition, and (c) the index was off by one —
+    // the `info` item precedes the messages, and only the clamp hid it.
+    var landed by rememberSaveable(conversationId, messageId) { mutableStateOf(false) }
+    var highlighted by remember(conversationId, messageId) { mutableStateOf(messageId) }
+    val lastIndex = state.messages.size
+    LaunchedEffect(state.messages.size, messageId) {
+        if (state.messages.isEmpty()) return@LaunchedEffect
+        if (!landed) {
+            val anchor = messageId?.let { id -> state.messages.indexOfFirst { it.id == id } } ?: -1
+            when {
+                anchor >= 0 -> listState.scrollToItem(anchor + 1)
+                // The hit is not in the list — deleted or expired between the search and the tap.
+                // Landing on the newest message would be a silent lie about where the match was.
+                messageId != null -> Unit
+                else -> listState.scrollToItem(lastIndex)
+            }
+            landed = true
+            return@LaunchedEffect
+        }
+        // Afterwards follow new messages only when the reader is already at the end.
+        val atEnd = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index?.let { it >= lastIndex - 1 } ?: true
+        if (atEnd) listState.animateScrollToItem(lastIndex)
+    }
+    LaunchedEffect(highlighted) {
+        if (highlighted != null) {
+            delay(HIGHLIGHT_MS)
+            highlighted = null
+        }
     }
 
     val conversation = state.conversation
@@ -255,6 +287,7 @@ fun ConversationScreen(
                             isGroup = conversation?.isGroup == true,
                             showSender = m.senderName != null && (previous == null || previous.senderName != m.senderName || newDay),
                             selected = m.id in state.selection,
+                            highlighted = m.id == highlighted,
                             selecting = selecting,
                             onToggleSelect = { viewModel.toggleSelect(m.id) },
                             onCopy = { copyToClipboard(context, m.body) },
@@ -337,6 +370,8 @@ private fun MessageBubble(
     isGroup: Boolean,
     showSender: Boolean,
     selected: Boolean,
+    /** Briefly tinted after landing here from a search hit, so the match is findable by eye. */
+    highlighted: Boolean,
     selecting: Boolean,
     onToggleSelect: () -> Unit,
     onCopy: () -> Unit,
@@ -348,12 +383,14 @@ private fun MessageBubble(
     val ambiguous = message.dedupState == DedupState.AMBIGUOUS_REPEAT
     val container = when {
         selected -> MaterialTheme.colorScheme.tertiaryContainer
+        highlighted -> MaterialTheme.colorScheme.secondaryContainer
         self -> MaterialTheme.colorScheme.primaryContainer
         ambiguous -> MaterialTheme.colorScheme.surfaceContainerHigh
         else -> MaterialTheme.colorScheme.surfaceContainerLow
     }
     val content = when {
         selected -> MaterialTheme.colorScheme.onTertiaryContainer
+        highlighted -> MaterialTheme.colorScheme.onSecondaryContainer
         self -> MaterialTheme.colorScheme.onPrimaryContainer
         else -> MaterialTheme.colorScheme.onSurface
     }
@@ -482,3 +519,6 @@ private fun copyToClipboard(context: Context, text: String) {
     context.getSystemService(ClipboardManager::class.java)
         ?.setPrimaryClip(ClipData.newPlainText("QuietInbox", text))
 }
+
+/** How long a search hit stays tinted after the screen lands on it. */
+private const val HIGHLIGHT_MS = 2500L

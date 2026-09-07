@@ -9,14 +9,14 @@ import dev.quietinbox.core.identity.IdentityResolver
 import dev.quietinbox.core.model.CaptureOrigin
 import dev.quietinbox.core.model.GapPrecision
 import dev.quietinbox.core.model.GapReason
-import dev.quietinbox.core.model.SourceConfiguration
 import dev.quietinbox.core.model.Limits
 import dev.quietinbox.core.model.ListenerState
 import dev.quietinbox.core.model.MediaState
-import dev.quietinbox.core.model.TruncationFlag
 import dev.quietinbox.core.model.NotificationShape
 import dev.quietinbox.core.model.NotificationSnapshot
+import dev.quietinbox.core.model.SourceConfiguration
 import dev.quietinbox.core.model.SourceScope
+import dev.quietinbox.core.model.TruncationFlag
 import dev.quietinbox.core.parser.ParserRegistry
 import dev.quietinbox.core.reconcile.KnownMessage
 import dev.quietinbox.core.reconcile.Reconciler
@@ -1207,6 +1207,12 @@ class CaptureCoordinator @Inject constructor(
          * `LINES_DROPPED` belongs here for the same reason the other two do: an InboxStyle
          * notification with more lines than the snapshot may hold loses the oldest ones outright.
          * It is not a shortened body; each surviving line carries its own truncation separately.
+         *
+         * All three are recorded as `GapReason.MESSAGES_DROPPED`, so the health page says
+         * "messages" for what was really a loss of lines. That is one name for two things, which
+         * is the cost this release spent two rounds removing from `TruncationFlag` — recorded here
+         * rather than renamed, because a `GapReason` is persisted and read by the UI in five
+         * languages (round 35 subagent, Minor 3).
          */
         private val DROPPED_MESSAGES = setOf(
             TruncationFlag.MESSAGES_DROPPED,

@@ -118,7 +118,9 @@ were wrong in a way that changed the fix.
   alone would have left it in memory for as long as the user changed no source, with capture
   working normally throughout, and a process death in that window would have taken it.
   One interval covers the outage rather than one per event: it opens at the first event that could
-  not be recorded and closes when the write finally lands. A locked vault is a different path,
+  not be recorded and closes when the write finally lands. It therefore also covers whatever was
+  captured successfully in between, which over-reports rather than under-reports — the direction
+  this app errs in on purpose. A locked vault is a different path,
   caught by exception type before this one, and already had its own remembered obligation.
 - A loss that arrives *with* an event is committed with it or not at all, which means a gap write
   that fails now rejects the event: the surviving messages are not stored either. That is a

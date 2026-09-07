@@ -160,5 +160,4 @@ class MigrationTest {
         )
         migrated.close()
     }
-
 }

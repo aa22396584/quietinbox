@@ -48,6 +48,39 @@ were wrong in a way that changed the fix.
   still led out, so nobody was trapped — but the only visible exit was gone. The two decisions are
   now separate, and so are they in `tools/demo-screenshots.sh`, which had inherited the same
   assumption.
+- **Onboarding could report a successful capture test without having captured anything.** The step
+  watched the vault's total message count, so a second run of onboarding, a restored backup or a
+  seeded demo vault started above zero and the step said "captured and saved" immediately. It also
+  never compared against the three messages it had just sent, so one arriving out of three read
+  exactly like three. It now counts only messages from QuietInbox's own package observed since the
+  test was posted, and says "n of 3".
+- **That step could also wait for ever.** There was no timeout and no failure branch: with capture
+  broken the spinner never stopped, and the only way on was a Skip button that said nothing about
+  what had gone wrong. After twenty seconds it now reports the failure, shows the listener state,
+  offers to send the test again, and relabels the way out as "Continue without verifying". Moving on
+  is still never blocked on a successful capture — a device-policy block would otherwise trap the
+  user in onboarding.
+- The capture page never showed when a copy was last actually *saved*. Its "accepted" tile counts
+  events that reached the journal, which happens before parsing — a source whose format the parser
+  cannot read still raises it. There is now a separate "last copy saved" line, stamped after the
+  commit, and the tile says "admitted" so the two cannot be read as the same thing.
+- The last-event timestamp was rendered in only one of the hero's states, and never in Connected —
+  which is exactly what a work-profile block looks like: connected, and nothing arriving. It is now
+  shown in every state, in the diagnostics summary, and named honestly: it is when an event was last
+  *accepted*, after the source filter, not when the system last called.
+- "No gaps recorded in this session." read as "nothing was missed", which is the opposite of what
+  the app can claim. The gaps section now states, with or without gaps, that a gap is a window
+  QuietInbox knows it could not observe and never a count of what was missed.
+- Diagnostic codes reached the user raw, as `LOCKDOWN_REMOVAL` or
+  `SKIPPED_PREVIEW_RESTRICTED_SUSPECTED`. Each now has a sentence, with the code kept underneath
+  because that is what a bug report should quote.
+- Nothing anywhere told the user the one thing they can act on when copies arrive as "You have a new
+  message": the setting is in the source app, or in Android's own sensitive-notification setting,
+  and QuietInbox cannot tell which. The capture page says so and can open the system notification
+  settings for each source, onboarding repeats it, and `docs/COMPATIBILITY.md` gains a section
+  explaining why the app deliberately does not request `RECEIVE_SENSITIVE_NOTIFICATIONS` to find out.
+- Onboarding now ends by naming media copies, reminders and encrypted backup as three separate
+  choices that are off until turned on, instead of leaving them to be discovered in Settings.
 - The recovery key said it was "the only way to open your backups on another device" without ever
   saying what losing it costs. It is the only way to open them *anywhere*: "Delete everything"
   destroys the key too, so every backup already taken becomes unreadable on this device as well. The

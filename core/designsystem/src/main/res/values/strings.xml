@@ -173,7 +173,7 @@
     <string name="health_resume">Resume capture</string>
     <string name="health_pipeline_title">Pipeline</string>
     <string name="health_queue">queued</string>
-    <string name="health_accepted">accepted</string>
+    <string name="health_accepted">admitted</string>
     <string name="health_overflow">overflowed</string>
     <string name="health_dropped">dropped after revoke</string>
     <string name="health_pending_journal">pending journal</string>
@@ -182,6 +182,8 @@
     <string name="health_add_source">Add source</string>
     <string name="health_source_enabled">Enabled</string>
     <string name="health_source_paused">Paused</string>
+    <string name="health_source_notification_settings">Notification settings for this app</string>
+    <string name="health_preview_hint">If copies from an app arrive as "You have a new message" instead of the text, QuietInbox cannot tell whether that app hides message previews or Android does. Check that app\'s own notification settings first, then Android\'s sensitive-notification setting.</string>
     <string name="health_remove_source">Remove source</string>
     <string name="health_remove_title">Remove %1$s?</string>
     <string name="health_remove_body">Stopping capture and deleting saved copies are separate choices.</string>
@@ -190,7 +192,7 @@
     <string name="health_adapter">adapter: %1$s</string>
     <string name="health_adapter_standard">generic parser</string>
     <string name="health_gaps_title">Possible gaps</string>
-    <string name="health_no_gaps">No gaps recorded in this session.</string>
+    <string name="health_no_gaps">No gap has been recorded since this session started.</string>
     <string name="health_gap_unknown_time">unknown time</string>
     <string name="health_gap_open">ongoing</string>
     <string name="gap_reason_disconnected">listener disconnected</string>
@@ -204,6 +206,13 @@
     <string name="gap_reason_unknown">unknown</string>
     <string name="health_diagnostics_title">Local diagnostics (last 7 days)</string>
     <string name="health_diagnostics_empty">No diagnostic events. Nothing is ever uploaded.</string>
+    <string name="diag_parse_warnings">The parser had to cut something short</string>
+    <string name="diag_parse_exception">A notification could not be parsed</string>
+    <string name="diag_reconcile_degraded">Alignment fell back to a safer, coarser rule</string>
+    <string name="diag_journal_failed">An accepted notification could not be written down</string>
+    <string name="diag_lockdown_removal">Android removed notifications for a lockdown</string>
+    <string name="diag_media_queue_overflow">Too many media copies at once; some were not started</string>
+    <string name="diag_skipped">Nothing usable in the notification, so nothing was stored</string>
     <string name="health_copy_diagnostics">Copy summary</string>
     <string name="health_diagnostics_copied">Diagnostic summary copied (codes and counts only).</string>
     <string name="health_send_test">Send test notification</string>
@@ -218,7 +227,12 @@
     <string name="health_add_by_package">Add by exact package name (generic parser)</string>
     <string name="health_add_source_empty">No matching apps.</string>
     <string name="health_known_source">Versioned adapter available</string>
-    <string name="health_last_event">last event %1$s</string>
+    <string name="health_last_event">last accepted event %1$s</string>
+    <string name="health_last_event_never">no event accepted yet</string>
+    <string name="health_last_saved">last copy saved %1$s</string>
+    <string name="health_last_saved_never">no copy saved since the listener started</string>
+    <string name="health_gaps_caveat">A gap is a window QuietInbox knows it could not observe. It is not a count of what was missed: only what a source posts as a notification can be seen, and the missing count is unknown.</string>
+    <string name="health_saved">saved</string>
 
     <!-- Settings -->
     <string name="settings_title">Settings</string>
@@ -333,6 +347,12 @@
     <string name="ob_test_button">Send test notification</string>
     <string name="ob_test_waiting">Waiting for the copy…</string>
     <string name="ob_test_captured">%1$d messages captured and saved.</string>
+    <string name="ob_test_captured_of">%1$d of %2$d messages captured and saved.</string>
+    <string name="ob_test_failed_title">No copy arrived</string>
+    <string name="ob_test_failed_body">The test notification was posted but nothing was captured. Notification access may have been withdrawn, or a work profile policy may be blocking it. You can continue and check the Capture page later.</string>
+    <string name="ob_test_retry">Send it again</string>
+    <string name="ob_skip_unverified">Continue without verifying</string>
+    <string name="ob_extras">Media copies, reminders and encrypted backup are separate choices, all off until you turn them on. They live in Settings.</string>
     <string name="ob_preview_title">What you will see</string>
     <string name="ob_preview_body">Each copy shows its source, capture time and, when available, the source time. Labels tell you when identity is uncertain, when a preview was hidden, or when a message may be a repeat.</string>
     <string name="ob_next">Next</string>

@@ -171,7 +171,7 @@
     <string name="health_resume">继续捕获</string>
     <string name="health_pipeline_title">流水线状态</string>
     <string name="health_queue">队列中</string>
-    <string name="health_accepted">已接受</string>
+    <string name="health_accepted">已收下</string>
     <string name="health_overflow">溢出</string>
     <string name="health_dropped">撤权后丢弃</string>
     <string name="health_pending_journal">待处理日志</string>
@@ -180,6 +180,8 @@
     <string name="health_add_source">添加来源</string>
     <string name="health_source_enabled">已启用</string>
     <string name="health_source_paused">已暂停</string>
+    <string name="health_source_notification_settings">这个 App 的通知设置</string>
+    <string name="health_preview_hint">如果某个 App 的副本收到的是“你有一条新消息”而不是内容，静读分不出是那个 App 隐藏了消息预览，还是 Android 隐藏的。请先看那个 App 自己的通知设置，再看 Android 的敏感通知设置。</string>
     <string name="health_remove_source">移除来源</string>
     <string name="health_remove_title">移除 %1$s？</string>
     <string name="health_remove_body">停止捕获与删除已保存的副本是两个不同的决定。</string>
@@ -188,7 +190,7 @@
     <string name="health_adapter">适配器：%1$s</string>
     <string name="health_adapter_standard">通用解析器</string>
     <string name="health_gaps_title">可能的中断</string>
-    <string name="health_no_gaps">本次运行期间没有记录到中断。</string>
+    <string name="health_no_gaps">自本次运行开始以来没有记录到中断。</string>
     <string name="health_gap_unknown_time">时间不明</string>
     <string name="health_gap_open">持续中</string>
     <string name="gap_reason_disconnected">监听器断开</string>
@@ -202,6 +204,13 @@
     <string name="gap_reason_unknown">原因不明</string>
     <string name="health_diagnostics_title">本机诊断（最近 7 天）</string>
     <string name="health_diagnostics_empty">没有诊断事件。任何内容都不会被上传。</string>
+    <string name="diag_parse_warnings">解析时有内容被迫截断</string>
+    <string name="diag_parse_exception">有通知无法解析</string>
+    <string name="diag_reconcile_degraded">对齐退回较保守、较粗的规则</string>
+    <string name="diag_journal_failed">已收下的通知写不进记录</string>
+    <string name="diag_lockdown_removal">Android 因锁定而移除了通知</string>
+    <string name="diag_media_queue_overflow">同时要复制的媒体太多，有些没有开始</string>
+    <string name="diag_skipped">通知里没有可用内容，因此没有存下任何东西</string>
     <string name="health_copy_diagnostics">复制摘要</string>
     <string name="health_diagnostics_copied">已复制诊断摘要（仅含代码与计数）。</string>
     <string name="health_send_test">发送测试通知</string>
@@ -216,7 +225,12 @@
     <string name="health_add_by_package">按包名直接添加（通用解析器）</string>
     <string name="health_add_source_empty">没有匹配的应用。</string>
     <string name="health_known_source">有版本化适配器</string>
-    <string name="health_last_event">最近事件 %1$s</string>
+    <string name="health_last_event">最近接受的事件 %1$s</string>
+    <string name="health_last_event_never">还没有接受过任何事件</string>
+    <string name="health_last_saved">最近存下副本 %1$s</string>
+    <string name="health_last_saved_never">自监听器启动以来没有存下任何副本</string>
+    <string name="health_gaps_caveat">中断是指 QuietInbox 知道自己看不到的那段时间。它不是漏掉多少的数量：只有来源 App 推送成通知的内容才看得到，漏掉多少无从得知。</string>
+    <string name="health_saved">已存下</string>
 
     <!-- Settings -->
     <string name="settings_title">设置</string>
@@ -330,6 +344,12 @@
     <string name="ob_test_button">发送测试通知</string>
     <string name="ob_test_waiting">正在等待副本…</string>
     <string name="ob_test_captured">已捕获并保存 %1$d 条消息。</string>
+    <string name="ob_test_captured_of">%2$d 条中捕获并存下 %1$d 条。</string>
+    <string name="ob_test_failed_title">没有收到副本</string>
+    <string name="ob_test_failed_body">测试通知已发出，但什么都没被捕获。可能是通知访问权被收回，或工作资料夹策略挡住了。你可以先继续，之后再到“捕获”页查看。</string>
+    <string name="ob_test_retry">再发一次</string>
+    <string name="ob_skip_unverified">不验证，直接继续</string>
+    <string name="ob_extras">媒体复制、提醒与加密备份是三个各自独立的选项，在你打开之前都是关的。它们在“设置”里。</string>
     <string name="ob_preview_title">你会看到什么</string>
     <string name="ob_preview_body">每条副本都标示来源、捕获时间，以及（可获得时）来源时间。标签会告诉你身份是否不确定、预览是否被隐藏、或消息是否可能重复。</string>
     <string name="ob_next">下一步</string>

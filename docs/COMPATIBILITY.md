@@ -31,7 +31,23 @@ Compile/target baseline: compileSdk 37 (required by the AndroidX versions used),
   ignored by the system, so QuietInbox must be installed in the personal profile.
 - A Device Policy Controller (MDM) can block notifications from work-profile apps from reaching
   personal-profile listeners. QuietInbox cannot detect this; the source simply never appears.
-  The capture health page shows the listener as connected while nothing arrives.
+  The capture health page shows the listener as connected while nothing arrives — which is why the
+  page always states when it last accepted an event and when it last saved a copy, and why the
+  diagnostics summary carries both.
+
+## Hidden previews: Android's own setting and the app's (QI-ID-009)
+
+A notification whose text is a placeholder is recorded as `PREVIEW_RESTRICTED_SUSPECTED`. Two very
+different causes produce it and **QuietInbox cannot tell them apart**:
+
+- the source app's own "hide message content in notifications" setting, and
+- Android's platform redaction, including the sensitive-notification hiding added in Android 15,
+  which replaces the text before any listener sees it.
+
+Distinguishing them would need `RECEIVE_SENSITIVE_NOTIFICATIONS`, a restricted permission this app
+deliberately does not request: it would widen what QuietInbox can read for a labelling nicety. So the
+label stays honest about its own uncertainty, and the advice the app gives names both places to look
+rather than claiming to know which one applies.
 - Sources are configured per package, not per profile: enabling LINE captures both the personal
   and the work LINE. Per-profile source control and a non-null account key in the conversation
   identity are planned schema work (see `docs/SCOPE.md`, "Not done").

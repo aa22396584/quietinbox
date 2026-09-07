@@ -1,9 +1,14 @@
 package dev.quietinbox.feature.health
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -32,6 +37,7 @@ import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Send
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.Timeline
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -78,6 +84,7 @@ import dev.quietinbox.core.designsystem.components.StatTile
 import dev.quietinbox.core.designsystem.components.StatusHero
 import dev.quietinbox.core.designsystem.components.TimeFormat
 import dev.quietinbox.core.designsystem.components.currentLocale
+import dev.quietinbox.core.designsystem.components.diagnosticLabel
 import dev.quietinbox.core.designsystem.components.gapReasonLabel
 import dev.quietinbox.core.designsystem.components.listenerStateLabel
 import dev.quietinbox.core.designsystem.components.relativeTime
@@ -202,6 +209,17 @@ fun HealthScreen(
                     StatTile(state.capture.droppedAfterRevoke.toString(), stringResource(R.string.health_dropped), Modifier.weight(1f))
                 }
                 Spacer(Modifier.height(8.dp))
+                // `admitted` counts events that reached the journal, before parsing; this is the
+                // only line on the page that means a copy was actually written (H5).
+                Text(
+                    state.capture.lastCommittedAtEpochMs
+                        ?.let { stringResource(R.string.health_last_saved, relativeTime(it)) }
+                        ?: stringResource(R.string.health_last_saved_never),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+                Spacer(Modifier.height(8.dp))
                 Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilledTonalButton(onClick = sendTest, enabled = state.listenerGranted) {
                         Icon(Icons.Outlined.Send, null, Modifier.size(18.dp))
@@ -227,9 +245,25 @@ fun HealthScreen(
                     onRemove = { removeTarget = s },
                 )
             }
+            item(key = "preview-hint") {
+                // The app can detect a placeholder body but never why it is one, and the fix is
+                // never in QuietInbox — it is in the source app, or in Android's own sensitive
+                // notification setting (H9, and COMPATIBILITY.md "Hidden previews").
+                Text(
+                    stringResource(R.string.health_preview_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                )
+            }
             item(key = "gaps") {
                 SectionHeader(stringResource(R.string.health_gaps_title))
+                // Shown whether or not there are gaps: with gaps listed the page still never said
+                // what a gap is not, and the empty state read as "nothing was missed" — the
+                // opposite of what the app can honestly claim (H8).
+                Text(stringResource(R.string.health_gaps_caveat), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 20.dp))
                 if (state.gaps.isEmpty()) {
+                    Spacer(Modifier.height(8.dp))
                     Text(stringResource(R.string.health_no_gaps), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 20.dp))
                 }
             }
@@ -262,7 +296,8 @@ fun HealthScreen(
             }
             items(state.diagnostics, key = { "diag-${it.code}" }) { d ->
                 ListItem(
-                    headlineContent = { Text(d.code, style = MaterialTheme.typography.bodyMedium) },
+                    headlineContent = { Text(diagnosticLabel(d.code), style = MaterialTheme.typography.bodyMedium) },
+                    supportingContent = { Text(d.code, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) },
                     trailingContent = { Text(d.n.toString(), style = MaterialTheme.typography.labelLarge) },
                     colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
                 )
@@ -334,10 +369,18 @@ private fun HeroCard(state: HealthUiState, onGrant: () -> Unit, onPause: (Boolea
         } ?: stringResource(R.string.health_connected_body)
         ListenerState.NOT_GRANTED -> stringResource(R.string.health_not_granted_body)
         ListenerState.DEGRADED -> if (state.vaultFailure != null) stringResource(R.string.health_vault_locked) else stringResource(R.string.gap_reason_overflow)
-        else -> state.capture.lastEventAtEpochMs?.let { stringResource(R.string.health_last_event, relativeTime(it)) } ?: ""
+        else -> ""
     }
+    // Rendered in every state, not only the fall-through one. A listener that looks connected and
+    // has silently stopped receiving callbacks — the work-profile / DPC case in COMPATIBILITY.md —
+    // is exactly the state where this timestamp is the whole diagnosis, and it was the state that
+    // never showed it (H4).
+    val lastEvent = state.capture.lastEventAtEpochMs
+        ?.let { stringResource(R.string.health_last_event, relativeTime(it)) }
+        ?: stringResource(R.string.health_last_event_never)
     Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         StatusHero(title = listenerStateLabel(ls), body = body, icon = icon, container = container, content = content)
+        Text(lastEvent, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (!state.listenerGranted) {
                 Button(onClick = onGrant) { Text(stringResource(R.string.health_grant)) }
@@ -352,6 +395,7 @@ private fun HeroCard(state: HealthUiState, onGrant: () -> Unit, onPause: (Boolea
 
 @Composable
 private fun SourceRow(source: SourceConfiguration, onEnabled: (Boolean) -> Unit, onPaused: (Boolean) -> Unit, onRemove: () -> Unit) {
+    val context = LocalContext.current
     ListItem(
         leadingContent = { SourceBadge(source.packageName, size = 40.dp) },
         headlineContent = { Text(source.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -363,6 +407,12 @@ private fun SourceRow(source: SourceConfiguration, onEnabled: (Boolean) -> Unit,
         },
         trailingContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                // Opens the system's notification settings for the source app — a Settings screen,
+                // never the source's own UI and never a notification. It is the only place the user
+                // can turn message previews back on, and the app had no way of saying so (H9).
+                IconButton(onClick = { openSourceNotificationSettings(context, source.packageName) }) {
+                    Icon(Icons.Outlined.Tune, stringResource(R.string.health_source_notification_settings), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 IconButton(onClick = { onPaused(!source.paused) }) {
                     Icon(Icons.Outlined.PauseCircle, stringResource(if (source.paused) R.string.health_resume else R.string.health_pause), tint = if (source.paused) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -410,6 +460,27 @@ private fun AddSourceSheet(onDismiss: () -> Unit, search: suspend (String) -> Li
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * The system's notification settings for [packageName]. QuietInbox never acts on a source
+ * notification; this opens a Settings screen, and falls back to the app's details page on devices
+ * whose OEM Settings does not answer the per-app notification intent.
+ */
+private fun openSourceNotificationSettings(context: Context, packageName: String) {
+    val notifications = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+        .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    val details = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null))
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    for (intent in listOf(notifications, details)) {
+        try {
+            context.startActivity(intent)
+            return
+        } catch (_: ActivityNotFoundException) {
+            continue
         }
     }
 }

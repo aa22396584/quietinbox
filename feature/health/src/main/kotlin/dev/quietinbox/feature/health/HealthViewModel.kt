@@ -131,7 +131,10 @@ class HealthViewModel @Inject constructor(
         return buildString {
             appendLine("QuietInbox diagnostics (no message content)")
             appendLine("listener=${s.capture.listenerState} granted=${s.listenerGranted} vaultLocked=${s.vaultFailure != null}")
-            appendLine("queue=${s.capture.queueDepth} accepted=${s.capture.acceptedCount} overflow=${s.capture.overflowCount} droppedAfterRevoke=${s.capture.droppedAfterRevoke} pendingJournal=${s.pendingJournal}")
+            appendLine("queue=${s.capture.queueDepth} admitted=${s.capture.acceptedCount} overflow=${s.capture.overflowCount} droppedAfterRevoke=${s.capture.droppedAfterRevoke} pendingJournal=${s.pendingJournal}")
+            // Without these two a report cannot distinguish "connected and idle" from "connected
+            // and receiving nothing", which is what a work-profile or DPC block looks like.
+            appendLine("lastAcceptedEvent=${s.capture.lastEventAtEpochMs ?: "never"} lastCommitted=${s.capture.lastCommittedAtEpochMs ?: "never"}")
             appendLine("sources=" + s.sources.joinToString { "${it.packageName}:${if (it.enabled) "on" else "off"}${if (it.paused) "(paused)" else ""}:${it.adapterId ?: "standard"}" })
             appendLine("parsers=" + registry.all.joinToString { "${it.id}@${it.version}" })
             appendLine("gaps=" + s.gaps.joinToString { "${it.reason}/${it.precision}" })

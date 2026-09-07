@@ -53,6 +53,10 @@ class InboxRepository @Inject constructor(
         ) { c, m, a, s -> InboxCounts(c, m, a, s) }
     }
 
+    /** Messages of one package observed since [since] — onboarding's proof that a capture worked. */
+    fun observeCapturedSince(packageName: String, since: Long): Flow<Int> =
+        holder.flowWithDb { db -> db.messageDao().observeCapturedSince(packageName, since) }
+
     suspend fun markViewed(conversationId: Long, now: Long) = holder.db().conversationDao().markViewed(conversationId, now)
 
     /** How many conversations (of [packages], or all when empty) have copies the user has not looked at yet (QI-REMIND-015). */

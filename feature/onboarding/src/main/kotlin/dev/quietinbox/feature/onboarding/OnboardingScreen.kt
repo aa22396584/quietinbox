@@ -27,6 +27,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Label
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.NotificationsActive
@@ -65,6 +66,7 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.quietinbox.core.designsystem.R
 import dev.quietinbox.core.designsystem.components.QualityTag
+import dev.quietinbox.core.designsystem.components.listenerStateLabel
 import dev.quietinbox.core.designsystem.components.SourceBadge
 import dev.quietinbox.core.designsystem.theme.QualityColors
 
@@ -120,14 +122,19 @@ fun OnboardingScreen(
                         1 -> SourcesStep(state, viewModel::toggle)
                         2 -> AccessStep(state, settingsMissing = settingsMissing, onOpen = { settingsMissing = !viewModel.openListenerSettings(context) })
                         3 -> TestStep(state, sendTest)
-                        else -> PreviewStep()
+                        else -> PreviewStep(state)
                     }
                 }
             }
             Row(Modifier.fillMaxWidth().padding(24.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 if (state.step > 0) TextButton(onClick = viewModel::back) { Text(stringResource(R.string.ob_back)) } else Spacer(Modifier.width(1.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (state.step == 3 && !state.testSent) TextButton(onClick = viewModel::next) { Text(stringResource(R.string.ob_skip)) }
+                    // Offered before the test, and again once the wait has run out — with a label that says what
+                    // continuing means. Next is deliberately never gated on a successful capture: a device
+                    // policy that blocks the listener would otherwise trap the user in onboarding for ever.
+                    if (state.step == 3 && (!state.testSent || state.testFailed)) {
+                        TextButton(onClick = viewModel::next) { Text(stringResource(if (state.testFailed) R.string.ob_skip_unverified else R.string.ob_skip)) }
+                    }
                     val last = state.step == state.stepCount - 1
                     Button(
                         onClick = { if (last) viewModel.finish(onFinished) else viewModel.next() },
@@ -225,10 +232,23 @@ private fun TestStep(state: OnboardingUiState, onSend: () -> Unit) {
         Text(stringResource(R.string.ob_notification_permission), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     if (state.testSent) {
-        if (state.capturedMessages > 0) {
-            QualityTag(stringResource(R.string.ob_test_captured, state.capturedMessages), Icons.Outlined.CheckCircle, QualityColors.verified)
-        } else {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        when {
+            // Verified only when all three arrived: a 1-of-3 capture used to read exactly like 3-of-3.
+            state.testSucceeded ->
+                QualityTag(stringResource(R.string.ob_test_captured_of, state.capturedMessages, TEST_MESSAGES), Icons.Outlined.CheckCircle, QualityColors.verified)
+            // The step had no failure branch at all: with capture broken it span for ever.
+            state.testFailed -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                QualityTag(
+                    stringResource(R.string.ob_test_captured_of, state.capturedMessages, TEST_MESSAGES),
+                    Icons.Outlined.ErrorOutline,
+                    if (state.capturedMessages > 0) QualityColors.uncertain else QualityColors.failed,
+                )
+                Text(stringResource(R.string.ob_test_failed_title), style = MaterialTheme.typography.titleSmall)
+                Text(stringResource(R.string.ob_test_failed_body), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(listenerStateLabel(state.listenerState), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                FilledTonalButton(onClick = onSend, enabled = state.granted) { Text(stringResource(R.string.ob_test_retry)) }
+            }
+            else -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 LoadingIndicator(modifier = Modifier.size(32.dp))
                 Text(stringResource(R.string.ob_test_waiting), style = MaterialTheme.typography.bodyMedium)
             }
@@ -237,12 +257,24 @@ private fun TestStep(state: OnboardingUiState, onSend: () -> Unit) {
 }
 
 @Composable
-private fun PreviewStep() {
+private fun PreviewStep(state: OnboardingUiState) {
     Illustration(Icons.Outlined.Visibility, MaterialShapes.Ghostish.toShape())
     StepTitle(stringResource(R.string.ob_preview_title), stringResource(R.string.ob_preview_body))
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         QualityTag(stringResource(R.string.identity_inferred), Icons.Outlined.Label, QualityColors.inferred)
         QualityTag(stringResource(R.string.conv_preview_restricted), Icons.Outlined.Visibility, QualityColors.uncertain)
         QualityTag(stringResource(R.string.conv_ambiguous_tag), Icons.Outlined.Label, QualityColors.uncertain)
+        // The last screen of onboarding used to end without ever saying how the capture test went
+        // (O8), what to do about a hidden preview (O6), or that three further features exist and
+        // are off (O9).
+        if (state.testSent) {
+            Text(
+                stringResource(R.string.ob_test_captured_of, state.capturedMessages, TEST_MESSAGES) + " · " + listenerStateLabel(state.listenerState),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Text(stringResource(R.string.health_preview_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(stringResource(R.string.ob_extras), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

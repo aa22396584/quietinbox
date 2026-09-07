@@ -171,7 +171,7 @@
     <string name="health_resume">キャプチャを再開</string>
     <string name="health_pipeline_title">パイプライン</string>
     <string name="health_queue">待機中</string>
-    <string name="health_accepted">受理</string>
+    <string name="health_accepted">受付</string>
     <string name="health_overflow">オーバーフロー</string>
     <string name="health_dropped">権限取り消し後に破棄</string>
     <string name="health_pending_journal">ジャーナル待ち</string>
@@ -180,6 +180,8 @@
     <string name="health_add_source">ソースを追加</string>
     <string name="health_source_enabled">有効</string>
     <string name="health_source_paused">一時停止中</string>
+    <string name="health_source_notification_settings">このアプリの通知設定</string>
+    <string name="health_preview_hint">あるアプリのコピーが本文ではなく「新しいメッセージがあります」で届く場合、そのアプリがプレビューを隠しているのか Android が隠しているのか、QuietInbox には区別できません。まずそのアプリ自身の通知設定を、次に Android の機密通知の設定を確認してください。</string>
     <string name="health_remove_source">ソースを削除</string>
     <string name="health_remove_title">%1$s を削除しますか？</string>
     <string name="health_remove_body">キャプチャの停止と保存済みコピーの削除は別々の選択です。</string>
@@ -188,7 +190,7 @@
     <string name="health_adapter">アダプター: %1$s</string>
     <string name="health_adapter_standard">汎用パーサー</string>
     <string name="health_gaps_title">欠落の可能性</string>
-    <string name="health_no_gaps">このセッションでは欠落は記録されていません。</string>
+    <string name="health_no_gaps">このセッションが始まってから記録された空白はありません。</string>
     <string name="health_gap_unknown_time">時刻不明</string>
     <string name="health_gap_open">継続中</string>
     <string name="gap_reason_disconnected">リスナーが切断</string>
@@ -202,6 +204,13 @@
     <string name="gap_reason_unknown">不明</string>
     <string name="health_diagnostics_title">ローカル診断（過去 7 日間）</string>
     <string name="health_diagnostics_empty">診断イベントはありません。何もアップロードされることはありません。</string>
+    <string name="diag_parse_warnings">解析時に内容を切り詰めました</string>
+    <string name="diag_parse_exception">解析できない通知がありました</string>
+    <string name="diag_reconcile_degraded">照合がより安全で粗い規則に切り替わりました</string>
+    <string name="diag_journal_failed">受け付けた通知を記録できませんでした</string>
+    <string name="diag_lockdown_removal">ロックダウンのため Android が通知を削除しました</string>
+    <string name="diag_media_queue_overflow">同時のメディアコピーが多すぎて、開始できなかったものがあります</string>
+    <string name="diag_skipped">通知に使える内容がなく、何も保存しませんでした</string>
     <string name="health_copy_diagnostics">概要をコピー</string>
     <string name="health_diagnostics_copied">診断の概要をコピーしました（コードと件数のみ）。</string>
     <string name="health_send_test">テスト通知を送信</string>
@@ -216,7 +225,12 @@
     <string name="health_add_by_package">パッケージ名を直接指定して追加（汎用パーサー）</string>
     <string name="health_add_source_empty">一致するアプリはありません。</string>
     <string name="health_known_source">バージョン管理されたアダプターあり</string>
-    <string name="health_last_event">最終イベント %1$s</string>
+    <string name="health_last_event">最後に受け付けたイベント %1$s</string>
+    <string name="health_last_event_never">まだイベントを受け付けていません</string>
+    <string name="health_last_saved">最後に保存したコピー %1$s</string>
+    <string name="health_last_saved_never">リスナーの開始以降、コピーは保存されていません</string>
+    <string name="health_gaps_caveat">空白とは、QuietInbox が観測できなかったと分かっている時間帯のことです。取りこぼした件数ではありません。通知として送られたものしか見えず、取りこぼした数は分かりません。</string>
+    <string name="health_saved">保存</string>
 
     <!-- Settings -->
     <string name="settings_title">設定</string>
@@ -330,6 +344,12 @@
     <string name="ob_test_button">テスト通知を送信</string>
     <string name="ob_test_waiting">コピーを待っています…</string>
     <string name="ob_test_captured">%1$d 件のメッセージをキャプチャして保存しました。</string>
+    <string name="ob_test_captured_of">%2$d 件中 %1$d 件を取得して保存しました。</string>
+    <string name="ob_test_failed_title">コピーが届きませんでした</string>
+    <string name="ob_test_failed_body">テスト通知は送信しましたが、何も取得できませんでした。通知アクセスが取り消されたか、仕事用プロファイルのポリシーが妨げている可能性があります。このまま進めて、あとで「取得」ページを確認できます。</string>
+    <string name="ob_test_retry">もう一度送る</string>
+    <string name="ob_skip_unverified">確認せずに続ける</string>
+    <string name="ob_extras">メディアのコピー、リマインダー、暗号化バックアップはそれぞれ別の選択肢で、オンにするまではすべてオフです。設定にあります。</string>
     <string name="ob_preview_title">表示される内容</string>
     <string name="ob_preview_body">各コピーには送信元、キャプチャ時刻、（取得できれば）送信元の時刻が表示されます。送信者が不確かなとき、プレビューが隠されたとき、メッセージが重複している可能性があるときはラベルで示します。</string>
     <string name="ob_next">次へ</string>

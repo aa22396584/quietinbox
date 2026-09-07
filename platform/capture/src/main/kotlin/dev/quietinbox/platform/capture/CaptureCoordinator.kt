@@ -52,7 +52,21 @@ import javax.inject.Singleton
 data class CaptureStatus(
     val listenerState: ListenerState = ListenerState.NOT_GRANTED,
     val connectedSinceEpochMs: Long? = null,
+    /**
+     * When an event was last *accepted* — stamped inside `enqueue`, after the source filter. Not
+     * "the last system callback": a callback for a disabled source, or one the bounded queue
+     * dropped, never reaches it, so labelling it that way would be a claim the app cannot make.
+     */
     val lastEventAtEpochMs: Long? = null,
+    /**
+     * When a copy was last actually written. [acceptedCount] increments right after the journal
+     * write and before parsing, so it counts admitted events, not successful ones: a source whose
+     * format the parser cannot read still raises it. This is stamped after `ingest.commit` returns,
+     * so it is the only number on the page that means "something was saved". In memory on purpose,
+     * like the rest of this type: a process restart writes a `PROCESS_RESTART` gap and resets
+     * "connected since" too, so "since the listener started" is the page's existing frame.
+     */
+    val lastCommittedAtEpochMs: Long? = null,
     val queueDepth: Int = 0,
     val overflowCount: Long = 0,
     val acceptedCount: Long = 0,
@@ -861,6 +875,9 @@ class CaptureCoordinator @Inject constructor(
             retentionMs = retentionDays * DAY_MS,
             mediaAllowed = appSettings.mediaCopyEnabled && (source?.mediaEnabled ?: true),
         )
+        // Past every early return — the commit fence, a parse failure, an empty batch — so unlike
+        // `acceptedCount` this one only moves when a copy really was written.
+        _status.update { it.copy(lastCommittedAtEpochMs = now) }
         if (reconcile?.degraded == true) ingest.diagnostic("RECONCILE_DEGRADED", null, snapshot.source.packageName, now)
         if (batch.warnings.isNotEmpty()) ingest.diagnostic("PARSE_WARNINGS", batch.warnings.joinToString(",") { it.name }, snapshot.source.packageName, now)
         if (outcome.pendingMediaMessageIds.isNotEmpty()) {

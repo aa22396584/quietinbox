@@ -77,3 +77,20 @@ fun gapReasonLabel(reason: GapReason): String = when (reason) {
     GapReason.COLD_START -> stringResource(R.string.gap_reason_cold_start)
     GapReason.UNKNOWN -> stringResource(R.string.gap_reason_unknown)
 }
+
+/**
+ * A plain sentence for a diagnostic code. The capture page used to print the raw constant, so
+ * `LOCKDOWN_REMOVAL` and `SKIPPED_PREVIEW_RESTRICTED_SUSPECTED` reached the user as-is (D8). The
+ * code itself stays on screen underneath, because it is what a bug report should quote. An unknown
+ * code falls back to itself rather than to a wrong guess.
+ */
+@Composable
+fun diagnosticLabel(code: String): String = when (code) {
+    "PARSE_WARNINGS" -> stringResource(R.string.diag_parse_warnings)
+    "PARSE_EXCEPTION" -> stringResource(R.string.diag_parse_exception)
+    "RECONCILE_DEGRADED" -> stringResource(R.string.diag_reconcile_degraded)
+    "JOURNAL_FAILED" -> stringResource(R.string.diag_journal_failed)
+    "LOCKDOWN_REMOVAL" -> stringResource(R.string.diag_lockdown_removal)
+    "MEDIA_QUEUE_OVERFLOW" -> stringResource(R.string.diag_media_queue_overflow)
+    else -> if (code.startsWith("SKIPPED_")) stringResource(R.string.diag_skipped) else code
+}

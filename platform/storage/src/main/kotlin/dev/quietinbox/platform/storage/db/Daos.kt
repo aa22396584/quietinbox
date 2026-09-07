@@ -283,6 +283,19 @@ interface MessageDao {
     @Query("SELECT COUNT(*) FROM message WHERE dedupState = 'AMBIGUOUS_REPEAT' AND (expiresAtEpochMs IS NULL OR expiresAtEpochMs > :now)")
     fun observeAmbiguousCount(now: Long): Flow<Int>
 
+    /**
+     * Messages of one package observed since [since]. Onboarding's capture test used the whole
+     * vault's message count, which is already non-zero on a re-run or after a restore, so the step
+     * reported success without having captured anything.
+     */
+    @Query(
+        """
+        SELECT COUNT(*) FROM message m JOIN conversation c ON c.id = m.conversationId
+        WHERE c.packageName = :packageName AND m.observedAtEpochMs >= :since
+        """,
+    )
+    fun observeCapturedSince(packageName: String, since: Long): Flow<Int>
+
     @Query("SELECT COUNT(*) FROM message WHERE mediaState = 'PENDING'")
     suspend fun pendingMediaCount(): Int
 

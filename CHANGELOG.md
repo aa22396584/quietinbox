@@ -58,7 +58,13 @@ were wrong in a way that changed the fix.
   a source disabled later, which discards the row for good. Writing it after the commit fence
   instead, as the first attempt did, lost it on three of those four paths and wrote it twice on
   replay; the event id is the journal's primary key, so acceptance — and the gap with it — happens
-  exactly once however often the event is delivered.
+  exactly once per accepted event, however many times that event is replayed or re-delivered.
+  Not once per *notification*, which round 34 was right to separate: a snapshot is stamped with a
+  fresh id every time one is taken, so a reconnect that re-reads the notifications still on screen
+  produces new events, and one that still declares dropped messages records the loss again. That is
+  a second observation of a loss that is still true rather than a duplicate of one write, but it
+  does mean the health page can list the same batch more than once after a reconnect. Left as is
+  and recorded here; deduplicating across snapshots is a change to the resync, not to this path.
   Making that possible needed a flag split first. `TruncationFlag.MESSAGES` was raised by two
   different losses in the same function — whole messages discarded, and a kept message whose text
   was shortened — so a gap keyed on it would have manufactured gaps that never happened. The split

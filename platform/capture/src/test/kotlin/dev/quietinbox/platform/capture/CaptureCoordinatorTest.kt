@@ -26,6 +26,7 @@ import dev.quietinbox.platform.storage.settings.AppSettings
 import dev.quietinbox.platform.storage.settings.SettingsRepository
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.nulls.shouldNotBeNull
+import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.mockk.coEvery
@@ -149,6 +150,76 @@ class CaptureCoordinatorTest : FunSpec({
                 SourceConfiguration(ENABLED_PKG, ENABLED_PKG, true, false, null, true, 0L, null),
             )
             journalAnswers { true }
+            installGapStore()
+        }
+
+        /**
+         * A real (if tiny) gap table, so tests about gaps can assert what the health page would
+         * show rather than how many times a mock was called. Round 34 found a test asserting
+         * against a fake that contained the very logic under test; state is harder to fool.
+         */
+        val gaps: MutableList<GapIntervalEntity> = Collections.synchronizedList(ArrayList())
+        private var nextGapId = 1L
+
+        private fun addGap(start: Long?, end: Long?, reason: GapReason, precision: GapPrecision, now: Long, pkg: String?): Long =
+            synchronized(gaps) {
+                val id = nextGapId++
+                gaps += GapIntervalEntity(id, start, end, reason.name, precision.name, now, pkg)
+                id
+            }
+
+        private fun closeWhere(end: Long?, predicate: (GapIntervalEntity) -> Boolean) = synchronized(gaps) {
+            for (i in gaps.indices) {
+                val g = gaps[i]
+                if (g.endEpochMs == null && predicate(g)) gaps[i] = g.copy(endEpochMs = end)
+            }
+        }
+
+        /** The open gaps of one source, as the health page would list them. */
+        fun openGapsFor(pkg: String, reason: GapReason) =
+            synchronized(gaps) { gaps.filter { it.endEpochMs == null && it.packageName == pkg && it.reason == reason.name } }
+
+        private fun installGapStore() {
+            coEvery { health.openGap(any(), any(), any(), any(), any()) } answers {
+                addGap(firstArg(), null, secondArg(), thirdArg(), arg(3), arg(4))
+            }
+            coEvery { health.recordGap(any(), any(), any(), any(), any(), any()) } answers {
+                addGap(firstArg(), secondArg(), thirdArg(), arg(3), arg(4), arg(5))
+                Unit
+            }
+            coEvery { health.closeOpenGapsForSource(any(), any(), *anyVararg()) } answers {
+                val end = firstArg<Long?>()
+                val pkg = secondArg<String>()
+                val reasons = arg<Array<GapReason>>(2).map { it.name }.toSet()
+                closeWhere(end) { it.packageName == pkg && it.reason in reasons }
+                Unit
+            }
+            coEvery { health.closeOpenGaps(any(), *anyVararg()) } answers {
+                val end = firstArg<Long?>()
+                val reasons = arg<Array<GapReason>>(1).map { it.name }.toSet()
+                closeWhere(end) { it.reason in reasons }
+                Unit
+            }
+            coEvery { health.closeGap(any(), any()) } answers {
+                val id = firstArg<Long>()
+                closeWhere(secondArg()) { it.id == id }
+                Unit
+            }
+            coEvery { health.openSourceGaps() } answers {
+                synchronized(gaps) {
+                    gaps.filter {
+                        it.endEpochMs == null &&
+                            (it.reason == GapReason.SOURCE_DISABLED_BY_USER.name || it.reason == GapReason.SOURCE_PAUSED_BY_USER.name)
+                    }
+                }
+            }
+            coEvery { health.forgetGapSource(any()) } answers {
+                val pkg = firstArg<String>()
+                synchronized(gaps) {
+                    for (i in gaps.indices) if (gaps[i].packageName == pkg) gaps[i] = gaps[i].copy(packageName = null)
+                }
+                Unit
+            }
         }
 
         /** Replaces the journal stub; [answer] runs on the consumer coroutine. */
@@ -1027,6 +1098,43 @@ class CaptureCoordinatorTest : FunSpec({
             h.health.closeOpenGapsForSource(any(), ENABLED_PKG, GapReason.SOURCE_DISABLED_BY_USER, GapReason.SOURCE_PAUSED_BY_USER)
         }
         stillHolds { coVerify(exactly = 0) { h.health.forgetGapSource(any()) } }
+    }
+
+    test("a source paused, then switched off and on again, still has a gap saying it is paused") {
+        val h = Harness()
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+
+        // Round 34 C1, found independently by two reviewers, and mine. The reconciliation on
+        // policy load asked `pausedPackages` whether the source was paused — but that allow-list
+        // deliberately holds only *enabled* sources, so it says "no" for one that is paused and
+        // disabled. The pause gap was closed by the very load that followed the disable, and
+        // re-enabling never opened another: the source came back still paused, still not being
+        // captured, with nothing on the health page saying so.
+        coordinator.setSourcePaused(ENABLED_PKG, true)
+        awaitUntil { h.openGapsFor(ENABLED_PKG, GapReason.SOURCE_PAUSED_BY_USER) shouldHaveSize 1 }
+        coordinator.setSourceEnabled(ENABLED_PKG, false)
+        coordinator.setSourceEnabled(ENABLED_PKG, true)
+
+        awaitUntil { h.openGapsFor(ENABLED_PKG, GapReason.SOURCE_DISABLED_BY_USER) shouldHaveSize 0 }
+        stillHolds {
+            // Still paused, so the pause gap is still the truth.
+            h.openGapsFor(ENABLED_PKG, GapReason.SOURCE_PAUSED_BY_USER) shouldHaveSize 1
+        }
+    }
+
+    test("pausing a source that is switched off keeps the gap that says so") {
+        val h = Harness()
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+
+        // The other half of the same defect: the policy load that follows the pause closed the
+        // gap it had just opened, because a disabled source is not in `pausedPackages` either.
+        coordinator.setSourceEnabled(ENABLED_PKG, false)
+        coordinator.setSourcePaused(ENABLED_PKG, true)
+
+        awaitUntil { h.openGapsFor(ENABLED_PKG, GapReason.SOURCE_PAUSED_BY_USER) shouldHaveSize 1 }
+        stillHolds { h.openGapsFor(ENABLED_PKG, GapReason.SOURCE_PAUSED_BY_USER) shouldHaveSize 1 }
     }
 
     test("a gap an earlier version left open against its own policy is closed when the policy loads") {

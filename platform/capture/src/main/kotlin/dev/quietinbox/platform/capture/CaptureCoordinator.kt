@@ -9,6 +9,7 @@ import dev.quietinbox.core.identity.IdentityResolver
 import dev.quietinbox.core.model.CaptureOrigin
 import dev.quietinbox.core.model.GapPrecision
 import dev.quietinbox.core.model.GapReason
+import dev.quietinbox.core.model.SourceConfiguration
 import dev.quietinbox.core.model.Limits
 import dev.quietinbox.core.model.ListenerState
 import dev.quietinbox.core.model.MediaState
@@ -407,25 +408,37 @@ class CaptureCoordinator @Inject constructor(
      */
     /**
      * Closes the source gaps the policy contradicts. Must be called under [pipelineMutex], with
-     * [known] the packages the source table still holds.
+     * [configured] the source table as it now stands.
      *
      * The flag and its gap are written in one transaction now, so this cannot fire for anything
      * this version wrote. It exists for the rows earlier versions left behind — a gap opened after
      * its setting had already committed, then a process death — and for a source removed while a
      * gap of its own was open. The policy is the truth: it is what capture actually does, and an
      * interval that says otherwise reads on the health page as capture still being missing.
+     *
+     * Each reason is answered by its own setting, read off the configuration rather than off
+     * [pausedPackages] and [enabledPackages]. Those two are the allow-lists the pipeline consults,
+     * and `pausedPackages` deliberately holds only *enabled* sources — so asking it whether an app
+     * is paused says "no" for one that is paused and also disabled. Round 34 found both halves of
+     * that: pausing a disabled source had its gap closed by the very load that followed, and
+     * pause → disable → re-enable ended with a source that was still paused and had nothing open
+     * to say capture had stopped.
      */
-    private suspend fun reconcileSourceGaps(known: Set<String>) {
+    private suspend fun reconcileSourceGaps(configured: List<SourceConfiguration>) {
         val now = System.currentTimeMillis()
+        val byPackage = configured.associateBy { it.packageName }
         guarded {
             for (gap in health.openSourceGaps()) {
                 val pkg = gap.packageName ?: continue
-                val contradicted = when (gap.reason) {
-                    GapReason.SOURCE_DISABLED_BY_USER.name -> pkg in enabledPackages
-                    GapReason.SOURCE_PAUSED_BY_USER.name -> pkg !in pausedPackages
+                val source = byPackage[pkg]
+                val contradicted = when {
+                    // The source is gone. Nothing can ever close this, so nothing ever would.
+                    source == null -> true
+                    gap.reason == GapReason.SOURCE_DISABLED_BY_USER.name -> source.enabled
+                    gap.reason == GapReason.SOURCE_PAUSED_BY_USER.name -> !source.paused
                     else -> false
                 }
-                if (contradicted || pkg !in known) health.closeGap(gap.id, now)
+                if (contradicted) health.closeGap(gap.id, now)
             }
         }
     }
@@ -446,7 +459,7 @@ class CaptureCoordinator @Inject constructor(
         val list = sources.sources()
         enabledPackages = list.filter { it.enabled }.map { it.packageName }.toSet()
         pausedPackages = list.filter { it.enabled && it.paused }.map { it.packageName }.toSet()
-        reconcileSourceGaps(list.map { it.packageName }.toSet())
+        reconcileSourceGaps(list)
         settleColdStartGap()
         releaseHeld()
         sourcesLoaded = true

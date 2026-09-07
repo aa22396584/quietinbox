@@ -180,4 +180,31 @@ class SourcePolicyTransactionTest {
         all.single().endEpochMs shouldBe null
         Unit
     }
+
+    @Test
+    fun removingASourceAndItsDataTakesTheNameOffItsGapsInOneGo() = runBlocking {
+        ready()
+        addSource()
+        sources.setEnabled(pkg, false) {
+            health.openGap(2_000, GapReason.SOURCE_DISABLED_BY_USER, GapPrecision.EXACT, 2_000, pkg)
+        }
+        // Another source's interval, to prove the removal is scoped and does not take it too.
+        health.openGap(2_500, GapReason.SOURCE_PAUSED_BY_USER, GapPrecision.EXACT, 2_500, "com.example.other")
+
+        // The path the coordinator actually takes, end to end (round 34 I3): close and forget both
+        // run inside remove's own transaction, not as two calls that could half-happen.
+        sources.remove(pkg, deleteData = true) {
+            health.closeOpenGapsForSource(4_000, pkg, GapReason.SOURCE_DISABLED_BY_USER, GapReason.SOURCE_PAUSED_BY_USER)
+            health.forgetGapSource(pkg)
+        }
+
+        val all = holder.db().healthDao().observeGaps(100).first()
+        // The removed source's interval is closed and anonymous; it is still there, because it is
+        // the record that capture stopped.
+        all.count { it.packageName == pkg } shouldBe 0
+        all.count { it.packageName == null && it.endEpochMs != null } shouldBe 1
+        // The other source is untouched: still named, still open.
+        all.count { it.packageName == "com.example.other" && it.endEpochMs == null } shouldBe 1
+        Unit
+    }
 }

@@ -65,8 +65,8 @@ class SnapshotFactory(
         // "not self" is the deliberate failure mode: a contact's message must never be shown as mine.
         val self = messaging?.user
         val selfName = self?.name?.toString()
-        val messages = messaging?.messages?.let { bound(it, TruncationFlag.MESSAGES, truncated, self, selfName) }.orEmpty()
-        val historic = messaging?.historicMessages?.let { bound(it, TruncationFlag.HISTORIC_MESSAGES, truncated, self, selfName) }.orEmpty()
+        val messages = messaging?.messages?.let { bound(it, TruncationFlag.MESSAGES, TruncationFlag.MESSAGES_DROPPED, truncated, self, selfName) }.orEmpty()
+        val historic = messaging?.historicMessages?.let { bound(it, TruncationFlag.HISTORIC_MESSAGES, TruncationFlag.HISTORIC_MESSAGES_DROPPED, truncated, self, selfName) }.orEmpty()
 
         val actions = n.actions?.toList()?.let { list ->
             if (list.size > Limits.MAX_ACTIONS) truncated += TruncationFlag.ACTIONS
@@ -148,12 +148,13 @@ class SnapshotFactory(
         return CapturedNotification(snapshot, bitmap)
     }
 
-    private fun bound(list: List<NotificationCompat.MessagingStyle.Message>, flag: TruncationFlag, truncated: MutableSet<TruncationFlag>, self: androidx.core.app.Person?, selfName: String?): List<MessagingMessageShape> {
-        if (list.size > Limits.MAX_MESSAGES) truncated += flag
+    /** [textFlag] marks a kept message whose text was shortened; [droppedFlag], messages discarded outright. */
+    private fun bound(list: List<NotificationCompat.MessagingStyle.Message>, textFlag: TruncationFlag, droppedFlag: TruncationFlag, truncated: MutableSet<TruncationFlag>, self: androidx.core.app.Person?, selfName: String?): List<MessagingMessageShape> {
+        if (list.size > Limits.MAX_MESSAGES) truncated += droppedFlag
         return list.takeLast(Limits.MAX_MESSAGES).map { m ->
             val person = m.person
             val text = BoundedText.of(m.text)
-            if (text?.truncated == true) truncated += flag
+            if (text?.truncated == true) truncated += textFlag
             val uri = m.dataUri?.takeIf { it.scheme == "content" }?.toString()?.take(Limits.MAX_URI_CHARS)
             MessagingMessageShape(
                 text = text,

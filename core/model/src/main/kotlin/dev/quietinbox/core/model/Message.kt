@@ -48,6 +48,12 @@ data class Message(
     val observationCount: Int,
     val mediaState: MediaState,
     val mediaBlobId: Long?,
+    /**
+     * What the snapshot had to cut before this message was parsed. Empty for almost everything.
+     * A body that was shortened is shown as complete unless this says otherwise, which is the one
+     * thing the honesty rules cannot allow.
+     */
+    val truncationFlags: Set<TruncationFlag> = emptySet(),
     /** Deterministic ordering key: source time if present, else post time, else observed time. */
     val sortKey: Long,
 )

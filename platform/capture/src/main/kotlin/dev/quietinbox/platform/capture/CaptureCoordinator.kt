@@ -12,6 +12,7 @@ import dev.quietinbox.core.model.GapReason
 import dev.quietinbox.core.model.Limits
 import dev.quietinbox.core.model.ListenerState
 import dev.quietinbox.core.model.MediaState
+import dev.quietinbox.core.model.TruncationFlag
 import dev.quietinbox.core.model.NotificationSnapshot
 import dev.quietinbox.core.model.SourceScope
 import dev.quietinbox.core.parser.ParserRegistry
@@ -598,14 +599,38 @@ class CaptureCoordinator @Inject constructor(
     suspend fun addSource(packageName: String, displayName: String, adapterId: String?, now: Long) =
         changeSourcePolicy { sources.enable(packageName, displayName, adapterId, now) }
 
-    /** Disabling also discards the source's pending journal rows: nothing captured for it may land later. */
-    suspend fun setSourceEnabled(packageName: String, enabled: Boolean) = changeSourcePolicy {
-        sources.setEnabled(packageName, enabled)
-        if (!enabled) ingest.discardPendingJournal(packageName)
+    /**
+     * Disabling also discards the source's pending journal rows: nothing captured for it may land
+     * later. It opens a gap of its own, too. Events dropped for a disabled source used to land in
+     * `droppedAfterRevoke`, one counter that also holds a revoked permission, a rotated generation
+     * and a maintenance run — so the one cause the user chose looked identical to three they did
+     * not, and nothing recorded the window at all (QI-CAPTURE-018).
+     */
+    suspend fun setSourceEnabled(packageName: String, enabled: Boolean) {
+        changeSourcePolicy {
+            sources.setEnabled(packageName, enabled)
+            if (!enabled) ingest.discardPendingJournal(packageName)
+        }
+        val now = System.currentTimeMillis()
+        guarded {
+            if (enabled) {
+                health.closeOpenGapsForSource(now, packageName, GapReason.SOURCE_DISABLED_BY_USER)
+            } else {
+                health.openGap(now, GapReason.SOURCE_DISABLED_BY_USER, GapPrecision.EXACT, now, packageName)
+            }
+        }
     }
 
     suspend fun setSourcePaused(packageName: String, paused: Boolean) {
         changeSourcePolicy { sources.setPaused(packageName, paused) }
+        val now = System.currentTimeMillis()
+        guarded {
+            if (paused) {
+                health.openGap(now, GapReason.SOURCE_PAUSED_BY_USER, GapPrecision.EXACT, now, packageName)
+            } else {
+                health.closeOpenGapsForSource(now, packageName, GapReason.SOURCE_PAUSED_BY_USER)
+            }
+        }
         if (!paused) scope.launch { replayJournal() }
     }
 
@@ -733,7 +758,7 @@ class CaptureCoordinator @Inject constructor(
                 it.copy(overflowCount = it.overflowCount + 1, listenerState = ListenerState.DEGRADED)
             }
         }
-        if (!ok) scope.launch { guarded { health.recordGap(now, now, GapReason.QUEUE_OVERFLOW, GapPrecision.EXACT, now) } }
+        if (!ok) scope.launch { guarded { health.recordGap(now, now, GapReason.QUEUE_OVERFLOW, GapPrecision.EXACT, now, captured.snapshot.source.packageName) } }
         return ok
     }
 
@@ -799,7 +824,7 @@ class CaptureCoordinator @Inject constructor(
                         lastError = e::class.java.simpleName
                         guarded {
                             ingest.diagnostic("JOURNAL_FAILED", e::class.java.simpleName, snapshot.source.packageName, snapshot.observedAtEpochMs)
-                            health.recordGap(snapshot.observedAtEpochMs, snapshot.observedAtEpochMs, GapReason.UNKNOWN, GapPrecision.EXACT, snapshot.observedAtEpochMs)
+                            health.recordGap(snapshot.observedAtEpochMs, snapshot.observedAtEpochMs, GapReason.UNKNOWN, GapPrecision.EXACT, snapshot.observedAtEpochMs, snapshot.source.packageName)
                         }
                     }
                 }
@@ -837,6 +862,15 @@ class CaptureCoordinator @Inject constructor(
     private suspend fun processJournaled(snapshot: NotificationSnapshot, generation: String, bitmap: Bitmap?): Boolean {
         val now = snapshot.observedAtEpochMs
         if (commitFenced(snapshot)) return false
+        // Recorded before anything can short-circuit on the parse result, because it is a property
+        // of the snapshot and not of what was made of it. The notification carried more messages
+        // than the snapshot may hold, so the oldest were discarded before parsing — and whatever
+        // followed, a clean commit or an empty batch, nothing else would ever have said that
+        // content existed and was lost. It is worst when the parse yields nothing: then the loss
+        // is total and the event is merely "skipped".
+        if (snapshot.shape.truncated.any { it in DROPPED_MESSAGES }) {
+            guarded { health.recordGap(snapshot.postedAtEpochMs ?: now, now, GapReason.MESSAGES_DROPPED, GapPrecision.BOUNDED, now, snapshot.source.packageName) }
+        }
         val parser = registry.parserFor(snapshot)
         val batch = try {
             parser.parse(snapshot)
@@ -976,6 +1010,9 @@ class CaptureCoordinator @Inject constructor(
         private const val DAY_MS = 24L * 60 * 60 * 1000
         private const val REASON_LOCKDOWN = 20 // NotificationListenerService.REASON_LOCKDOWN (API 29)
         private const val MAX_QUEUED_BITMAPS = 8
+
+        /** Truncation that means content was discarded, not merely shortened. */
+        private val DROPPED_MESSAGES = setOf(TruncationFlag.MESSAGES_DROPPED, TruncationFlag.HISTORIC_MESSAGES_DROPPED)
 
         /** In-flight media copies. Bitmaps are bounded by their bytes; URI copies by their jobs. */
         private const val MAX_QUEUED_MEDIA_COPIES = 32

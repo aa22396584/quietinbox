@@ -94,6 +94,7 @@
     <string name="conv_time_captured">擷取時間</string>
     <string name="conv_revision">已修改 ×%1$d</string>
     <string name="conv_ambiguous_tag">可能重複</string>
+    <string name="conv_truncated">文字被截短</string>
     <string name="conv_preview_restricted">預覽受限</string>
     <string name="conv_summary_only">僅摘要</string>
     <string name="conv_media_pending">媒體複製中</string>
@@ -206,6 +207,9 @@
     <string name="gap_reason_first_unlock">首次解鎖前</string>
     <string name="gap_reason_maintenance">重設或還原進行中</string>
     <string name="gap_reason_cold_start">來源清單載入前</string>
+    <string name="gap_reason_source_disabled">你把這個來源關掉了</string>
+    <string name="gap_reason_source_paused">你暫停了這個來源</string>
+    <string name="gap_reason_messages_dropped">該則通知帶的訊息多到讀不完</string>
     <string name="gap_reason_unknown">原因不明</string>
     <string name="health_diagnostics_title">本機診斷（最近 7 天）</string>
     <string name="health_diagnostics_empty">沒有診斷事件。任何內容都不會被上傳。</string>

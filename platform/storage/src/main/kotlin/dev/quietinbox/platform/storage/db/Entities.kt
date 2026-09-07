@@ -39,6 +39,8 @@ data class GapIntervalEntity(
     val reason: String,
     val precision: String,
     val createdAtEpochMs: Long,
+    /** Null for a process-wide gap; never a conversation, which is unknowable for a dropped event. */
+    val packageName: String? = null,
 )
 
 /** Durable, short-TTL copy of accepted input. Committed rows are pruned by retention. */
@@ -149,6 +151,9 @@ data class MessageEntity(
     val eventId: String,
     val sortKey: Long,
     val expiresAtEpochMs: Long?,
+    /** `TruncationFlag` names joined by ',', or null. A name, not a boolean: "the text was cut" and
+     *  "whole messages were dropped" are different losses and must stay distinguishable. */
+    val truncationFlags: String? = null,
 )
 
 @Entity(

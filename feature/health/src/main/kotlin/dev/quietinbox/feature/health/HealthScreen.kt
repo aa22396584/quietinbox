@@ -273,7 +273,11 @@ fun HealthScreen(
                 ListItem(
                     leadingContent = { Icon(Icons.Outlined.Timeline, null, tint = QualityColors.uncertain) },
                     headlineContent = { Text("$start → $end") },
-                    supportingContent = { Text(gapReasonLabel(gap.reason)) },
+                    supportingContent = {
+                        // Most gaps are process-wide and say nothing about a source; the ones that
+                        // do — a source you switched off, a queue overflow — now name it.
+                        Text(gap.packageName?.let { "${gapReasonLabel(gap.reason)} · $it" } ?: gapReasonLabel(gap.reason))
+                    },
                     colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
                 )
             }

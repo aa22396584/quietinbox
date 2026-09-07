@@ -7,6 +7,7 @@ import dev.quietinbox.core.model.DedupState
 import dev.quietinbox.core.model.MediaState
 import dev.quietinbox.core.model.MessageCandidate
 import dev.quietinbox.core.model.NotificationSnapshot
+import dev.quietinbox.core.model.TruncationFlag
 import dev.quietinbox.core.model.ParsedBatch
 import dev.quietinbox.core.model.SearchNormalizer
 import dev.quietinbox.core.model.TimestampQuality
@@ -34,6 +35,16 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /** Result of a committed snapshot; ids are used to kick off media work. */
+/** Flags that mean "text this message kept was shortened", as opposed to content dropped wholesale. */
+private val TEXT_TRUNCATION = setOf(
+    TruncationFlag.TEXT,
+    TruncationFlag.BIG_TEXT,
+    TruncationFlag.TITLE,
+    TruncationFlag.MESSAGES,
+    TruncationFlag.HISTORIC_MESSAGES,
+    TruncationFlag.LINES,
+)
+
 data class CommitOutcome(
     val conversationId: Long?,
     val newMessageIds: List<Long>,
@@ -297,6 +308,13 @@ class IngestRepository @Inject constructor(
                                 mediaMimeType = c.media?.mimeType,
                                 fingerprint = decision.fingerprint,
                                 eventId = snapshot.eventId,
+                                // Only the flags that describe this message's own text. The
+                                // dropped-message flags belong to the batch, not to a row that
+                                // survived, and they are recorded as a gap instead.
+                                truncationFlags = snapshot.shape.truncated
+                                    .filter { it in TEXT_TRUNCATION }
+                                    .takeIf { it.isNotEmpty() }
+                                    ?.joinToString(",") { it.name },
                                 sortKey = sortKey(c, snapshot),
                                 expiresAtEpochMs = retentionMs?.let { now + it },
                             ),

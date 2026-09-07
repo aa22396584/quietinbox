@@ -96,6 +96,7 @@
     <string name="conv_time_captured">captured</string>
     <string name="conv_revision">edited ×%1$d</string>
     <string name="conv_ambiguous_tag">possible repeat</string>
+    <string name="conv_truncated">text was shortened</string>
     <string name="conv_preview_restricted">preview restricted</string>
     <string name="conv_summary_only">summary only</string>
     <string name="conv_media_pending">copying media</string>
@@ -208,6 +209,9 @@
     <string name="gap_reason_first_unlock">before first unlock</string>
     <string name="gap_reason_maintenance">reset or restore in progress</string>
     <string name="gap_reason_cold_start">before the source list was loaded</string>
+    <string name="gap_reason_source_disabled">you switched this source off</string>
+    <string name="gap_reason_source_paused">you paused this source</string>
+    <string name="gap_reason_messages_dropped">the notification held more messages than could be read</string>
     <string name="gap_reason_unknown">unknown</string>
     <string name="health_diagnostics_title">Local diagnostics (last 7 days)</string>
     <string name="health_diagnostics_empty">No diagnostic events. Nothing is ever uploaded.</string>

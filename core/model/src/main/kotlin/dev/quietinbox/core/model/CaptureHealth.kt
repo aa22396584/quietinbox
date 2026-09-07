@@ -23,6 +23,19 @@ enum class GapReason {
 
     /** Notifications arrived before the source list was known and the vault did not open in time; nothing was read from them (QI-CAPTURE-013). */
     COLD_START,
+
+    /** The user switched this source off. Its own reason, not the bucket that also holds a revoke. */
+    SOURCE_DISABLED_BY_USER,
+
+    /** The user paused this source. */
+    SOURCE_PAUSED_BY_USER,
+
+    /**
+     * A notification carried more messages than [Limits.MAX_MESSAGES] and the oldest were discarded
+     * before anything was parsed. The ingest that followed succeeded, so nothing else would ever
+     * have said that content was lost — a gap hidden inside a success.
+     */
+    MESSAGES_DROPPED,
     UNKNOWN,
 }
 
@@ -38,6 +51,13 @@ data class GapInterval(
     val endEpochMs: Long?,
     val reason: GapReason,
     val precision: GapPrecision,
+    /**
+     * The source the gap belongs to, when one is known. Most gaps are process-wide — a disconnect,
+     * a restart, a maintenance run — and for those it is null and must stay null. It can never
+     * carry a conversation: identity is resolved during ingest, which is exactly what did not
+     * happen for an event that was dropped.
+     */
+    val packageName: String? = null,
 )
 
 data class CaptureHealth(

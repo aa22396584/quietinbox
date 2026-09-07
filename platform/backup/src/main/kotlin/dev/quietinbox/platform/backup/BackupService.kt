@@ -168,10 +168,19 @@ class BackupService @Inject constructor(
                 val page = db.messageDao().exportPage(after, PAGE, now)
                 if (page.isEmpty()) break
                 for (m in page) line(
+                    // Named, not positional: a field inserted anywhere but the end used to shift
+                    // every argument after it, silently and without a compile error.
                     BackupRecord.Message(
-                        m.id, m.conversationId, m.sourceMessageId, m.senderName, m.senderKey, m.isSelf, m.body, m.kind, m.sourceTimestampEpochMs, m.timestampQuality,
-                        m.observedAtEpochMs, m.postedAtEpochMs, m.origin, m.contentStatus, m.dedupState, m.revisionCount, m.observationCount, m.mediaState, m.mediaBlobId,
-                        m.mediaMimeType, m.fingerprint, m.sortKey, m.expiresAtEpochMs,
+                        id = m.id, conversationId = m.conversationId, sourceMessageId = m.sourceMessageId,
+                        senderName = m.senderName, senderKey = m.senderKey, isSelf = m.isSelf, body = m.body,
+                        kind = m.kind, sourceTimestampEpochMs = m.sourceTimestampEpochMs,
+                        timestampQuality = m.timestampQuality, observedAtEpochMs = m.observedAtEpochMs,
+                        postedAtEpochMs = m.postedAtEpochMs, origin = m.origin, contentStatus = m.contentStatus,
+                        dedupState = m.dedupState, revisionCount = m.revisionCount,
+                        observationCount = m.observationCount, mediaState = m.mediaState,
+                        mediaBlobId = m.mediaBlobId, mediaMimeType = m.mediaMimeType,
+                        fingerprint = m.fingerprint, sortKey = m.sortKey, expiresAtEpochMs = m.expiresAtEpochMs,
+                        truncationFlags = m.truncationFlags,
                     ),
                 )
                 after = page.last().id
@@ -353,7 +362,7 @@ class BackupService @Inject constructor(
                             observedAtEpochMs = m.observedAtEpochMs, postedAtEpochMs = m.postedAtEpochMs, origin = m.origin, contentStatus = m.contentStatus,
                             dedupState = m.dedupState, revisionCount = m.revisionCount, observationCount = m.observationCount, mediaState = mediaState,
                             mediaBlobId = null, mediaUri = null, mediaMimeType = m.mediaMimeType, fingerprint = m.fingerprint, eventId = "restore:${s.manifest.createdAtEpochMs}",
-                            sortKey = m.sortKey,
+                            sortKey = m.sortKey, truncationFlags = m.truncationFlags,
                             // A backup older than the retention window must not be swept on the next
                             // retention run; expiry is re-based on the current setting.
                             expiresAtEpochMs = m.expiresAtEpochMs?.let { maxOf(it, now + retentionMs) },

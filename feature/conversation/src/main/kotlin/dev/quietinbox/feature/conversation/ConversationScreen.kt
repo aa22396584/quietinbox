@@ -98,6 +98,7 @@ import dev.quietinbox.core.designsystem.components.dayLabel
 import dev.quietinbox.core.designsystem.components.identityLabel
 import dev.quietinbox.core.designsystem.components.mediaLabel
 import dev.quietinbox.core.designsystem.components.originLabel
+import dev.quietinbox.core.designsystem.components.truncationLabel
 import dev.quietinbox.core.designsystem.theme.QualityColors
 import dev.quietinbox.core.model.ContentStatus
 import dev.quietinbox.core.model.DedupState
@@ -500,6 +501,8 @@ private fun MetaLine(message: Message, contentColor: androidx.compose.ui.graphic
         if (message.contentStatus == ContentStatus.PREVIEW_RESTRICTED_SUSPECTED) QualityTag(stringResource(R.string.conv_preview_restricted), Icons.Outlined.VisibilityOff, QualityColors.uncertain)
         if (message.revisionCount > 0) QualityTag(stringResource(R.string.conv_revision, message.revisionCount), Icons.Outlined.Edit, QualityColors.inferred)
         if (message.observationCount > 1) QualityTag(stringResource(R.string.conv_observed_times, message.observationCount), Icons.Outlined.History, QualityColors.inferred)
+        // A body that was cut used to be drawn exactly like a complete one.
+        truncationLabel(message.truncationFlags)?.let { QualityTag(it.text, it.icon, it.tint) }
         mediaLabel(message.mediaState)?.let { QualityTag(it.text, it.icon, it.tint) }
         originLabel(message.origin)?.let { QualityTag(it, Icons.Outlined.Science, QualityColors.inferred) }
     }

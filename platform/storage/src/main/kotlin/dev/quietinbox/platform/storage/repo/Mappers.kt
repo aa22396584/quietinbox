@@ -17,6 +17,7 @@ import dev.quietinbox.core.model.SourceScope
 import dev.quietinbox.core.model.TimestampQuality
 import dev.quietinbox.platform.storage.db.ConversationEntity
 import dev.quietinbox.platform.storage.db.GapIntervalEntity
+import dev.quietinbox.core.model.TruncationFlag
 import dev.quietinbox.platform.storage.db.MessageEntity
 import dev.quietinbox.platform.storage.db.MessageRevisionEntity
 import dev.quietinbox.platform.storage.db.SourceConfigurationEntity
@@ -62,6 +63,12 @@ fun MessageEntity.toDomain(): Message = Message(
     observationCount = observationCount,
     mediaState = mediaState.toEnumOr(MediaState.NONE),
     mediaBlobId = mediaBlobId,
+    // An unknown name from a newer build degrades to "not flagged" rather than crashing, the same
+    // tolerance every other enum column here has.
+    truncationFlags = truncationFlags.orEmpty()
+        .split(',')
+        .mapNotNull { name -> enumValues<TruncationFlag>().firstOrNull { it.name == name } }
+        .toSet(),
     sortKey = sortKey,
 )
 
@@ -84,4 +91,5 @@ fun GapIntervalEntity.toDomain(): GapInterval = GapInterval(
     endEpochMs = endEpochMs,
     reason = reason.toEnumOr(GapReason.UNKNOWN),
     precision = precision.toEnumOr(GapPrecision.UNKNOWN),
+    packageName = packageName,
 )

@@ -2,6 +2,7 @@ package dev.quietinbox.core.designsystem.components
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.BrokenImage
+import androidx.compose.material.icons.outlined.ContentCut
 import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.HideImage
 import androidx.compose.material.icons.outlined.HourglassEmpty
@@ -23,6 +24,7 @@ import dev.quietinbox.core.model.GapReason
 import dev.quietinbox.core.model.IdentityConfidence
 import dev.quietinbox.core.model.ListenerState
 import dev.quietinbox.core.model.MediaState
+import dev.quietinbox.core.model.TruncationFlag
 
 data class Labelled(val text: String, val icon: ImageVector, val tint: Color)
 
@@ -75,6 +77,9 @@ fun gapReasonLabel(reason: GapReason): String = when (reason) {
     GapReason.BEFORE_FIRST_UNLOCK -> stringResource(R.string.gap_reason_first_unlock)
     GapReason.MAINTENANCE -> stringResource(R.string.gap_reason_maintenance)
     GapReason.COLD_START -> stringResource(R.string.gap_reason_cold_start)
+    GapReason.SOURCE_DISABLED_BY_USER -> stringResource(R.string.gap_reason_source_disabled)
+    GapReason.SOURCE_PAUSED_BY_USER -> stringResource(R.string.gap_reason_source_paused)
+    GapReason.MESSAGES_DROPPED -> stringResource(R.string.gap_reason_messages_dropped)
     GapReason.UNKNOWN -> stringResource(R.string.gap_reason_unknown)
 }
 
@@ -93,4 +98,11 @@ fun diagnosticLabel(code: String): String = when (code) {
     "LOCKDOWN_REMOVAL" -> stringResource(R.string.diag_lockdown_removal)
     "MEDIA_QUEUE_OVERFLOW" -> stringResource(R.string.diag_media_queue_overflow)
     else -> if (code.startsWith("SKIPPED_")) stringResource(R.string.diag_skipped) else code
+}
+
+/** What a message had to give up before it was stored, or null when it kept everything. */
+@Composable
+fun truncationLabel(flags: Set<TruncationFlag>): Labelled? = when {
+    flags.isEmpty() -> null
+    else -> Labelled(stringResource(R.string.conv_truncated), Icons.Outlined.ContentCut, QualityColors.uncertain)
 }

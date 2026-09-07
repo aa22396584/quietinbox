@@ -94,6 +94,7 @@
     <string name="conv_time_captured">캡처 시각</string>
     <string name="conv_revision">수정됨 ×%1$d</string>
     <string name="conv_ambiguous_tag">중복 가능성</string>
+    <string name="conv_truncated">본문이 잘렸습니다</string>
     <string name="conv_preview_restricted">미리보기 제한됨</string>
     <string name="conv_summary_only">요약만</string>
     <string name="conv_media_pending">미디어 복사 중</string>
@@ -206,6 +207,9 @@
     <string name="gap_reason_first_unlock">첫 잠금 해제 전</string>
     <string name="gap_reason_maintenance">재설정 또는 복원 진행 중</string>
     <string name="gap_reason_cold_start">소스 목록을 불러오기 전</string>
+    <string name="gap_reason_source_disabled">이 소스를 껐습니다</string>
+    <string name="gap_reason_source_paused">이 소스를 일시중지했습니다</string>
+    <string name="gap_reason_messages_dropped">알림에 다 읽을 수 없는 수의 메시지가 있었습니다</string>
     <string name="gap_reason_unknown">알 수 없음</string>
     <string name="health_diagnostics_title">로컬 진단(최근 7일)</string>
     <string name="health_diagnostics_empty">진단 이벤트가 없습니다. 어떤 것도 업로드되지 않습니다.</string>

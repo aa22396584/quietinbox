@@ -99,4 +99,46 @@ class MigrationTest {
         migrated.execSQL("INSERT INTO event_journal (eventId, generation, receivedAtEpochMs, expiresAtEpochMs, state, attempts, failureCode, payload, packageName) VALUES ('e2', 'g', 1, 2, 'PENDING', 0, NULL, '{}', 'pkg')")
         migrated.close()
     }
+
+    /**
+     * v4 adds `gap_interval.packageName` and `message.truncationFlags`. Both are additive and
+     * nullable: an existing gap stays a gap and an existing message stays readable, with the new
+     * columns null rather than a fabricated value.
+     */
+    @Test
+    fun migrate3To4AddsNullableColumnsAndKeepsRows() {
+        val name = "$dbName-v4"
+        helper.createDatabase(name, 3).use { db ->
+            db.execSQL(
+                "INSERT INTO gap_interval (startEpochMs, endEpochMs, reason, precision, createdAtEpochMs) " +
+                    "VALUES (10, 20, 'LISTENER_DISCONNECTED', 'EXACT', 30)",
+            )
+            db.execSQL(
+                "INSERT INTO conversation (packageName, profileKey, identityKey, identityConfidence, pinned, archived, createdAtEpochMs, " +
+                    "lastActivityEpochMs, messageCount, ambiguousCount, summaryOnlyCount) " +
+                    "VALUES ('pkg', 'user:0', 'k', 'INFERRED_FROM_STREAM', 0, 0, 5, 5, 1, 0, 0)",
+            )
+            db.execSQL(
+                "INSERT INTO message (conversationId, isSelf, body, kind, timestampQuality, observedAtEpochMs, origin, contentStatus, dedupState, " +
+                    "revisionCount, observationCount, mediaState, fingerprint, eventId, sortKey) " +
+                    "VALUES (1, 0, 'body', 'TEXT', 'OBSERVED_ONLY', 5, 'LIVE', 'FULL_STRUCTURED', 'CANDIDATE', 0, 1, 'NONE', 'fp', 'e1', 5)",
+            )
+        }
+        val migrated = helper.runMigrationsAndValidate(name, 4, true, QuietInboxDatabase.MIGRATION_3_4)
+        migrated.query("SELECT reason, startEpochMs, packageName FROM gap_interval").use { c ->
+            c.moveToFirst() shouldBe true
+            c.getString(0) shouldBe "LISTENER_DISCONNECTED"
+            c.getLong(1) shouldBe 10L
+            // A gap that predates the column is process-wide as far as anyone knows: null, not "".
+            c.isNull(2) shouldBe true
+        }
+        migrated.query("SELECT body, fingerprint, truncationFlags FROM message").use { c ->
+            c.moveToFirst() shouldBe true
+            c.getString(0) shouldBe "body"
+            c.getString(1) shouldBe "fp"
+            c.isNull(2) shouldBe true
+        }
+        migrated.execSQL("INSERT INTO gap_interval (startEpochMs, endEpochMs, reason, precision, createdAtEpochMs, packageName) VALUES (40, NULL, 'SOURCE_PAUSED_BY_USER', 'EXACT', 40, 'pkg')")
+        migrated.close()
+    }
 }

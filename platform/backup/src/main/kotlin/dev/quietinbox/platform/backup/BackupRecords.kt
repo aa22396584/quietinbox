@@ -73,6 +73,13 @@ sealed interface BackupRecord {
         val fingerprint: String,
         val sortKey: Long,
         val expiresAtEpochMs: Long?,
+        /**
+         * Appended, and defaulted, on purpose: an older reader ignores it (`ignoreUnknownKeys`) and
+         * a newer reader restoring an older file gets null. A new field anywhere but the end would
+         * also have silently shifted every argument at the one construction site that was
+         * positional — that site is named now.
+         */
+        val truncationFlags: String? = null,
     ) : BackupRecord
 
     @Serializable

@@ -48,6 +48,26 @@ were wrong in a way that changed the fix.
   still led out, so nobody was trapped — but the only visible exit was gone. The two decisions are
   now separate, and so are they in `tools/demo-screenshots.sh`, which had inherited the same
   assumption.
+- **A notification that carried more messages than the snapshot may hold lost the oldest ones
+  silently.** They were discarded before parsing, the ingest that followed reported a clean commit,
+  and nothing anywhere said content had existed and been lost — a gap hidden inside a success, in an
+  app whose first rule is that gaps are shown. It is recorded as a gap now, before the parse result
+  can short-circuit it: when the parse then yields nothing the loss is total, and that case used to
+  be filed merely as "skipped".
+  Making that possible needed a flag split first. `TruncationFlag.MESSAGES` was raised by two
+  different losses in the same function — whole messages discarded, and a kept message whose text
+  was shortened — so a gap keyed on it would have manufactured gaps that never happened.
+- **A message whose body was shortened was shown as if it were complete.** The truncation was
+  computed at capture and thrown away; it is stored per message now and the bubble says so.
+- **Switching a source off, or pausing it, recorded nothing.** Events dropped for it landed in
+  `droppedAfterRevoke`, one counter that also holds a revoked permission, a rotated generation and a
+  maintenance run — so the one cause the user chose looked exactly like three they did not, and the
+  window itself was never recorded. Each now opens a gap of its own that names the source, and
+  closes it again on re-enable or resume. Closing is scoped to that source: ending one app's pause
+  no longer ends another's.
+- Gaps can say which source they belong to. Most cannot and must not: of the seven places that
+  record one, five are process-wide. None can ever name a conversation — identity is resolved during
+  the ingest that did not happen — so there is deliberately no conversation column.
 - **Search called its first page a total.** The screen asked for 100 hits and rendered "%d results",
   so a query matching five thousand messages said "100 results" — the repository's own kdoc admitted
   it showed the first page only. It now says "Newest 100 shown; there may be more" while a cursor
@@ -127,6 +147,13 @@ were wrong in a way that changed the fix.
   which attributes the silence to the other person in the same way, and is now 安静率. The word also reached the live Play store description.
 
 ### Changed
+- Database schema 3 → 4: two additive nullable columns, `gap_interval.packageName` and
+  `message.truncationFlags`, with `MIGRATION_3_4`, an exported `schemas/4.json` and a migration test
+  that asserts existing rows survive with both columns null. The backup format gained the same field,
+  appended and defaulted so an older reader ignores it and a newer reader restoring an older file
+  gets null — and the one place that built a backup record positionally now names its arguments,
+  because a field inserted anywhere but the end would have shifted every argument after it with no
+  compile error.
 - CI's instrumented lane and every documented device-test command now include
   `:feature:conversation:connectedDebugAndroidTest`, and bind `ANDROID_SERIAL` —
   `connectedDebugAndroidTest` otherwise runs on every attached device. `CLAUDE.md` had also been

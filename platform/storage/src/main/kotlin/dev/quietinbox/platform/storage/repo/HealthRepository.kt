@@ -49,8 +49,9 @@ class HealthRepository @Inject constructor(
 
     suspend fun endSession(id: Long, now: Long?, reason: String) = holder.db().healthDao().endSession(id, now, reason)
 
-    suspend fun openGap(startEpochMs: Long?, reason: GapReason, precision: GapPrecision, now: Long): Long =
-        holder.db().healthDao().insertGap(GapIntervalEntity(startEpochMs = startEpochMs, endEpochMs = null, reason = reason.name, precision = precision.name, createdAtEpochMs = now))
+    /** [packageName] only when the gap really belongs to one source; null means process-wide. */
+    suspend fun openGap(startEpochMs: Long?, reason: GapReason, precision: GapPrecision, now: Long, packageName: String? = null): Long =
+        holder.db().healthDao().insertGap(GapIntervalEntity(startEpochMs = startEpochMs, endEpochMs = null, reason = reason.name, precision = precision.name, createdAtEpochMs = now, packageName = packageName))
 
     /** Closes the open gaps with the given reasons only, so a pause gap survives a reconnect and vice versa. */
     suspend fun closeOpenGaps(endEpochMs: Long?, vararg reasons: GapReason) {
@@ -58,8 +59,16 @@ class HealthRepository @Inject constructor(
         for (gap in db.healthDao().openGaps(reasons.map { it.name })) db.healthDao().closeGap(gap.id, endEpochMs)
     }
 
-    suspend fun recordGap(startEpochMs: Long?, endEpochMs: Long?, reason: GapReason, precision: GapPrecision, now: Long) {
-        holder.db().healthDao().insertGap(GapIntervalEntity(startEpochMs = startEpochMs, endEpochMs = endEpochMs, reason = reason.name, precision = precision.name, createdAtEpochMs = now))
+    /** Closes the open gaps of one source only, so disabling app A never closes app B's gap. */
+    suspend fun closeOpenGapsForSource(endEpochMs: Long?, packageName: String, vararg reasons: GapReason) {
+        val db = holder.db()
+        for (gap in db.healthDao().openGaps(reasons.map { it.name })) {
+            if (gap.packageName == packageName) db.healthDao().closeGap(gap.id, endEpochMs)
+        }
+    }
+
+    suspend fun recordGap(startEpochMs: Long?, endEpochMs: Long?, reason: GapReason, precision: GapPrecision, now: Long, packageName: String? = null) {
+        holder.db().healthDao().insertGap(GapIntervalEntity(startEpochMs = startEpochMs, endEpochMs = endEpochMs, reason = reason.name, precision = precision.name, createdAtEpochMs = now, packageName = packageName))
     }
 
     suspend fun diagnostic(code: String, detail: String? = null, packageName: String? = null, now: Long) {

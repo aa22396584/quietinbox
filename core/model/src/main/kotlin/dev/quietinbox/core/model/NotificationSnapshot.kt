@@ -38,7 +38,32 @@ data class BoundedText(
 enum class NotificationTemplate { MESSAGING, BIG_TEXT, INBOX, BIG_PICTURE, MEDIA, CALL, BASE, UNKNOWN }
 
 @Serializable
-enum class TruncationFlag { TITLE, TEXT, BIG_TEXT, LINES, MESSAGES, HISTORIC_MESSAGES, ACTIONS, EXTRAS, URI }
+/**
+ * What had to be cut to fit the snapshot inside [Limits].
+ *
+ * `MESSAGES` and `MESSAGES_DROPPED` are deliberately separate, and so are their historic twins.
+ * They used to be one flag raised by two different losses in the same function — a kept message
+ * whose text was shortened, and whole messages discarded because the batch exceeded
+ * [Limits.MAX_MESSAGES]. Only the second is content the vault never sees, so only the second may
+ * become a gap; conflating them would have manufactured gaps that never happened.
+ */
+enum class TruncationFlag {
+    TITLE,
+    TEXT,
+    BIG_TEXT,
+    LINES,
+
+    /** A message was kept, but its text was shortened. */
+    MESSAGES,
+
+    /** Whole messages were discarded from this batch: content nothing downstream will ever see. */
+    MESSAGES_DROPPED,
+    HISTORIC_MESSAGES,
+    HISTORIC_MESSAGES_DROPPED,
+    ACTIONS,
+    EXTRAS,
+    URI,
+}
 
 /** One entry of a `MessagingStyle` notification, reduced to allow-listed fields. */
 @Serializable

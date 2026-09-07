@@ -6,6 +6,7 @@ import android.service.notification.StatusBarNotification
 import dev.quietinbox.core.model.CaptureOrigin
 import dev.quietinbox.core.model.GapPrecision
 import dev.quietinbox.core.model.GapReason
+import dev.quietinbox.core.model.TruncationFlag
 import dev.quietinbox.core.model.ListenerState
 import dev.quietinbox.core.model.NotificationSnapshot
 import dev.quietinbox.core.model.SourceConfiguration
@@ -97,6 +98,17 @@ class CaptureCoordinatorTest : FunSpec({
                 packageName = pkg,
                 eventId = eventId,
                 origin = origin,
+            ),
+            null,
+        )
+
+    /** Same as [captured], with the snapshot declaring what it had to cut. */
+    fun capturedWithTruncation(eventId: String, truncated: Set<TruncationFlag>) =
+        CapturedNotification(
+            Fixtures.snapshot(
+                shape = Fixtures.base(title = null, text = null).copy(truncated = truncated),
+                packageName = ENABLED_PKG,
+                eventId = eventId,
             ),
             null,
         )
@@ -598,7 +610,9 @@ class CaptureCoordinatorTest : FunSpec({
         coordinator.offerCaptured(captured("evt-ok"))
 
         awaitUntil { h.journaled shouldBe listOf("evt-busy", "evt-ok") }
-        coVerify(timeout = 5_000, exactly = 1) { h.health.recordGap(any(), any(), GapReason.UNKNOWN, GapPrecision.EXACT, any()) }
+        // The gap names the source it belongs to: this one is not process-wide, and "dropped
+        // somewhere" was never a useful thing to tell a bug report.
+        coVerify(timeout = 5_000, exactly = 1) { h.health.recordGap(any(), any(), GapReason.UNKNOWN, GapPrecision.EXACT, any(), ENABLED_PKG) }
         coVerify(timeout = 5_000, exactly = 1) { h.ingest.diagnostic("JOURNAL_FAILED", "IllegalStateException", ENABLED_PKG, any()) }
         coVerify(exactly = 0) { h.ingest.markJournalRetryable("evt-busy", any()) }
     }
@@ -897,5 +911,70 @@ class CaptureCoordinatorTest : FunSpec({
         awaitUntil { bitmaps.size shouldBe 9 }
         // Copies are launched in order but not started in order: assert the bound, not the index.
         bitmaps.count { it == null } shouldBe 1
+    }
+
+    test("switching a source off opens a gap that names it, and switching it back on closes it") {
+        val h = Harness()
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+
+        coordinator.setSourceEnabled(ENABLED_PKG, false)
+
+        // Its own reason and its own source. Before this the only trace was `droppedAfterRevoke`,
+        // one counter that also holds a revoked permission, a rotated generation and maintenance —
+        // so the one cause the user chose was indistinguishable from three they did not.
+        coVerify(timeout = 5_000, exactly = 1) {
+            h.health.openGap(any(), GapReason.SOURCE_DISABLED_BY_USER, GapPrecision.EXACT, any(), ENABLED_PKG)
+        }
+
+        coordinator.setSourceEnabled(ENABLED_PKG, true)
+        coVerify(timeout = 5_000, exactly = 1) {
+            h.health.closeOpenGapsForSource(any(), ENABLED_PKG, GapReason.SOURCE_DISABLED_BY_USER)
+        }
+    }
+
+    test("pausing one source never closes another source's gap") {
+        val h = Harness()
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+
+        coordinator.setSourcePaused(ENABLED_PKG, true)
+        coVerify(timeout = 5_000, exactly = 1) {
+            h.health.openGap(any(), GapReason.SOURCE_PAUSED_BY_USER, GapPrecision.EXACT, any(), ENABLED_PKG)
+        }
+
+        coordinator.setSourcePaused(ENABLED_PKG, false)
+        // Scoped to the package: a global close would have ended an unrelated source's gap too.
+        coVerify(timeout = 5_000, exactly = 1) {
+            h.health.closeOpenGapsForSource(any(), ENABLED_PKG, GapReason.SOURCE_PAUSED_BY_USER)
+        }
+        coVerify(exactly = 0) { h.health.closeOpenGaps(any(), GapReason.SOURCE_PAUSED_BY_USER) }
+    }
+
+    test("messages dropped before parsing are a gap, even though the ingest that followed succeeded") {
+        val h = Harness()
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+
+        // The notification carried more messages than the snapshot may hold. The commit afterwards
+        // is a perfectly good one, so nothing else would ever say that content existed and was lost.
+        coordinator.offerCaptured(capturedWithTruncation("evt-drop", setOf(TruncationFlag.MESSAGES_DROPPED)))
+
+        coVerify(timeout = 5_000, exactly = 1) {
+            h.health.recordGap(any(), any(), GapReason.MESSAGES_DROPPED, GapPrecision.BOUNDED, any(), ENABLED_PKG)
+        }
+    }
+
+    test("a message whose text was merely shortened is not a gap") {
+        val h = Harness()
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+
+        // The negative control for the test above: the two losses shared one flag until this
+        // release, so a shortened body would have manufactured a gap that never happened.
+        coordinator.offerCaptured(capturedWithTruncation("evt-short", setOf(TruncationFlag.MESSAGES, TruncationFlag.BIG_TEXT)))
+
+        awaitUntil { coordinator.status.value.acceptedCount shouldBe 1L }
+        stillHolds { coVerify(exactly = 0) { h.health.recordGap(any(), any(), GapReason.MESSAGES_DROPPED, any(), any(), any()) } }
     }
 })

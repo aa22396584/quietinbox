@@ -49,7 +49,7 @@ abstract class QuietInboxDatabase : RoomDatabase() {
     abstract fun demoDao(): DemoDao
 
     companion object {
-        const val VERSION = 3
+        const val VERSION = 4
         const val FILE_NAME = "quietinbox.vault"
 
         /**
@@ -95,6 +95,25 @@ abstract class QuietInboxDatabase : RoomDatabase() {
             }
         }
 
-        val MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3)
+        /**
+         * Two additive nullable columns, no rewrite of any row.
+         *
+         * `gap_interval.packageName` lets a gap say which source it belongs to — the disable and
+         * pause gaps this release adds, and the two drop sites that know a package. It deliberately
+         * has no conversation column: of the seven places that record a gap, five are process-wide,
+         * and none can know a conversation, because identity is resolved during the ingest that did
+         * not happen.
+         *
+         * `message.truncationFlags` records what the snapshot had to cut, so a body that was
+         * shortened is no longer displayed as if it were complete.
+         */
+        val MIGRATION_3_4: Migration = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE gap_interval ADD COLUMN packageName TEXT")
+                db.execSQL("ALTER TABLE message ADD COLUMN truncationFlags TEXT")
+            }
+        }
+
+        val MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
     }
 }

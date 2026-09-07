@@ -94,6 +94,7 @@
     <string name="conv_time_captured">キャプチャ時刻</string>
     <string name="conv_revision">編集 ×%1$d</string>
     <string name="conv_ambiguous_tag">重複の可能性</string>
+    <string name="conv_truncated">本文が短縮されました</string>
     <string name="conv_preview_restricted">プレビュー制限</string>
     <string name="conv_summary_only">要約のみ</string>
     <string name="conv_media_pending">メディアをコピー中</string>
@@ -206,6 +207,9 @@
     <string name="gap_reason_first_unlock">初回ロック解除前</string>
     <string name="gap_reason_maintenance">リセットまたは復元の実行中</string>
     <string name="gap_reason_cold_start">ソース一覧の読み込み前</string>
+    <string name="gap_reason_source_disabled">このソースをオフにしました</string>
+    <string name="gap_reason_source_paused">このソースを一時停止しました</string>
+    <string name="gap_reason_messages_dropped">通知に読み切れない数のメッセージが入っていました</string>
     <string name="gap_reason_unknown">不明</string>
     <string name="health_diagnostics_title">ローカル診断（過去 7 日間）</string>
     <string name="health_diagnostics_empty">診断イベントはありません。何もアップロードされることはありません。</string>

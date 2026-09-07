@@ -94,7 +94,7 @@
     <string name="conv_time_captured">キャプチャ時刻</string>
     <string name="conv_revision">編集 ×%1$d</string>
     <string name="conv_ambiguous_tag">重複の可能性</string>
-    <string name="conv_truncated">本文が短縮されました</string>
+    <string name="conv_truncated">通知で短縮された</string>
     <string name="conv_preview_restricted">プレビュー制限</string>
     <string name="conv_summary_only">要約のみ</string>
     <string name="conv_media_pending">メディアをコピー中</string>

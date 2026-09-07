@@ -23,6 +23,8 @@ import dev.quietinbox.platform.storage.db.ConversationEntity
 import dev.quietinbox.platform.storage.db.DatabaseHolder
 import dev.quietinbox.platform.storage.db.DiagnosticEventEntity
 import dev.quietinbox.platform.storage.db.EventJournalEntity
+import dev.quietinbox.platform.storage.db.LOSS_SETTLED
+import dev.quietinbox.platform.storage.db.LOSS_UNSETTLED
 import dev.quietinbox.platform.storage.db.MessageEntity
 import dev.quietinbox.platform.storage.db.MessageRevisionEntity
 import dev.quietinbox.platform.storage.db.ObservationLinkEntity
@@ -111,7 +113,7 @@ class IngestRepository @Inject constructor(
             packageName = snapshot.source.packageName,
             // Set with the insert, so the upgrade path can tell a row this release already
             // accounted for from one carried over from a release that did not.
-            lossRecorded = lossOnAccept != null,
+            lossRecorded = if (lossOnAccept != null) LOSS_SETTLED else LOSS_UNSETTLED,
         )
         return db.withTransaction {
             val accepted = db.journalDao().insert(row) != -1L
@@ -129,24 +131,41 @@ class IngestRepository @Inject constructor(
      * [writeGap] runs only for the caller that wins the claim, and in the same transaction as the
      * claim, so the two cannot come apart: a row whose gap write fails keeps its claim unspent and
      * is tried again by the next pass. Returns whether this call was the one that recorded it.
+     *
+     * A failure also defers the row — the rollback has already undone the claim, so the deferral is
+     * a write of its own afterwards — and then rethrows, because whether the *caller's* work may
+     * continue is the caller's decision: the replay leaves the event uncommitted, and a source
+     * policy change aborts, because a policy change that discarded the row would destroy the
+     * evidence the deferral exists to keep. If the deferral cannot be written either, the row stays
+     * in the candidate set and [isReplayCandidate] says so; nothing here pretends otherwise.
      */
     suspend fun claimEventLoss(eventId: String, writeGap: suspend () -> Unit): Boolean {
         val db = holder.db()
-        return db.withTransaction {
-            val won = db.journalDao().claimLoss(eventId) == 1
-            if (won) writeGap()
-            won
+        try {
+            return db.withTransaction {
+                val won = db.journalDao().claimLoss(eventId) == 1
+                if (won) writeGap()
+                won
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            runCatching { db.journalDao().deferLoss(eventId) }
+            throw e
         }
     }
 
     /**
-     * Pending rows of one source, decoded. Used before those rows are discarded outright: whatever
-     * loss they arrived with is settled while the payload still says what it was.
+     * Puts every deferred settlement back into the replay's candidate set, returning how many.
      *
-     * A row that cannot be decoded is left alone rather than failed: this runs inside a source
-     * policy transaction that is about to discard it anyway, and the replay path is what owns the
-     * decision to mark a payload unreadable.
+     * Called at the head of the two passes that read pending rows. A deferral is not a verdict: it
+     * says only that the gap table refused the write at the time, and this is what makes the row
+     * try again rather than wait for a user to change a source.
      */
+    suspend fun resumeDeferredSettlements(): Int = holder.db().journalDao().resumeDeferredLosses()
+
+    /** Whether the replay would still pick this row up — the honest test for "did it move on". */
+    suspend fun isReplayCandidate(eventId: String): Boolean = holder.db().journalDao().isReplayCandidate(eventId) > 0
+
     /**
      * One page of a source's pending rows, decoded. Used before those rows are discarded outright:
      * whatever loss they arrived with is settled while the payload still says what it was.
@@ -502,5 +521,11 @@ data class JournalCursor(val receivedAtEpochMs: Long, val eventId: String) {
     }
 }
 
-/** A page of decodable pending snapshots, and where to continue — null when the page was the last. */
+/**
+ * A page of decodable pending snapshots, and where to continue.
+ *
+ * A non-null [next] means "ask again", not "there is another row": a walk whose last page happens
+ * to be exactly `limit` long has already returned everything, and only the empty page after it says
+ * so. Null is the confirmed end (round 36 Codex M3).
+ */
 data class JournalPage(val snapshots: List<NotificationSnapshot>, val next: JournalCursor?)

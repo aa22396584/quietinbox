@@ -94,7 +94,7 @@
     <string name="conv_time_captured">捕获时间</string>
     <string name="conv_revision">已修改 ×%1$d</string>
     <string name="conv_ambiguous_tag">可能重复</string>
-    <string name="conv_truncated">文字被截短</string>
+    <string name="conv_truncated">曾被通知截短</string>
     <string name="conv_preview_restricted">预览受限</string>
     <string name="conv_summary_only">仅摘要</string>
     <string name="conv_media_pending">媒体复制中</string>

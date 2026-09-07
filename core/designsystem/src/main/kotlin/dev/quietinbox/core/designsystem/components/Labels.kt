@@ -99,7 +99,13 @@ fun diagnosticLabel(code: String): String = when (code) {
     else -> if (code.startsWith("SKIPPED_")) stringResource(R.string.diag_skipped) else code
 }
 
-/** What a message had to give up before it was stored, or null when it kept everything. */
+/**
+ * That a notification carrying this message arrived with its text shortened — evidence about the
+ * observations, not about the row. The flag is set-only: a later, complete observation of the same
+ * message does not clear it, because "this was seen shortened once" stays true. The label says
+ * *in a notification* for that reason; read as a statement about the text below it, it would claim
+ * something the flag does not mean (round 36 Codex M2). Null when nothing was ever shortened.
+ */
 @Composable
 fun truncationLabel(bodyTruncated: Boolean): Labelled? =
     if (bodyTruncated) Labelled(stringResource(R.string.conv_truncated), Icons.Outlined.ContentCut, QualityColors.uncertain) else null

@@ -94,7 +94,7 @@
     <string name="conv_time_captured">캡처 시각</string>
     <string name="conv_revision">수정됨 ×%1$d</string>
     <string name="conv_ambiguous_tag">중복 가능성</string>
-    <string name="conv_truncated">본문이 잘렸습니다</string>
+    <string name="conv_truncated">알림에서 잘림</string>
     <string name="conv_preview_restricted">미리보기 제한됨</string>
     <string name="conv_summary_only">요약만</string>
     <string name="conv_media_pending">미디어 복사 중</string>

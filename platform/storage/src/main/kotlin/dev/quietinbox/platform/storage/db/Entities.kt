@@ -43,8 +43,33 @@ data class GapIntervalEntity(
     val packageName: String? = null,
 )
 
+/**
+ * `event_journal.lossRecorded`: whether the loss the event arrived with has reached the gap table.
+ *
+ * Three values rather than a flag because a settlement that *cannot* be written is neither of the
+ * other two: calling it unsettled leaves it at the head of every replay page for ever, and calling
+ * it settled throws away the only evidence of what was lost.
+ */
+const val LOSS_UNSETTLED = 0
+
+/** The gap is written; no later pass may write it again. */
+const val LOSS_SETTLED = 1
+
+/** The gap write failed; retried when one is next seen to succeed, evidence untouched meanwhile. */
+const val LOSS_DEFERRED = 2
+
 /** Durable, short-TTL copy of accepted input. Committed rows are pruned by retention. */
-@Entity(tableName = "event_journal", indices = [Index("state"), Index("expiresAtEpochMs")])
+@Entity(
+    tableName = "event_journal",
+    indices = [
+        Index("state"),
+        Index("expiresAtEpochMs"),
+        // The settle walk's whole predicate and its order, so a source with many pending rows is
+        // read by seeking to the cursor rather than by scanning every PENDING row again per page
+        // (round 36 Codex I2 measured the scan growing with the square of the row count).
+        Index("packageName", "state", "lossRecorded", "receivedAtEpochMs", "eventId"),
+    ],
+)
 data class EventJournalEntity(
     @PrimaryKey val eventId: String,
     val generation: String,
@@ -63,14 +88,23 @@ data class EventJournalEntity(
     /** Source package, so a disabled or removed source can discard its pending rows (schema v3). */
     val packageName: String? = null,
     /**
-     * True once this event's own loss — content the framework had already dropped when the
-     * notification reached us — has been written to the gap table (schema v4). Set in the same
-     * transaction as the insert for events accepted by this release, and claimed exactly once by
-     * the upgrade path for rows carried over from a release that recorded the loss nowhere. It is
-     * the idempotency boundary: the claim is a conditional update, so a replayed row cannot record
-     * the same loss a second time.
+     * How far this event's own loss — content the framework had already dropped when the
+     * notification reached us — has got towards the gap table (schema v4):
+     *
+     * - [LOSS_UNSETTLED]: nothing written yet. Every row a release up to 0.1.3 left pending is
+     *   here, because that release wrote the loss nowhere.
+     * - [LOSS_SETTLED]: written. Set in the same transaction as the insert for an event this
+     *   release accepts with a loss, and claimed exactly once for a carried-over row. It is the
+     *   idempotency boundary: the claim is a conditional update, so a replayed row cannot record
+     *   the same loss a second time.
+     * - [LOSS_DEFERRED]: the gap write failed, and the row is out of the replay's candidate set
+     *   until a gap write is seen to succeed. Without a state of its own such a row is either
+     *   charged for the failure (three tries file it FAILED and clear the payload — round 35) or
+     *   left at the head of every page for ever, starving the rows behind it (round 36 Codex I1).
+     *   The transition back to [LOSS_UNSETTLED] is what makes it a deferral rather than a verdict:
+     *   the payload and the evidence are untouched throughout.
      */
-    val lossRecorded: Boolean = false,
+    val lossRecorded: Int = LOSS_UNSETTLED,
 )
 
 /** Last visible window per notification stream (plan section 8: NotificationCheckpoint). */

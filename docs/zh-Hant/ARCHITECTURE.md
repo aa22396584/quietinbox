@@ -49,6 +49,18 @@ StatusBarNotification
 （schema v4）由一道條件式 UPDATE 認領，缺口寫在同一個 transaction 內，因此先到的那條路記錄它、之後任何一次
 都不會再記一次。只認領 payload 足以判定的情況：`LINES`，以及沒有任何倖存訊息自身被截短的 `MESSAGES`。
 
+這個欄位有三種值，因為金庫拒絕寫入的結清，既不是「已結清」也不只是「還沒結清」。把這次失敗算進事件的 commit
+額度，三次之後 payload 就被清空；把它留在 replay 的候選集合裡，它就佔住每一頁的開頭，數量夠多時後面的列全部
+餓死。被拒絕的結清因此進入**延後**狀態：仍是 `PENDING`，payload 與認領都沒有動過，暫時離開兩個讀取者，直到下
+一輪 pass 把它放回去——每一次 replay 與每一次結清走訪都會在讀取前這麼做。重試由「證據」觸發而不是由計時器：
+一個自身帶著損失而被接受的事件，剛剛才在它的接受交易裡寫成一個缺口，代表先前拒絕的那張表又收寫入了；沒有寫
+出缺口的接受不會觸發任何東西。
+
+兩個讀取者都有界、都分頁。結清走訪跑在來源 policy 交易內、持著 pipeline 鎖，代價由現場擷取承擔：它以
+`(receivedAtEpochMs, eventId)` 的 row-value 游標 seek 進
+`index_event_journal_packageName_state_lossRecorded_receivedAtEpochMs_eventId`，而不是每一頁都重讀並重新排序該
+來源所有的 PENDING 列。
+
 來源 policy（新增／啟用／暫停／移除）一律經由 `CaptureCoordinator`：金庫寫入與記憶體內的允許清單在 pipeline 鎖內
 一起更新，因此正在等鎖的事件會以新 policy 被圍籬，不會用舊的。停用或移除來源會把該來源的 PENDING journal 全部標為丟棄。
 

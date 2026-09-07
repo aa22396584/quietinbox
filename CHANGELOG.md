@@ -98,6 +98,20 @@ were wrong in a way that changed the fix.
   by a conditional update that writes the gap in the same transaction. A row replayed twenty times
   therefore lists one loss, and a claim whose gap cannot be written stays unspent for the next
   attempt rather than marking a record that does not exist.
+  That column has three values, not two, because a settlement that *cannot* be written is neither
+  "done" nor "not started yet" and both of those readings caused a defect of their own. Charging the
+  failure to the event's three commit attempts filed the row `FAILED` and cleared its payload,
+  losing the survivors and the record together. Leaving it merely unsettled kept the evidence but
+  left the row at the head of every replay page: two hundred rows whose gap writes keep failing then
+  starve the two hundred and first for ever, however often a replay runs. A refused settlement is
+  therefore *deferred* — out of the two passes that read pending rows, still `PENDING`, payload and
+  unspent claim untouched — and every such pass begins by putting deferred rows back, so the retry
+  costs each row one attempt per pass and no more. It is also not left waiting for the user: the
+  four things that trigger a replay are all a user or a lifecycle event, so a device that got its
+  disk space back could have waited days, and the retry is now armed by proof instead — an event
+  accepted *with* a loss wrote a gap in its acceptance transaction, which is exactly the table that
+  had refused. An acceptance that wrote no gap arms nothing, so a vault that keeps refusing cannot
+  turn a stream of events into a stream of replays.
   Three cases deliberately record nothing. `MESSAGES` beside a message that was itself shortened
   is undecidable — the batch may also have been over the limit — and a loss invented from evidence
   that does not support it is the same defect facing the other way. A carried-over payload that no
@@ -108,6 +122,16 @@ were wrong in a way that changed the fix.
   the same call round 33 made for the two columns already in that migration. A development vault
   that already ran the earlier 4 fails Room's identity-hash check and has to be cleared; that is a
   cost paid on a workbench, not on a user's phone.
+  Schema 4 also gains the index those reads need. Switching a source off settles its pending rows
+  before they are discarded, in pages, inside the policy transaction and under the pipeline lock —
+  so what it costs is paid by live capture. Without an index covering `(packageName, state,
+  lossRecorded, receivedAtEpochMs, eventId)` each page re-read every pending row of the source and
+  sorted the lot in a temporary B-tree, and the work grew with the square of the backlog: measured
+  over eight thousand rows, forty-one pages cost 3.8 million SQLite instructions against 128,000
+  for one unpaged read. The cursor is now a row-value comparison, which SQLite turns into a seek
+  into that index — `SEARCH event_journal USING INDEX … (packageName=? AND state=? AND
+  lossRecorded=? AND (receivedAtEpochMs,eventId)>(?,?))`, with no temporary B-tree — and an
+  instrumented test asserts that query plan rather than a timing.
 - **An event the vault would not take at all is remembered until it can be recorded.** A journal
   insert that fails is recorded as a gap instead — but whatever stopped the insert does not stop at
   one statement, and a disk with no space left fails that gap too. Both writes failing left nothing
@@ -130,7 +154,11 @@ were wrong in a way that changed the fix.
 - **A message whose body was shortened was shown as if it were complete.** The truncation was
   computed at capture and thrown away at the parser boundary: each message's own `BoundedText`
   knows whether it was cut, and only its text was carried forward. It is stored per message now and
-  the bubble says so.
+  the bubble says so — as "shortened in a notification", in all five languages, because the flag is
+  historical and the label has to say so. It is set-only: a later, complete observation of the same
+  message does not clear it, since "this was seen shortened once" stays true. Worded as a statement
+  about the text underneath, the chip would have claimed the stored body is incomplete when the last
+  notification carrying it was whole.
   The first attempt stored the notification's flag set on every row it produced instead, which is
   the same defect one layer down: a batch of three messages in which only the second was cut marked
   all three, and a notification whose *title* was too long marked messages that had lost nothing at

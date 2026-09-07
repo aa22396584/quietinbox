@@ -199,6 +199,15 @@ class CaptureCoordinator @Inject constructor(
     @Volatile
     private var journalLossSince: Long? = null
 
+    /**
+     * Whether a replay left a row's settlement deferred, so that the next gap write seen to
+     * succeed can put it back. RAM only on purpose: the deferral itself is on disk, where every
+     * later pass finds it; this is only what saves the retry from waiting for a user to change a
+     * source (round 36 Codex I1).
+     */
+    @Volatile
+    private var deferredSettlements: Boolean = false
+
     @Volatile
     private var paused: Boolean = false
 
@@ -523,7 +532,27 @@ class CaptureCoordinator @Inject constructor(
             health.recordGap(since, now, GapReason.UNKNOWN, GapPrecision.BOUNDED, now)
             written = true
         }
-        if (written) journalLossSince = null
+        if (written) {
+            journalLossSince = null
+            retryDeferredSettlements()
+        }
+    }
+
+    /**
+     * A gap write has just succeeded, so rows whose settlement was deferred may try again.
+     *
+     * The trigger is proof rather than a timer: a deferral means the gap table refused the write,
+     * and the one thing worth waiting for is another write it did take. A timer would retry into a
+     * vault still refusing everything, and the retry itself is what re-defers the row. At most one
+     * replay per deferral — the flag is cleared before the launch and set again only by a pass that
+     * defers something — so a vault that keeps refusing cannot turn a stream of events into a
+     * stream of replays. Launched rather than awaited because the caller holds `pipelineMutex`,
+     * which the replay takes once per event.
+     */
+    private fun retryDeferredSettlements() {
+        if (!deferredSettlements) return
+        deferredSettlements = false
+        scope.launch { replayJournal() }
     }
 
     // ---- cold start (QI-CAPTURE-013) ---------------------------------------------------------
@@ -926,6 +955,10 @@ class CaptureCoordinator @Inject constructor(
                     // long as the user changed no source — capture working normally the whole
                     // time — and a process death in that window lost it for good (round 35 agy I1).
                     settleUnrecordedJournalLoss(System.currentTimeMillis())
+                    // The acceptance transaction wrote a gap, which is the proof a deferred
+                    // settlement is waiting for. An acceptance without one proves only that the
+                    // journal takes writes, and the table that refused is the gap table.
+                    if (lossOnAccept != null) retryDeferredSettlements()
                     _status.update { it.copy(acceptedCount = it.acceptedCount + 1) }
                     bitmapHandedOver = processJournaled(snapshot, item.generation, item.captured.bitmap)
                 } catch (e: VaultUnavailableException) {
@@ -1088,6 +1121,11 @@ class CaptureCoordinator @Inject constructor(
         maintenance.work {
             withContext(Dispatchers.Default) {
                 guarded {
+                    // A deferral says only that the gap table refused a write at the time, so every
+                    // pass begins by putting those rows back: this is the one place that decides
+                    // whether the refusal still holds. A row that fails again defers itself again
+                    // inside this same pass, so the retry costs it one attempt and no more.
+                    guarded { ingest.resumeDeferredSettlements() }
                     // Drain in batches until nothing is pending (a long lock-out can leave > 200 rows).
                     var rounds = 0
                     var progressed = true
@@ -1123,7 +1161,20 @@ class CaptureCoordinator @Inject constructor(
                                 // carried-over row whose loss cannot be written is not committed.
                                 val settled = runCatching { recordCarriedOverLoss(replay) }
                                 settled.exceptionOrNull()?.let { if (it is CancellationException) throw it }
-                                if (settled.isFailure) return@withLock
+                                if (settled.isFailure) {
+                                    // The repository deferred the row, which frees its place on the
+                                    // next page: 200 rows that cannot settle used to sit at the head
+                                    // of every page and starve row 201 for ever (round 36 Codex I1).
+                                    // Progress is claimed only if the row really left the candidate
+                                    // set — a vault that refused the deferral too still holds its
+                                    // place, and saying otherwise would re-read the same page until
+                                    // the round limit.
+                                    if (!ingest.isReplayCandidate(snapshot.eventId)) {
+                                        deferredSettlements = true
+                                        progressed = true
+                                    }
+                                    return@withLock
+                                }
                                 try {
                                     processJournaled(replay, generation, null)
                                 } catch (e: Exception) {
@@ -1175,9 +1226,15 @@ class CaptureCoordinator @Inject constructor(
      * Paged, because a source paused for a long time accumulates pending rows and this holds the
      * pipeline lock while it decodes them: live capture waits for as long as it takes. That is the
      * cost of the disable the user just asked for, and it is bounded per page rather than by the
-     * size of the backlog (round 35 subagent I2).
+     * size of the backlog (round 35 subagent I2). The pages seek to the cursor in an index rather
+     * than rescanning the source's pending rows once per page (round 36 Codex I2).
      */
     private suspend fun settleCarriedOverLosses(packageName: String) {
+        // A row the replay deferred is not in the page query's set, and the discard about to run
+        // would clear its payload: put it back first, or the one path that still holds the evidence
+        // would be the one path that skipped it. Inside the policy transaction, so a settle that
+        // then fails takes the resume back with everything else.
+        ingest.resumeDeferredSettlements()
         var after = JournalCursor.START
         while (true) {
             val page = ingest.pendingJournalForPackage(packageName, after)

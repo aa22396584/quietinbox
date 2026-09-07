@@ -6,7 +6,14 @@ import dev.quietinbox.core.model.GapPrecision
 import dev.quietinbox.core.model.GapReason
 import dev.quietinbox.core.testing.Fixtures
 import dev.quietinbox.platform.crypto.KeyMaterial
+import dev.quietinbox.platform.storage.db.CheckpointEntity
+import dev.quietinbox.platform.storage.db.ConversationEntity
 import dev.quietinbox.platform.storage.db.DatabaseHolder
+import dev.quietinbox.platform.storage.db.DeletionSuppressionEntity
+import dev.quietinbox.platform.storage.db.DiagnosticEventEntity
+import dev.quietinbox.platform.storage.db.MediaBlobEntity
+import dev.quietinbox.platform.storage.db.MessageEntity
+import dev.quietinbox.platform.storage.db.SummaryObservationEntity
 import dev.quietinbox.platform.storage.db.VaultState
 import dev.quietinbox.platform.storage.repo.HealthRepository
 import dev.quietinbox.platform.storage.repo.IngestRepository
@@ -87,6 +94,76 @@ class SourcePolicyTransactionTest {
     private suspend fun recordLoss() {
         health.recordGap(1_000, 2_000, GapReason.MESSAGES_DROPPED, GapPrecision.BOUNDED, 2_000, pkg)
     }
+
+    /**
+     * Everything `remove(deleteData = true)` deletes, so a rollback has something to be a rollback
+     * *of*. The two failure controls that existed built a source, a pending row and a gap only, and
+     * threw inside the callback — before the graph deletions had started — so "the whole graph
+     * stays in place" was a claim about rows the test never created (round 36 Codex I4).
+     */
+    private suspend fun seedGraph(): String {
+        val db = holder.db()
+        val conversationId = db.conversationDao().insert(
+            ConversationEntity(
+                packageName = pkg, profileKey = "$pkg|", accountKey = null, identityKey = "id-1",
+                identityConfidence = "EXACT", title = "Group", isGroup = true, pinned = false, archived = false,
+                createdAtEpochMs = 1_000, lastActivityEpochMs = 1_000, lastViewedEpochMs = null,
+                messageCount = 1, ambiguousCount = 0, summaryOnlyCount = 0,
+                lastMessagePreview = "hi", lastSenderName = "Ana",
+            ),
+        )
+        val messageId = db.messageDao().insert(
+            MessageEntity(
+                conversationId = conversationId, sourceMessageId = null, senderName = "Ana", senderKey = "ana",
+                isSelf = false, body = "hi", kind = "TEXT", sourceTimestampEpochMs = 1_000,
+                timestampQuality = "SOURCE", observedAtEpochMs = 1_000, postedAtEpochMs = 1_000,
+                origin = "LIVE", contentStatus = "COMPLETE", dedupState = "UNIQUE", revisionCount = 0,
+                observationCount = 1, mediaState = "NONE", mediaBlobId = null, mediaUri = null,
+                mediaMimeType = null, fingerprint = "fp-1", eventId = "evt-graph", sortKey = 1_000,
+                expiresAtEpochMs = null,
+            ),
+        )
+        val fileName = "graph-blob.bin"
+        MediaDirectory(context).file(fileName).also { it.parentFile?.mkdirs() }.writeBytes(byteArrayOf(1, 2, 3))
+        db.mediaDao().insert(
+            MediaBlobEntity(
+                messageId = messageId, fileName = fileName, thumbFileName = null, mimeType = "image/png",
+                byteCount = 3, width = 1, height = 1, state = "READY", failureReason = null, createdAtEpochMs = 1_000,
+            ),
+        )
+        db.checkpointDao().upsert(
+            CheckpointEntity(
+                streamKey = "$pkg|stream", packageName = pkg, notificationKey = "key", windowJson = "[]",
+                closed = false, parserId = "standard", parserVersion = "1", generation = "gen",
+                updatedAtEpochMs = 1_000,
+            ),
+        )
+        db.suppressionDao().upsert(DeletionSuppressionEntity("$pkg|scope", "fp-1", 9_000_000))
+        db.healthDao().insertSummary(
+            SummaryObservationEntity(packageName = pkg, observedAtEpochMs = 1_000, messageCount = 5, conversationCount = 1, eventId = "evt-sum"),
+        )
+        db.diagnosticsDao().insert(DiagnosticEventEntity(code = "TEST", detail = null, packageName = pkg, atEpochMs = 1_000))
+        return fileName
+    }
+
+    private suspend fun count(sql: String, vararg args: Any): Int =
+        holder.db().openHelper.writableDatabase.query(sql, args).use { it.moveToFirst(); it.getInt(0) }
+
+    /**
+     * One count per table `remove(deleteData = true)` touches, read straight from the vault rather
+     * than through DAOs written for the purpose: the assertion is about rows surviving, and a
+     * production query added only to let a test look is one more thing to keep true.
+     */
+    private suspend fun graphCounts(): List<Int> = listOf(
+        count("SELECT COUNT(*) FROM conversation WHERE packageName = ?", pkg),
+        count("SELECT COUNT(*) FROM message WHERE conversationId IN (SELECT id FROM conversation WHERE packageName = ?)", pkg),
+        count("SELECT COUNT(*) FROM media_blob WHERE messageId IN (SELECT m.id FROM message m JOIN conversation c ON m.conversationId = c.id WHERE c.packageName = ?)", pkg),
+        count("SELECT COUNT(*) FROM notification_checkpoint WHERE packageName = ?", pkg),
+        count("SELECT COUNT(*) FROM deletion_suppression WHERE scopeKey LIKE ?", "$pkg|%"),
+        count("SELECT COUNT(*) FROM summary_observation WHERE packageName = ?", pkg),
+        count("SELECT COUNT(*) FROM local_diagnostic_event WHERE packageName = ?", pkg),
+        count("SELECT COUNT(*) FROM source_configuration WHERE packageName = ?", pkg),
+    )
 
     @Test
     fun disablingWritesTheFlagAndItsGapTogether() = runBlocking {
@@ -316,6 +393,76 @@ class SourcePolicyTransactionTest {
         val open = openGaps().filter { it.packageName == pkg }
         open.size shouldBe 1
         open.single().endEpochMs shouldBe null
+        Unit
+    }
+
+    /**
+     * Round 36, Codex I4: the rollback of the *graph*, with the failure landing in the middle of it.
+     *
+     * The two controls above throw inside the callback, which runs before a single graph deletion
+     * has started — so they show that the callback's own writes roll back, and nothing more. Here
+     * the callback succeeds and the removal gets as far as the diagnostics delete, the last of the
+     * seven, before a trigger aborts it. Everything the six earlier statements had already deleted
+     * inside the transaction has to come back, and the media file — deleted after the transaction,
+     * from the list the transaction returned — must never have been touched at all.
+     */
+    @Test
+    fun aRemoveThatFailsPartWayThroughTheGraphRollsAllOfItBack() = runBlocking {
+        ready()
+        addSource()
+        journalCarriedOver("evt-graph-rollback")
+        val fileName = seedGraph()
+        val before = graphCounts()
+        before shouldBe listOf(1, 1, 1, 1, 1, 1, 1, 1)
+
+        val db = holder.db().openHelper.writableDatabase
+        db.execSQL(
+            "CREATE TRIGGER fail_diagnostics_delete BEFORE DELETE ON local_diagnostic_event " +
+                "BEGIN SELECT RAISE(ABORT, 'the diagnostics delete failed'); END",
+        )
+        try {
+            runCatching { sources.remove(pkg, deleteData = true) { recordLoss() } }.isFailure shouldBe true
+        } finally {
+            db.execSQL("DROP TRIGGER IF EXISTS fail_diagnostics_delete")
+        }
+
+        // Every row is back, including the ones six statements had already deleted.
+        graphCounts() shouldBe before
+        // And the parts the earlier controls covered, still: the journal row with its payload, and
+        // the callback's own gap.
+        ingest.isJournalPending("evt-graph-rollback") shouldBe true
+        allGaps().count { it.reason == GapReason.MESSAGES_DROPPED.name } shouldBe 0
+        // The file is the one thing outside the transaction. It is deleted only from the list a
+        // committed transaction returns, so a failure must leave it where it is — a deleted file
+        // whose row came back is the shape that shows an empty bubble for ever.
+        MediaDirectory(context).file(fileName).exists() shouldBe true
+        Unit
+    }
+
+    /**
+     * The `deleteData = false` control, made discriminating.
+     *
+     * Its callback only threw, so moving the callback *before* the transaction changed nothing it
+     * asserted: the throw came first either way (round 36 Codex I4). Writing something observable
+     * before the throw is what tells the two apart — outside the transaction that write survives.
+     */
+    @Test
+    fun aRemoveWithoutDataRollsBackWhatItsCallbackHadAlreadyWritten() = runBlocking {
+        ready()
+        addSource()
+        journalCarriedOver("evt-remove-observable")
+
+        runCatching {
+            sources.remove(pkg, deleteData = false) {
+                recordLoss()
+                error("the gap close failed")
+            }
+        }.isFailure shouldBe true
+
+        // The gap the callback wrote before it threw is gone with everything else.
+        allGaps().count { it.reason == GapReason.MESSAGES_DROPPED.name } shouldBe 0
+        sources.get(pkg)!!.packageName shouldBe pkg
+        ingest.isJournalPending("evt-remove-observable") shouldBe true
         Unit
     }
 }

@@ -54,6 +54,21 @@ claimed by a conditional update that writes the gap in the same transaction, so 
 reaches the row first records it and no later pass records it again. Only what the payload settles
 is claimed: `LINES`, and `MESSAGES` with no surviving message of its own shortened.
 
+That column holds three values, because a settlement the vault refuses is neither settled nor
+merely unsettled. Charging the failure to the event's commit attempts destroys the payload after
+three tries; leaving the row in the replay's candidate set puts it at the head of every page, where
+enough of them starve everything behind. A refused settlement is *deferred* instead: still
+`PENDING`, payload and claim untouched, out of both readers until the pass that runs next puts it
+back — which every replay and every settle walk does before it reads. The retry is armed by proof
+rather than by a timer: an event accepted with a loss of its own has just written a gap, so the
+table that refused is taking writes again; an acceptance that wrote no gap arms nothing.
+
+Both readers are bounded and both are paged. The settle walk runs inside the source policy
+transaction, under the pipeline lock, so its cost is live capture's: it seeks to a
+`(receivedAtEpochMs, eventId)` row-value cursor inside
+`index_event_journal_packageName_state_lossRecorded_receivedAtEpochMs_eventId` rather than
+re-reading and re-sorting the source's pending rows once per page.
+
 Source policy (add / enable / pause / remove) goes through `CaptureCoordinator`: the vault write
 and the in-memory allow-list change under the pipeline lock, so an event waiting for the lock is
 fenced against the new policy, not the old one. Disabling or removing a source discards its

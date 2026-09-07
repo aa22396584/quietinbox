@@ -3,6 +3,8 @@ package dev.quietinbox.feature.conversation
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.test.platform.app.InstrumentationRegistry
+import dev.quietinbox.core.designsystem.R
 import dev.quietinbox.core.designsystem.theme.QuietInboxTheme
 import dev.quietinbox.core.model.CaptureOrigin
 import dev.quietinbox.core.model.ContentStatus
@@ -28,6 +30,10 @@ class MessageBubbleSemanticsTest {
     @get:Rule
     val rule = createComposeRule()
 
+    /** Read from resources, not hardcoded: the label is translated into all five catalogues. */
+    private val truncatedLabel: String =
+        InstrumentationRegistry.getInstrumentation().targetContext.getString(R.string.conv_truncated)
+
     private val message = Message(
         id = 1,
         conversationId = 1,
@@ -51,7 +57,7 @@ class MessageBubbleSemanticsTest {
         sortKey = 1_757_000_000_000,
     )
 
-    private fun show() = rule.setContent {
+    private fun show(message: Message = this.message) = rule.setContent {
         QuietInboxTheme {
             MessageBubble(
                 message = message,
@@ -90,6 +96,32 @@ class MessageBubbleSemanticsTest {
         // the merged match is the merge doing its job and not the two happening to be one composable.
         rule.onAllNodes(hasText(SENDER, substring = true) and hasText(BODY, substring = true), useUnmergedTree = true)
             .assertCountEquals(0)
+    }
+
+
+    /**
+     * The truncation chip, on a device, because the only thing that says a stored body is not the
+     * whole body is this one label: the bubble draws the shortened text exactly as it draws a
+     * complete one, so a chip that stopped rendering would be a silent loss of the honest-labels
+     * rule rather than a visible bug.
+     *
+     * The wording is checked too. The flag is historical — set-only, so a later complete
+     * observation of the same message does not clear it — and a label reading as a statement about
+     * the text underneath would claim something the flag does not mean (round 36 Codex M2).
+     */
+    @Test
+    fun aShortenedBodyIsLabelledAsShortenedInANotification() {
+        show(message.copy(bodyTruncated = true))
+        rule.onAllNodes(hasText(truncatedLabel, substring = true)).assertCountEquals(1)
+    }
+
+    @Test
+    fun aCompleteBodyCarriesNoTruncationLabel() {
+        // The negative control: the chip must come from the flag, not from the bubble always
+        // drawing it. A label on a complete message is the mirror defect — a loss invented from
+        // evidence that does not support it.
+        show(message.copy(bodyTruncated = false))
+        rule.onAllNodes(hasText(truncatedLabel, substring = true)).assertCountEquals(0)
     }
 
     private companion object {

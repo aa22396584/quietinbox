@@ -123,6 +123,11 @@ abstract class QuietInboxDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE gap_interval ADD COLUMN packageName TEXT")
                 db.execSQL("ALTER TABLE message ADD COLUMN truncationFlags TEXT")
                 db.execSQL("ALTER TABLE event_journal ADD COLUMN lossRecorded INTEGER NOT NULL DEFAULT 0")
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS " +
+                        "index_event_journal_packageName_state_lossRecorded_receivedAtEpochMs_eventId " +
+                        "ON event_journal (packageName, state, lossRecorded, receivedAtEpochMs, eventId)",
+                )
             }
         }
 

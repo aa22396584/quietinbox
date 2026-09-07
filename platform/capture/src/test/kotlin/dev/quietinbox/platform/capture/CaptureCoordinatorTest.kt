@@ -20,6 +20,7 @@ import dev.quietinbox.platform.storage.db.GapIntervalEntity
 import dev.quietinbox.platform.storage.repo.CommitOutcome
 import dev.quietinbox.platform.storage.repo.HealthRepository
 import dev.quietinbox.platform.storage.repo.IngestRepository
+import dev.quietinbox.platform.storage.repo.JournalCursor
 import dev.quietinbox.platform.storage.repo.JournalPage
 import dev.quietinbox.platform.storage.repo.SourceRepository
 import dev.quietinbox.platform.storage.repo.VaultRepository
@@ -120,6 +121,15 @@ class CaptureCoordinatorTest : FunSpec({
      * Every collaborator is a relaxed mock: the coordinator runs its bookkeeping inside `guarded
      * {}`, which swallows the exception a strict mock would raise, so a missing stub would fail
      * silently. The two return values that actually steer control flow are stubbed explicitly.
+     *
+     * Two of the fakes below hold a guard the coordinator does not: `journal` refuses an event id
+     * it has already seen, and `setEnabled` returns false when the flag already holds the value
+     * asked for. That is deliberate and not a fake standing in for untested logic — those guards
+     * are the repository's, they are SQL (a primary key that ignores conflicts, a conditional
+     * update), and each is pinned on a real vault in `JournalLossTransactionTest` and
+     * `SourcePolicyTransactionTest`. What the tests here decide is the half those cannot: that the
+     * coordinator asks, and at which moment. Round 36 agy read this pair as false safety, which it
+     * would be if the instrumented halves did not exist (agy I2).
      */
     class Harness {
         val context: Context = mockk(relaxed = true)
@@ -181,11 +191,21 @@ class CaptureCoordinatorTest : FunSpec({
         fun openGapsFor(pkg: String, reason: GapReason) =
             synchronized(gaps) { gaps.filter { it.endEpochMs == null && it.packageName == pkg && it.reason == reason.name } }
 
+        /**
+         * A gap table that refuses writes — the disk-full shape. Set it and the *real* claim fake
+         * runs into a failing gap write, which is what makes the deferral its own behaviour here
+         * rather than something a per-test stub of `claimEventLoss` decided.
+         */
+        @Volatile
+        var gapWritesFail: Boolean = false
+
         private fun installGapStore() {
             coEvery { health.openGap(any(), any(), any(), any(), any()) } answers {
+                if (gapWritesFail) throw IllegalStateException("no space left on device")
                 addGap(firstArg(), null, secondArg(), thirdArg(), arg(3), arg(4))
             }
             coEvery { health.recordGap(any(), any(), any(), any(), any(), any()) } answers {
+                if (gapWritesFail) throw IllegalStateException("no space left on device")
                 addGap(firstArg(), secondArg(), thirdArg(), arg(3), arg(4), arg(5))
                 Unit
             }
@@ -244,12 +264,49 @@ class CaptureCoordinatorTest : FunSpec({
                         arg<suspend () -> Unit>(1).invoke()
                     } catch (e: Throwable) {
                         lossClaimed.remove(eventId)
+                        // The repository's deferral, after the rollback undid the claim.
+                        lossDeferred += eventId
                         throw e
                     }
                 }
                 won
             }
             installPendingJournal()
+            installPendingReplay()
+        }
+
+        /**
+         * The rows the vault holds for the replay, and which of them a failed settlement has taken
+         * out of the candidate set.
+         *
+         * `pendingJournal` honours the limit and skips deferred rows, as the query does, so
+         * "the page moved on" is something the coordinator has to earn. A fake that returned the
+         * same list every time is what made round 36's starvation invisible (Codex I1).
+         */
+        val pendingReplay: MutableList<Pair<String, NotificationSnapshot>> =
+            Collections.synchronizedList(ArrayList())
+
+        val lossDeferred: MutableSet<String> = Collections.synchronizedSet(HashSet())
+
+        private fun installPendingReplay() {
+            coEvery { ingest.pendingJournal(any(), any()) } answers {
+                val limit = firstArg<Int>()
+                val excluded = secondArg<Collection<String>>().toSet()
+                synchronized(pendingReplay) {
+                    pendingReplay.filter {
+                        it.second.eventId !in lossDeferred && it.second.source.packageName !in excluded
+                    }.take(limit)
+                }
+            }
+            // Unmodelled rows are candidates: a fake may not report progress the code has not made.
+            coEvery { ingest.isReplayCandidate(any()) } answers { firstArg<String>() !in lossDeferred }
+            coEvery { ingest.resumeDeferredSettlements() } answers {
+                synchronized(lossDeferred) {
+                    val resumed = lossDeferred.size
+                    lossDeferred.clear()
+                    resumed
+                }
+            }
         }
 
         /**
@@ -263,9 +320,29 @@ class CaptureCoordinatorTest : FunSpec({
             Collections.synchronizedMap(HashMap())
 
         private fun installPendingJournal() {
+            // Pages the way the query does — ordered by `(receivedAtEpochMs, eventId)`, seeking past
+            // the cursor, `next` only when the page came back full — so the loop that drives it is
+            // the thing under test. Returning the whole list with `next = null` made the caller's
+            // paging unobservable, which is the shape round 34 found four times (round 36 subagent
+            // C1). Whether the *query* pages correctly is decided on a real vault, in
+            // `JournalLossTransactionTest`.
             coEvery { ingest.pendingJournalForPackage(any(), any(), any()) } answers {
                 val pkg = firstArg<String>()
-                JournalPage(synchronized(pendingByPackage) { pendingByPackage[pkg]?.toList().orEmpty() }, null)
+                val after = secondArg<JournalCursor>()
+                val limit = thirdArg<Int>()
+                val rows = synchronized(pendingByPackage) { pendingByPackage[pkg]?.toList().orEmpty() }
+                    // As the query's `lossRecorded = 0` does: a deferred row is not in the walk's
+                    // set either, which is why the walk resumes before it reads — the discard that
+                    // follows would clear the payload it is the last reader of.
+                    .filter { it.eventId !in lossDeferred }
+                    .sortedWith(compareBy({ it.observedAtEpochMs }, { it.eventId }))
+                    .filter {
+                        it.observedAtEpochMs > after.receivedAtEpochMs ||
+                            (it.observedAtEpochMs == after.receivedAtEpochMs && it.eventId > after.eventId)
+                    }
+                    .take(limit)
+                val last = rows.lastOrNull()
+                JournalPage(rows, if (rows.size == limit && last != null) JournalCursor(last.observedAtEpochMs, last.eventId) else null)
             }
             coEvery { ingest.discardPendingJournal(any()) } answers {
                 val pkg = firstArg<String>()
@@ -323,6 +400,13 @@ class CaptureCoordinatorTest : FunSpec({
                 val pkg = firstArg<String>()
                 sourceList.removeAll { it.packageName == pkg }
                 arg<(suspend () -> Unit)?>(2)?.invoke()
+                // The repository discards this source's pending rows itself, inside the same
+                // transaction and after the callback — so the callback settling first is the only
+                // thing standing between a carried-over loss and a cleared payload. Leaving the
+                // rows in place here made that order unobservable, and agy found the settle call
+                // could be deleted outright with the suite still green (round 36 agy I1).
+                synchronized(pendingByPackage) { pendingByPackage.remove(pkg) }
+                Unit
             }
         }
 
@@ -1253,7 +1337,10 @@ class CaptureCoordinatorTest : FunSpec({
             h.health.recordGap(any(), any(), GapReason.MESSAGES_DROPPED, GapPrecision.BOUNDED, any(), ENABLED_PKG)
         }
         // It was committed, not skipped: the loss belongs to an event whose survivors were stored.
-        coVerify(exactly = 1) { h.ingest.commit(any(), any(), any(), any(), any(), any(), any()) }
+        // With a timeout, because the gap is written in the acceptance transaction and the commit
+        // comes after it: verifying without one asserts on a point the pipeline has not reached
+        // yet, and passes or fails on scheduling (round 36 Codex M1).
+        coVerify(timeout = 5_000, exactly = 1) { h.ingest.commit(any(), any(), any(), any(), any(), any(), any()) }
         coVerify(exactly = 0) { h.ingest.markJournal("evt-drop", "SKIPPED", any()) }
     }
 
@@ -1521,8 +1608,12 @@ class CaptureCoordinatorTest : FunSpec({
         // together, with nothing on the health page. It is also not allowed to fall through and
         // commit: storing the batch while the record of what it lost goes missing is the round-33
         // finding. The row simply stays as it was, for a pass that can write.
+        // A real messaging body, so "not committed" is a claim about the guard rather than about
+        // the fixture: a body-less snapshot is filed SKIPPED and would never have been committed
+        // whatever the settlement did (round 36 subagent I1, the same flaw as round 35 Codex M1).
         val legacy = Fixtures.snapshot(
-            shape = Fixtures.base(title = null, text = null).copy(truncated = setOf(TruncationFlag.LINES)),
+            shape = Fixtures.messaging(conversationTitle = "Group") { message("Ana", "the newest one") }
+                .copy(truncated = setOf(TruncationFlag.LINES)),
             packageName = ENABLED_PKG,
             eventId = "evt-claim-fails",
         )
@@ -1540,9 +1631,169 @@ class CaptureCoordinatorTest : FunSpec({
         // The row was reached — the claim was asked for — and then nothing else happened to it.
         coVerify(timeout = 5_000, atLeast = 1) { h.ingest.claimEventLoss("evt-claim-fails", any()) }
         stillHolds {
+            // Not committed. The commit is what would have stored the survivors while the record of
+            // what they were missing went missing with them, and it writes COMMITTED itself, so
+            // `markJournal` never sees it: asserting only on `markJournal` asserts nothing here.
+            coVerify(exactly = 0) { h.ingest.commit(any(), any(), any(), any(), any(), any(), any()) }
             coVerify(exactly = 0) { h.ingest.markJournalRetryable(any(), any()) }
             coVerify(exactly = 0) { h.ingest.markJournal("evt-claim-fails", any(), any()) }
             h.gaps.isEmpty() shouldBe true
         }
+    }
+
+    test("rows whose loss cannot be written stop holding the page against the rows behind them") {
+        val h = Harness()
+        // Round 36, Codex I1, at the boundary Codex named. The page is 200 rows wide; the first 200
+        // carry a loss the gap table refuses, and the 201st is an ordinary event with nothing to
+        // settle. Keeping a refused row PENDING is right — its payload is the only evidence of what
+        // it lost — but keeping it *on the page* meant no replay ever reached row 201, however many
+        // times the user triggered one.
+        val blocked = (1..200).map { i ->
+            "gen-old" to Fixtures.snapshot(
+                shape = Fixtures.base(title = null, text = null).copy(truncated = setOf(TruncationFlag.LINES)),
+                packageName = ENABLED_PKG,
+                eventId = "evt-blocked-%03d".format(i),
+                observedAt = 1_000L + i,
+            )
+        }
+        val behind = "gen-old" to Fixtures.snapshot(
+            shape = Fixtures.messaging(conversationTitle = "Group") { message("Ana", "still here") },
+            packageName = ENABLED_PKG,
+            eventId = "evt-behind",
+            observedAt = 9_000L,
+        )
+        h.pendingReplay += blocked
+        h.pendingReplay += behind
+        coEvery { h.ingest.isJournalPending(any()) } returns true
+        h.gapWritesFail = true
+
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+        h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
+
+        // The 201st row reached the pipeline and was stored. Nothing else in this test commits:
+        // the 200 ahead of it return before the fence.
+        coVerify(timeout = 10_000, atLeast = 1) { h.ingest.commit(any(), any(), any(), any(), any(), any(), any()) }
+        // And the blocked rows paid for it with their place on the page, not with their evidence:
+        // no attempt was charged to any of them, and none was given up on.
+        stillHolds {
+            coVerify(exactly = 0) { h.ingest.markJournalRetryable(any(), any()) }
+            h.lossDeferred.size shouldBe 200
+            h.gaps.isEmpty() shouldBe true
+        }
+    }
+
+    test("a deferred settlement is retried when a gap write is next seen to succeed") {
+        val h = Harness()
+        // Round 36, Codex I1's second half: nothing rescheduled the blocked rows. The four things
+        // that trigger a replay are all a user or a lifecycle event — vault ready, unpause,
+        // maintenance ending, a manual recovery — so a device that got its disk space back could
+        // wait days. The trigger here is proof rather than a timer: an event accepted *with* a
+        // loss wrote a gap in its acceptance transaction, so the table that refused is taking
+        // writes again.
+        val stuck = "gen-old" to Fixtures.snapshot(
+            shape = Fixtures.base(title = null, text = null).copy(truncated = setOf(TruncationFlag.LINES)),
+            packageName = ENABLED_PKG,
+            eventId = "evt-stuck",
+            observedAt = 1_000L,
+        )
+        h.pendingReplay += stuck
+        coEvery { h.ingest.isJournalPending(any()) } returns true
+        h.gapWritesFail = true
+
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+        h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
+
+        awaitUntil { h.lossDeferred shouldBe setOf("evt-stuck") }
+        stillHolds { h.gaps.isEmpty() shouldBe true }
+
+        // Space is back, and the next event to arrive carries a loss of its own, so accepting it
+        // writes a gap. No source was touched, no maintenance ran, nothing was unpaused.
+        h.gapWritesFail = false
+        coordinator.offerCaptured(capturedWithTruncation("evt-live", setOf(TruncationFlag.MESSAGES_DROPPED)))
+
+        // Two gaps now: the live event's own, and the one the stuck row had been carrying since a
+        // release that recorded it nowhere.
+        awaitUntil { h.gaps.count { it.reason == GapReason.MESSAGES_DROPPED.name } shouldBe 2 }
+        h.lossClaimed shouldBe setOf("evt-stuck")
+    }
+
+    test("an event accepted without a loss does not retry a deferred settlement") {
+        val h = Harness()
+        // The negative control for the trigger above, and the reason it is not simply "any accepted
+        // event": an acceptance that wrote no gap proves the journal takes writes, and the table
+        // that refused was the gap table. Retrying on it would turn a stream of ordinary events
+        // into a stream of replays for as long as the vault stayed broken.
+        h.pendingReplay += "gen-old" to Fixtures.snapshot(
+            shape = Fixtures.base(title = null, text = null).copy(truncated = setOf(TruncationFlag.LINES)),
+            packageName = ENABLED_PKG,
+            eventId = "evt-stuck-2",
+            observedAt = 1_000L,
+        )
+        coEvery { h.ingest.isJournalPending(any()) } returns true
+        h.gapWritesFail = true
+
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+        h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
+        awaitUntil { h.lossDeferred shouldBe setOf("evt-stuck-2") }
+
+        h.gapWritesFail = false
+        coordinator.offerCaptured(capturedWithTruncation("evt-plain", emptySet()))
+
+        // The row is still deferred: the vault may be writable again, but nothing has shown it.
+        stillHolds {
+            h.lossDeferred shouldBe setOf("evt-stuck-2")
+            h.gaps.isEmpty() shouldBe true
+        }
+    }
+
+    test("a deferred row is still settled before its source is disabled") {
+        val h = Harness()
+        // Round 36. The deferral takes a row out of both readers of pending rows, and the discard
+        // that follows a disable clears its payload for good: if the walk did not resume first,
+        // the one path that still held the evidence would be the one path that skipped it.
+        val legacy = Fixtures.snapshot(
+            shape = Fixtures.base(title = null, text = null).copy(truncated = setOf(TruncationFlag.LINES)),
+            packageName = ENABLED_PKG,
+            eventId = "evt-deferred-then-disabled",
+        )
+        h.pendingByPackage[ENABLED_PKG] = mutableListOf(legacy)
+        h.lossDeferred += legacy.eventId
+
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+        coordinator.setSourceEnabled(ENABLED_PKG, false)
+
+        awaitUntil { h.gaps.count { it.reason == GapReason.MESSAGES_DROPPED.name } shouldBe 1 }
+        h.lossClaimed shouldBe setOf("evt-deferred-then-disabled")
+    }
+
+    test("pending rows removed with their source are settled while their payload can still be read") {
+        val h = Harness()
+        // Round 36 agy I1. `removeSource` carries the same invariant as `setSourceEnabled` — settle
+        // before the discard clears the payload — and had no test at all: agy deleted the settle
+        // call outright and the whole suite still passed. Remove is the harder case of the two,
+        // because nothing about it can be undone: the source is gone, so there is no later disable
+        // to reach the rows, and a loss missed here is missed for good.
+        val legacy = Fixtures.snapshot(
+            shape = Fixtures.base(title = null, text = null).copy(truncated = setOf(TruncationFlag.LINES)),
+            packageName = ENABLED_PKG,
+            eventId = "evt-v013-removed",
+        )
+        h.pendingByPackage[ENABLED_PKG] = mutableListOf(legacy)
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+        h.awaitConnected()
+
+        coordinator.removeSource(ENABLED_PKG, deleteData = false)
+
+        // Reversing the two inside the remove transaction empties the pending rows first and this
+        // gap is never written; deleting the settle call altogether does the same.
+        h.gaps.count { it.reason == GapReason.MESSAGES_DROPPED.name && it.packageName == ENABLED_PKG } shouldBe 1
+        h.lossClaimed shouldBe setOf("evt-v013-removed")
+        // And the rows really are gone, which is what makes the moment above the last one.
+        h.pendingByPackage[ENABLED_PKG] shouldBe null
     }
 })

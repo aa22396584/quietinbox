@@ -43,7 +43,12 @@ interface JournalDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(entity: EventJournalEntity): Long
 
-    @Query("SELECT * FROM event_journal WHERE state = 'PENDING' ORDER BY receivedAtEpochMs LIMIT :limit")
+    /**
+     * The replay's candidate set. A row whose settlement was deferred is not in it: it stays
+     * PENDING with its payload intact, but it may not hold a place on the page, or 200 of them
+     * starve row 201 for ever (round 36 Codex I1). [resumeDeferredLosses] puts them back.
+     */
+    @Query("SELECT * FROM event_journal WHERE state = 'PENDING' AND lossRecorded != 2 ORDER BY receivedAtEpochMs LIMIT :limit")
     suspend fun pending(limit: Int): List<EventJournalEntity>
 
     /**
@@ -51,7 +56,7 @@ interface JournalDao {
      * the whole page and starve every other source, QI-SEC-001 round-10). Rows without a package
      * (pre-v3) are included and decided by the commit fence.
      */
-    @Query("SELECT * FROM event_journal WHERE state = 'PENDING' AND (packageName IS NULL OR packageName NOT IN (:excludedPackages)) ORDER BY receivedAtEpochMs LIMIT :limit")
+    @Query("SELECT * FROM event_journal WHERE state = 'PENDING' AND lossRecorded != 2 AND (packageName IS NULL OR packageName NOT IN (:excludedPackages)) ORDER BY receivedAtEpochMs LIMIT :limit")
     suspend fun pendingExcluding(limit: Int, excludedPackages: List<String>): List<EventJournalEntity>
 
     /** A terminal state (anything but PENDING) also clears the payload: the text must not outlive its commit. */
@@ -72,14 +77,25 @@ interface JournalDao {
      * this runs inside the policy write transaction, so an unbounded read would hold the pipeline
      * lock for as long as the decode took (round 35 subagent I2).
      *
-     * Paged by `(receivedAtEpochMs, eventId)` rather than by offset: settling a row leaves it
-     * `PENDING`, so a repeated identical query would return it for ever.
+     * Paged by `(receivedAtEpochMs, eventId)` rather than by offset: a row with no loss to settle
+     * is left exactly as it was, so a repeated identical query would return it for ever. The
+     * comparison is written as a row value so SQLite can seek to the cursor inside
+     * `index_event_journal_packageName_state_lossRecorded_receivedAtEpochMs_eventId` instead of
+     * re-reading every earlier row of the same source and filtering (round 36 Codex I2). The
+     * `eventId` tiebreak is not decoration: rows sharing a millisecond are common — a batched
+     * re-post arrives as several notifications with one timestamp — and ordering by the timestamp
+     * alone leaves their relative order to the query plan, so a cursor built from the last row of
+     * one page can skip a sibling that the next page would then never return.
+     *
+     * `lossRecorded = 0` narrows it to the rows the walk exists for. A row this release accepted
+     * settled its loss with the insert, and one an earlier page settled is done; neither needs
+     * reading, and skipping them in the index costs nothing.
      */
     @Query(
         """
         SELECT * FROM event_journal
-        WHERE state = 'PENDING' AND packageName = :packageName
-          AND (receivedAtEpochMs > :afterTime OR (receivedAtEpochMs = :afterTime AND eventId > :afterId))
+        WHERE state = 'PENDING' AND packageName = :packageName AND lossRecorded = 0
+          AND (receivedAtEpochMs, eventId) > (:afterTime, :afterId)
         ORDER BY receivedAtEpochMs, eventId LIMIT :limit
         """,
     )
@@ -100,6 +116,34 @@ interface JournalDao {
     @Query("UPDATE event_journal SET lossRecorded = 1 WHERE eventId = :eventId AND lossRecorded = 0 AND state = 'PENDING'")
     suspend fun claimLoss(eventId: String): Int
 
+    /**
+     * Takes a row whose gap write failed out of the replay's candidate set, without spending the
+     * claim and without touching the payload.
+     *
+     * `lossRecorded = 0` in the predicate keeps this from overwriting a settled row, and
+     * `state = 'PENDING'` from deferring one that has since been committed or discarded. Returns 1
+     * only when the row really left the candidate set — the caller may not treat a failed deferral
+     * (a vault that refuses this write too) as progress, or the replay loop would re-read the same
+     * page until its round limit.
+     */
+    @Query("UPDATE event_journal SET lossRecorded = 2 WHERE eventId = :eventId AND lossRecorded = 0 AND state = 'PENDING'")
+    suspend fun deferLoss(eventId: String): Int
+
+    /**
+     * Puts every deferred row back into the candidate set, for the pass that is about to run.
+     *
+     * Called at the head of a replay and of a settle walk, which are the only two readers of
+     * pending rows: whatever made the earlier gap write fail may be gone, and the only way to find
+     * out is to try. One attempt per row per pass — a row that fails again defers itself again and
+     * stops holding a place on the page.
+     */
+    @Query("UPDATE event_journal SET lossRecorded = 0 WHERE lossRecorded = 2")
+    suspend fun resumeDeferredLosses(): Int
+
+    /** Whether the replay would pick this row up: exactly [pending]'s predicate, for one row. */
+    @Query("SELECT COUNT(*) FROM event_journal WHERE eventId = :eventId AND state = 'PENDING' AND lossRecorded != 2")
+    suspend fun isReplayCandidate(eventId: String): Int
+
     /** Pending rows of a source that was disabled or removed are discarded for good (QI-SEC-001). */
     @Query("UPDATE event_journal SET state = 'DISCARDED', failureCode = 'SOURCE_DISABLED', payload = '' WHERE state = 'PENDING' AND packageName = :packageName")
     suspend fun discardPending(packageName: String): Int
@@ -116,17 +160,20 @@ interface JournalDao {
     @Query("DELETE FROM event_journal WHERE expiresAtEpochMs < :now AND state != 'PENDING'")
     suspend fun deleteExpired(now: Long): Int
 
-    @Query("DELETE FROM event_journal WHERE expiresAtEpochMs < :now")
-    suspend fun deleteAllExpired(now: Long): Int
-
     @Query("SELECT COUNT(*) FROM event_journal WHERE state = 'PENDING'")
     fun observePendingCount(): Flow<Int>
 
     @Query("SELECT COUNT(*) FROM event_journal")
     suspend fun count(): Int
 
-    @Query("DELETE FROM event_journal")
-    suspend fun clear()
+    /**
+     * `deleteAllExpired` and `clear` used to sit here, both without the `state != 'PENDING'` guard
+     * the sweep above carries, and neither with a caller anywhere in the tree. A statement that
+     * deletes a pending row deletes an accepted event and the evidence of what it lost, in a file
+     * whose own KDoc says retention never does that; leaving two of them within easy reach of the
+     * next person to need "clean up the journal" was a loaded gun rather than dead weight
+     * (round 36 subagent M2).
+     */
 }
 
 @Dao
@@ -305,9 +352,11 @@ interface MessageDao {
      * flag would erase a newer, true loss (round 34 I2, round 35 Codex I4).
      *
      * The model this makes is **historical**: the flag says "this text was cut in at least one
-     * observation of this message", not "the version on screen is cut". The two diverge when the
-     * source sends a longer text and then the original again — the stored body never changes, so
-     * the reconciler sees a repost and the flag stays. Set-only is not a database-wide invariant
+     * observation of this message", not "the version on screen is cut". The two diverge whenever
+     * the same stored body is observed more than once and only some of those notifications were
+     * shortened: identical text is a repost on this path, so the flag set by the shortened one
+     * stays even though the observation after it was complete. (A *longer* text is not this case —
+     * that is a revision, and the line below says what happens to the flag there.) Set-only is not a database-wide invariant
      * either: it is the rule for the `Known` path. A revision replaces the body and recomputes the
      * flag from scratch through `applyRevision`, including back to null.
      */

@@ -96,7 +96,7 @@
     <string name="conv_time_captured">captured</string>
     <string name="conv_revision">edited ×%1$d</string>
     <string name="conv_ambiguous_tag">possible repeat</string>
-    <string name="conv_truncated">text was shortened</string>
+    <string name="conv_truncated">shortened in a notification</string>
     <string name="conv_preview_restricted">preview restricted</string>
     <string name="conv_summary_only">summary only</string>
     <string name="conv_media_pending">copying media</string>

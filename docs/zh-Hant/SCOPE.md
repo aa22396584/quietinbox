@@ -22,7 +22,7 @@
 | 搜尋（CJK 二元組 + 拉丁三元組、參數化、keyset 分頁、驗證到頁面填滿） | 完成 | 真機 `VaultRoundTripTest`（開會 / hel）與 `SearchPagingTest`（250 筆假陽性候選、可續的游標）；實機 UI |
 | 冷啟動 fail closed：來源政策未知前不讀任何通知 | 完成 | `CaptureCoordinatorTest`（原封保留、金庫打不開時以 `COLD_START` 缺口丟棄）；AVD 冷啟動後的合成擷取 |
 | 搜尋與對話頁面的鎖定／開啟中金庫 | 完成 | `SearchViewModelTest`（2）、`ConversationViewModelTest`（1）；未在裝置上演練（AVD 無法隨時把金庫鎖上） |
-| 活動洞察（僅觀測：概觀、熱區圖、排行、最佳時段、好聊度、神隱率、emoji、口頭禪） | 完成 | `core:analytics` 34 個 JVM 測試加 `AnalyticsViewModelTest` 8 個（狀態規則、非主執行緒計算、鎖定／開啟中金庫）；實機 UI；每個期間最多載入 50,000 則（超過時每個分頁都顯示提示） |
+| 活動洞察（僅觀測：概觀、熱區圖、排行、最佳時段、好聊度、安靜天數、emoji、口頭禪） | 完成 | `core:analytics` 34 個 JVM 測試加 `AnalyticsViewModelTest` 8 個（狀態規則、非主執行緒計算、鎖定／開啟中金庫）；實機 UI；每個期間最多載入 50,000 則（超過時每個分頁都顯示提示） |
 | 擷取健康頁（缺口與診斷） | 完成 | 實機 UI |
 | 保留期限 TTL worker | 完成（未做 soak 測試） | `RetentionWorker`，12 小時週期 |
 | 媒體複製（content:// + 通知 bitmap，加密） | 已實作，**未經裝置驗證** | `MediaCopier`；尚無測試碰過真實 content URI |

@@ -48,7 +48,7 @@
 | 收件匣 | 來源篩選、釘選／封存、本機已查看、身分與重複標籤、健康橫幅、刪除（含防重播 suppression） |
 | 對話 | 氣泡、發送者、來源時間 vs 擷取時間、修訂／觀測次數、媒體結果、選取刪除、開啟來源 App（需確認） |
 | 搜尋 | 加密 n-gram 索引：CJK 子字串（中／日／韓）、拉丁詞／3-gram、日期與來源篩選、參數化＋分頁 |
-| 活動洞察 | 只計已觀測資料：概觀（樣本、時段長條、週×時熱力圖、Emoji 與口頭禪）、排行榜（全部／平日／週末）、最佳時段、好聊度、神隱率；期間 7 天／本月／上月／3 個月／全部／自訂，全部免費 |
+| 活動洞察 | 只計已觀測資料：概觀（樣本、時段長條、週×時熱力圖、Emoji 與口頭禪）、排行榜（全部／平日／週末）、最佳時段、好聊度、安靜天數；期間 7 天／本月／上月／3 個月／全部／自訂，全部免費 |
 | 擷取健康 | 連線狀態、暫停、管線計數、來源啟用／暫停／移除、中斷區間、無正文診斷摘要 |
 | 設定 | 主題／動態色彩／減少動畫、App 鎖、禁止截圖、保存期限、媒體複製揭示、自己的提醒、復原金鑰、加密備份匯出／還原、刪除所有資料、已知限制、授權 |
 | Demo 模式（僅 debug） | 一鍵載入完全虛構的示範資料，用來截圖與走過所有功能而不暴露真實通知；`tools/demo-screenshots.sh` 自動截圖 |
@@ -61,7 +61,7 @@
 :core:parser               Parser SPI、ParserRegistry、StandardParser（MessagingStyle / Inbox / BigText / 摘要）
 :core:identity             會話身分：chat id > shortcut > 通知串流 > 標題（永不跨串流合併）
 :core:reconcile            有界視窗對齊去重、AMBIGUOUS_REPEAT、revision、checkpoint
-:core:analytics            描述統計與洞察（熱力圖、排行、時段、好聊度、神隱率、口頭禪）
+:core:analytics            描述統計與洞察（熱力圖、排行、時段、好聊度、安靜天數、口頭禪）
 :core:testing              合成 fixture DSL
 :parsers:apps              LINE / WhatsApp / Telegram / Instagram / Messenger adapter（SYNTHETIC_ONLY）
 :platform:crypto           Keystore 包裝的每安裝隨機 key、Tink AEAD、復原金鑰編碼

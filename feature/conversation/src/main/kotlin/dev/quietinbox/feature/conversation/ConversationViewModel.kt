@@ -42,8 +42,11 @@ data class ConversationUiState(
 )
 
 sealed interface OpenSourceResult {
-    data class Launch(val intent: Intent, val fallbackToHome: Boolean) : OpenSourceResult
+    data class Launch(val intent: Intent) : OpenSourceResult
     data object NotInstalled : OpenSourceResult
+
+    /** `startActivity` threw: the package was disabled or removed after the button was drawn. */
+    data object LaunchFailed : OpenSourceResult
 }
 
 @HiltViewModel(assistedFactory = ConversationViewModel.Factory::class)
@@ -121,12 +124,15 @@ class ConversationViewModel @AssistedInject constructor(
 
     /**
      * Explicit user action only. QuietInbox never persists source `PendingIntent`s, so the source
-     * app's launcher activity is used; this may mark the chat as read on the source side.
+     * app's launcher activity is always what opens — never the chat itself, and the app has no way
+     * to know whether the original notification is still live. The dialog says so unconditionally
+     * rather than claiming a state it cannot observe. Opening the chat there may mark messages as
+     * read on the source side.
      */
     fun openSourceIntent(): OpenSourceResult {
         val pkg = state.value.conversation?.scope?.packageName ?: return OpenSourceResult.NotInstalled
         val intent = context.packageManager.getLaunchIntentForPackage(pkg) ?: return OpenSourceResult.NotInstalled
-        return OpenSourceResult.Launch(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), fallbackToHome = true)
+        return OpenSourceResult.Launch(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
     suspend fun loadThumbnail(blobId: Long): ByteArray? = media.load(blobId, thumbnail = true)

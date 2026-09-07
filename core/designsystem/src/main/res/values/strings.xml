@@ -84,7 +84,8 @@
     <string name="conv_open_source">Open in source app</string>
     <string name="conv_open_source_title">Open the source app?</string>
     <string name="conv_open_source_body">QuietInbox will launch %1$s. Opening the chat there may mark messages as read on the source side. Viewing copies here never does.</string>
-    <string name="conv_open_source_fallback">The original notification is no longer active; the app\'s home screen will open instead.</string>
+    <string name="conv_open_source_fallback">QuietInbox never keeps the original notification\'s action, so the app opens at its own starting screen, not at this chat.</string>
+    <string name="conv_open_source_failed">QuietInbox could not open %1$s. It may have been disabled or removed since this page opened.</string>
     <string name="conv_open_source_unavailable">The source app is not installed.</string>
     <string name="conv_time_source">source time</string>
     <string name="conv_time_notification">notification time</string>
@@ -99,6 +100,7 @@
     <string name="conv_media_expired">media link expired</string>
     <string name="conv_media_denied">media permission denied</string>
     <string name="conv_media_too_large">media too large</string>
+    <string name="conv_media_vault_full">media store full</string>
     <string name="conv_media_disabled">media copy disabled</string>
     <string name="conv_media_failed">media copy failed</string>
     <string name="conv_origin_resync">reconciled after reconnect</string>

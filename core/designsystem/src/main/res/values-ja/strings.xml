@@ -82,7 +82,8 @@
     <string name="conv_open_source">送信元アプリで開く</string>
     <string name="conv_open_source_title">送信元アプリを開きますか？</string>
     <string name="conv_open_source_body">QuietInbox は %1$s を起動します。そちらでチャットを開くと、送信元アプリでメッセージが既読になる場合があります。ここでコピーを見るだけなら既読にはなりません。</string>
-    <string name="conv_open_source_fallback">元の通知はすでに存在しないため、代わりにアプリのホーム画面を開きます。</string>
+    <string name="conv_open_source_fallback">QuietInbox は元の通知のアクションを保持しないため、開くのはそのアプリの最初の画面であり、このチャットではありません。</string>
+    <string name="conv_open_source_failed">%1$s を開けませんでした。この画面を開いたあとに無効化または削除された可能性があります。</string>
     <string name="conv_open_source_unavailable">送信元アプリがインストールされていません。</string>
     <string name="conv_time_source">送信元の時刻</string>
     <string name="conv_time_notification">通知の時刻</string>
@@ -97,6 +98,7 @@
     <string name="conv_media_expired">メディアのリンクが期限切れ</string>
     <string name="conv_media_denied">メディアの権限がありません</string>
     <string name="conv_media_too_large">メディアが大きすぎます</string>
+    <string name="conv_media_vault_full">メディア保存領域が上限です</string>
     <string name="conv_media_disabled">メディアのコピーは無効</string>
     <string name="conv_media_failed">メディアのコピーに失敗</string>
     <string name="conv_origin_resync">再接続後に照合</string>

@@ -191,6 +191,14 @@ class CaptureCoordinator @Inject constructor(
     /** Bitmaps waiting in the queue; bounded so a burst of BigPicture notifications cannot OOM. */
     private val queuedBitmaps = AtomicInteger(0)
 
+    /**
+     * Media copies handed to [mediaCopier] and not finished. The bitmap bound above never covered
+     * a URI-only copy, so an arbitrary number of them could pile up behind the copier's two
+     * permits — each one a job registered in `VaultMaintenance.workers`, which `exclusive` has to
+     * join before it can start (QI-MEDIA-018).
+     */
+    private val queuedMediaCopies = AtomicInteger(0)
+
     @Volatile
     private var vaultGapOpen: Boolean = false
 
@@ -856,10 +864,18 @@ class CaptureCoordinator @Inject constructor(
         if (reconcile?.degraded == true) ingest.diagnostic("RECONCILE_DEGRADED", null, snapshot.source.packageName, now)
         if (batch.warnings.isNotEmpty()) ingest.diagnostic("PARSE_WARNINGS", batch.warnings.joinToString(",") { it.name }, snapshot.source.packageName, now)
         if (outcome.pendingMediaMessageIds.isNotEmpty()) {
+            if (queuedMediaCopies.incrementAndGet() > MAX_QUEUED_MEDIA_COPIES) {
+                queuedMediaCopies.decrementAndGet()
+                // The copy never runs. The rows stay PENDING and the retention sweep settles them;
+                // the drop itself is recorded rather than left to look like a copy still in flight.
+                ingest.diagnostic("MEDIA_QUEUE_OVERFLOW", outcome.pendingMediaMessageIds.size.toString(), snapshot.source.packageName, now)
+                return false
+            }
             scope.launch {
                 try {
                     mediaCopier.copyPending(outcome.pendingMediaMessageIds, bitmap)
                 } finally {
+                    queuedMediaCopies.decrementAndGet()
                     if (bitmap != null) queuedBitmaps.decrementAndGet()
                 }
             }
@@ -930,6 +946,9 @@ class CaptureCoordinator @Inject constructor(
         private const val DAY_MS = 24L * 60 * 60 * 1000
         private const val REASON_LOCKDOWN = 20 // NotificationListenerService.REASON_LOCKDOWN (API 29)
         private const val MAX_QUEUED_BITMAPS = 8
+
+        /** In-flight media copies. Bitmaps are bounded by their bytes; URI copies by their jobs. */
+        private const val MAX_QUEUED_MEDIA_COPIES = 32
 
         /**
          * Notifications held unread before the source policy is known; the oldest is dropped first

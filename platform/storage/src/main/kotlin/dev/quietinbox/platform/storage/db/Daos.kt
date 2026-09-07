@@ -367,6 +367,10 @@ interface MediaDao {
     )
     suspend fun forPackage(packageName: String): List<MediaBlobEntity>
 
+    /** Every file name any blob row still points at — the set a directory sweep must never delete. */
+    @Query("SELECT fileName FROM media_blob UNION SELECT thumbFileName FROM media_blob WHERE thumbFileName IS NOT NULL")
+    suspend fun allFileNames(): List<String>
+
     @Query("DELETE FROM media_blob WHERE id IN (:ids)")
     suspend fun delete(ids: List<Long>)
 

@@ -30,4 +30,26 @@ class MonogramTest {
         monogram(null) shouldBe "?"
         monogram("   ") shouldBe "?"
     }
+
+    /** `take` counts UTF-16 units, so half of a surrogate pair used to reach the avatar as tofu. */
+    @Test
+    fun anEmojiIsNeverCutInHalf() {
+        monogram("😀 Mom") shouldBe "😀M"
+        monogram("Mom 😀") shouldBe "M😀"
+        monogram("😀") shouldBe "😀"
+        monogram("😀🎉") shouldBe "😀🎉"
+        monogram("A😀") shouldBe "A😀"
+        // The invariant behind all of the above: every surrogate that survives is still paired.
+        listOf("😀 Mom", "Mom 😀", "😀", "😀🎉", "A😀", "🎉 Party 🎉").forEach { label ->
+            val m = monogram(label)
+            m.count { it.isHighSurrogate() } shouldBe m.count { it.isLowSurrogate() }
+        }
+    }
+
+    /** A right-to-left name still gets two initials; the platform handles the display order. */
+    @Test
+    fun rightToLeftNamesGiveTwoInitials() {
+        monogram("موسى الأحمد") shouldBe "ما"
+        monogram("דנה כהן") shouldBe "דכ"
+    }
 }

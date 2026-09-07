@@ -13,4 +13,13 @@ dependencies {
     implementation(project(":platform:crypto"))
     implementation(project(":platform:storage"))
     implementation(libs.androidx.room.runtime)
+
+    testImplementation(libs.kotest.runner.junit5)
+    testImplementation(libs.mockk)
+}
+
+// Kotest specs run on the JUnit Platform, as in the other platform modules.
+tasks.withType<Test>().configureEach {
+    useJUnitPlatform()
+    systemProperty("kotest.framework.classpath.scanning.autoscan.disable", "true")
 }

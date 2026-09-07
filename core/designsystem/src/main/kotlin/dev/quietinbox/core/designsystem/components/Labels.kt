@@ -9,6 +9,7 @@ import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.PhotoSizeSelectLarge
+import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material.icons.outlined.Verified
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.runtime.Composable
@@ -41,6 +42,7 @@ fun mediaLabel(state: MediaState): Labelled? = when (state) {
     MediaState.URI_EXPIRED -> Labelled(stringResource(R.string.conv_media_expired), Icons.Outlined.BrokenImage, QualityColors.uncertain)
     MediaState.PERMISSION_DENIED -> Labelled(stringResource(R.string.conv_media_denied), Icons.Outlined.Lock, QualityColors.uncertain)
     MediaState.TOO_LARGE -> Labelled(stringResource(R.string.conv_media_too_large), Icons.Outlined.PhotoSizeSelectLarge, QualityColors.uncertain)
+    MediaState.VAULT_MEDIA_FULL -> Labelled(stringResource(R.string.conv_media_vault_full), Icons.Outlined.Storage, QualityColors.uncertain)
     MediaState.DISABLED_BY_USER -> Labelled(stringResource(R.string.conv_media_disabled), Icons.Outlined.VisibilityOff, QualityColors.inferred)
     MediaState.FAILED -> Labelled(stringResource(R.string.conv_media_failed), Icons.Outlined.BrokenImage, QualityColors.failed)
 }

@@ -21,6 +21,9 @@ enum class MediaState {
     URI_EXPIRED,
     PERMISSION_DENIED,
     TOO_LARGE,
+
+    /** The vault's own media quota is full — says nothing about the size of this item. */
+    VAULT_MEDIA_FULL,
     DISABLED_BY_USER,
     FAILED,
 }

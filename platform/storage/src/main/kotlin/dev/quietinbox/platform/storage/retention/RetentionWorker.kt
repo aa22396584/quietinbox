@@ -10,6 +10,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import dev.quietinbox.core.model.MediaState
 import dev.quietinbox.platform.storage.db.DatabaseHolder
 import dev.quietinbox.platform.storage.db.VaultMaintenance
 import dev.quietinbox.platform.storage.db.VaultUnavailableException
@@ -79,6 +80,24 @@ class RetentionService @Inject constructor(
             blob.thumbFileName?.let { mediaDir.delete(it) }
         }
         if (orphans.isNotEmpty()) db.mediaDao().delete(orphans.map { it.id })
+
+        // Row-level reclamation above cannot see a file whose row never committed — process death
+        // between `BlobCipher.encryptToFile` and the transaction, or an interrupted restore, leaves
+        // permanent dead weight nothing ever looks at (QI-MEDIA-017). Names are compared against
+        // every name a row still points at, and a file younger than the grace window is left alone:
+        // `work {}` runs concurrently with a copy that has written its file but not yet committed.
+        val live = db.mediaDao().allFileNames().toHashSet()
+        val strayCutoff = now - STRAY_FILE_GRACE_MS
+        val stray = mediaDir.namesWithAge().filter { (name, modified) -> name !in live && modified < strayCutoff }
+        for ((name, _) in stray) mediaDir.delete(name)
+
+        // `pendingMedia` had no caller anywhere: a copy that threw inside store(), or was cancelled
+        // by a reset or restore, left its row PENDING for ever and the bubble showed an hourglass
+        // that never resolved (QI-MEDIA-015). The state written is FAILED, not URI_EXPIRED: the
+        // copy is known not to have finished, but nothing here observed why.
+        val stalePending = db.messageDao().pendingMedia(500).filter { it.observedAtEpochMs < now - PENDING_MEDIA_GRACE_MS }
+        for (row in stalePending) db.messageDao().setMedia(row.id, MediaState.FAILED.name, null)
+
         val journal = db.journalDao().deleteExpired(now)
         val suppression = db.suppressionDao().deleteExpired(now)
         val diagCutoff = now - 30L * DAY_MS
@@ -90,11 +109,17 @@ class RetentionService @Inject constructor(
         db.checkpointDao().deleteStale(now - 14L * DAY_MS)
         val emptyConversations = db.conversationDao().emptyOlderThan(now - 7L * DAY_MS)
         for (id in emptyConversations) db.conversationDao().delete(id)
-        return RetentionReport(deletedMessages, orphans.size, journal, suppression, diagnostics, emptyConversations.size)
+        return RetentionReport(deletedMessages, orphans.size, journal, suppression, diagnostics, emptyConversations.size, stray.size, stalePending.size)
     }
 
     companion object {
         const val DAY_MS: Long = 24L * 60 * 60 * 1000
+
+        /** A file younger than this may belong to a copy that has not committed its row yet. */
+        const val STRAY_FILE_GRACE_MS: Long = 60L * 60 * 1000
+
+        /** How long a media copy may stay PENDING before the sweep calls it failed. */
+        const val PENDING_MEDIA_GRACE_MS: Long = 60L * 60 * 1000
         const val WORK_NAME = "quietinbox.retention"
 
         fun schedule(context: Context) {
@@ -113,6 +138,10 @@ data class RetentionReport(
     val deletedSuppressions: Int,
     val deletedDiagnostics: Int,
     val deletedEmptyConversations: Int,
+    /** Files on disk that no blob row pointed at any more. */
+    val deletedStrayFiles: Int = 0,
+    /** Copies stuck in PENDING long enough to be called failed. */
+    val settledPendingMedia: Int = 0,
 )
 
 /** Location of encrypted media blobs; file names are opaque ids only. */
@@ -129,6 +158,9 @@ class MediaDirectory @Inject constructor(
     }
 
     fun totalBytes(): Long = dir.listFiles()?.sumOf { it.length() } ?: 0L
+
+    /** File name to last-modified time, for the sweep that reclaims files no row points at. */
+    fun namesWithAge(): List<Pair<String, Long>> = dir.listFiles()?.map { it.name to it.lastModified() } ?: emptyList()
 
     /** Deletes every blob; false when a file survived (the caller must not report a reset as done). */
     fun deleteAll(): Boolean {

@@ -1,11 +1,9 @@
 package dev.quietinbox.platform.media
 
-import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.room.withTransaction
-import dagger.hilt.android.qualifiers.ApplicationContext
 import dev.quietinbox.core.model.MediaState
 import dev.quietinbox.platform.crypto.BlobCipher
 import dev.quietinbox.platform.crypto.KeyResult
@@ -15,17 +13,16 @@ import dev.quietinbox.platform.storage.db.VaultMaintenance
 import dev.quietinbox.platform.storage.retention.MediaDirectory
 import dev.quietinbox.platform.storage.settings.SettingsRepository
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 import java.io.ByteArrayOutputStream
-import java.io.FileNotFoundException
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -41,7 +38,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class MediaCopier @Inject constructor(
-    @ApplicationContext private val context: Context,
+    private val streams: MediaStreams,
     private val holder: DatabaseHolder,
     private val cipher: BlobCipher,
     private val dir: MediaDirectory,
@@ -49,6 +46,22 @@ class MediaCopier @Inject constructor(
     private val maintenance: VaultMaintenance,
 ) {
     private val parallelism = Semaphore(2)
+
+    /**
+     * Provider reads run in this scope, not in the caller's job, on purpose. `openInputStream` and
+     * `InputStream.read` are blocking binder calls with no suspension point, so a provider that
+     * accepts the open and then never delivers bytes cannot be cancelled: the old `withTimeout`
+     * around them could not fire until `read` had already returned. The blocked worker held a
+     * [parallelism] permit and stayed registered in `VaultMaintenance.workers`, whose `exclusive`
+     * run does `joinAll()` before taking the pipeline lock — so one hung provider hung
+     * "Delete everything" and "Restore" forever (QI-MEDIA-014).
+     *
+     * Awaiting a [kotlinx.coroutines.Deferred] from a scope of our own gives the timeout a real
+     * suspension point. A thread stuck in a blocking read is orphaned rather than joined, and
+     * [READ_PARALLELISM] bounds how many can be: once they are all parked, later copies time out
+     * and are recorded as failures instead of piling up.
+     */
+    private val readScope = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(READ_PARALLELISM))
 
     suspend fun copyPending(messageIds: List<Long>, bitmap: Bitmap?) {
         maintenance.work {
@@ -68,19 +81,32 @@ class MediaCopier @Inject constructor(
                     val out = ByteArrayOutputStream()
                     if (runCatching { b.compress(Bitmap.CompressFormat.PNG, 100, out) }.getOrDefault(false)) out.toByteArray() else null
                 }
-                coroutineScope {
+                // supervisorScope, and a catch per id: one failing copy used to cancel its siblings
+                // and leave their rows PENDING, which the bubble shows as an hourglass that never
+                // resolves. Every id ends in a terminal state or is deliberately left for the
+                // retention sweep to rescue (QI-MEDIA-015).
+                supervisorScope {
                     messageIds.map { id ->
                         async {
                             parallelism.withPermit {
-                                val row = db.messageDao().get(id) ?: return@withPermit
-                                if (row.mediaState != MediaState.PENDING.name) return@withPermit
-                                val state = when {
-                                    row.mediaUri != null -> copyUri(id, Uri.parse(row.mediaUri), row.mediaMimeType)
-                                    bitmap != null -> copyBitmapBytes(id, bitmapBytes)
-                                    else -> MediaState.FAILED
+                                try {
+                                    val row = db.messageDao().get(id) ?: return@withPermit
+                                    if (row.mediaState != MediaState.PENDING.name) return@withPermit
+                                    val state = when {
+                                        row.mediaUri != null -> copyUri(id, Uri.parse(row.mediaUri), row.mediaMimeType)
+                                        bitmap != null -> copyBitmapBytes(id, bitmapBytes)
+                                        else -> MediaState.FAILED
+                                    }
+                                    // LOCAL_COPY was linked inside store()'s transaction; only failures are written here.
+                                    if (state != MediaState.LOCAL_COPY) db.messageDao().setMedia(id, state.name, null)
+                                } catch (e: CancellationException) {
+                                    // A reset or restore is about to take the pipeline lock: writing
+                                    // here would race it. The row stays PENDING and the retention
+                                    // sweep settles it.
+                                    throw e
+                                } catch (e: Exception) {
+                                    runCatching { db.messageDao().setMedia(id, MediaState.FAILED.name, null) }
                                 }
-                                // LOCAL_COPY was linked inside store()'s transaction; only failures are written here.
-                                if (state != MediaState.LOCAL_COPY) db.messageDao().setMedia(id, state.name, null)
                             }
                         }
                     }.awaitAll()
@@ -91,37 +117,12 @@ class MediaCopier @Inject constructor(
 
     private suspend fun copyUri(messageId: Long, uri: Uri, mimeType: String?): MediaState {
         if (uri.scheme != "content") return MediaState.PLACEHOLDER_ONLY
-        if (dir.totalBytes() > QUOTA_BYTES) return MediaState.TOO_LARGE
-        val bytes = try {
-            withTimeout(READ_TIMEOUT_MS) {
-                context.contentResolver.openInputStream(uri)?.use { input ->
-                    val out = ByteArrayOutputStream()
-                    val buf = ByteArray(64 * 1024)
-                    var total = 0L
-                    while (true) {
-                        val n = input.read(buf)
-                        if (n < 0) break
-                        total += n
-                        if (total > MAX_BYTES) return@withTimeout null
-                        out.write(buf, 0, n)
-                    }
-                    out.toByteArray()
-                }
-            }
-        } catch (e: SecurityException) {
-            return MediaState.PERMISSION_DENIED
-        } catch (e: FileNotFoundException) {
-            return MediaState.URI_EXPIRED
-        } catch (e: TimeoutCancellationException) {
-            return MediaState.FAILED
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            return MediaState.FAILED
+        val result = readWithTimeout(readScope, READ_TIMEOUT_MS, MAX_BYTES) { streams.open(uri) }
+            ?: return MediaState.FAILED
+        return when (result) {
+            is Read.Failed -> result.state
+            is Read.Ok -> store(messageId, result.bytes, mimeType)
         }
-        if (bytes == null) return MediaState.TOO_LARGE
-        if (bytes.isEmpty()) return MediaState.URI_EXPIRED
-        return store(messageId, bytes, mimeType)
     }
 
     private suspend fun copyBitmapBytes(messageId: Long, bytes: ByteArray?): MediaState {
@@ -135,6 +136,10 @@ class MediaCopier @Inject constructor(
      * after a file was written removes that file: no orphan survives a cancelled or failed copy.
      */
     private suspend fun store(messageId: Long, bytes: ByteArray, mimeType: String?): MediaState {
+        // The vault quota is checked here, where both paths meet: it used to sit in copyUri only,
+        // so notification bitmaps ignored the 512 MB cap entirely (QI-MEDIA-016). A full store is
+        // its own state — calling a 4 KB thumbnail "too large" was never true.
+        if (dir.totalBytes() > QUOTA_BYTES) return MediaState.VAULT_MEDIA_FULL
         val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
         val isImage = opts.outWidth > 0 && opts.outHeight > 0
@@ -211,5 +216,8 @@ class MediaCopier @Inject constructor(
         const val QUOTA_BYTES = 512L * 1024 * 1024
         const val THUMB_MAX = 512
         const val READ_TIMEOUT_MS = 10_000L
+
+        /** How many provider reads may be parked at once before later copies fail fast. */
+        const val READ_PARALLELISM = 2
     }
 }

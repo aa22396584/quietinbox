@@ -4,6 +4,47 @@ All notable changes to this project are documented here. The format follows Keep
 
 ## [Unreleased]
 
+Fixes from the second GPT-5.5 Pro re-review (issues #22–#27). Every item was re-verified against the
+code before it was worked: some of what the review asked for was already there, and two of its claims
+were wrong in a way that changed the fix.
+
+### Fixed
+- **A hung media provider could hang "Delete everything" and "Restore" for ever.** The 10-second read
+  timeout was around `openInputStream` and `InputStream.read`, both blocking binder calls with no
+  suspension point, so it could not fire until the read had already returned — the timeout was dead
+  code. The blocked worker held one of the copier's two permits and stayed registered in
+  `VaultMaintenance.workers`, which an exclusive run joins *before* it takes the pipeline lock. The
+  read now runs in the copier's own scope and is awaited with a timeout, so the copy gives up on time
+  and the thread is abandoned rather than joined.
+- **A media URI whose provider had gone away was reported as "media too large".** A dead provider
+  returns a null stream instead of throwing, and that fell into the same branch as the over-size
+  early return. It is an expired link, and says so.
+- **Notification bitmaps ignored the 512 MB media quota**, which was checked only on the `content://`
+  path. The check now sits where both paths meet. Quota exhaustion also has its own state and label:
+  calling a 4 KB thumbnail "media too large" because the vault was full was never true.
+- **A message whose media copy threw showed an hourglass for ever.** The row stayed `PENDING`, and
+  `MessageDao.pendingMedia` — the query written for exactly this — had no caller anywhere. One
+  failing copy also cancelled every sibling in its batch, leaving those `PENDING` too. Copies are now
+  independent of one another, a failure is recorded as one, and the retention sweep settles anything
+  still pending after an hour.
+- **Media files whose row never committed were permanent dead weight.** Reclamation compared rows to
+  rows and never the directory to the database, so a file written before a process death (or an
+  interrupted restore) was never seen again. The sweep now removes files no row points at, skipping
+  anything younger than an hour so it cannot race a copy that has not committed yet.
+- **Media copies were queued without a bound.** Only bitmaps were counted, so any number of URI-only
+  copies could pile up behind the copier's two permits, each one a job an exclusive run has to join.
+- Opening the source app swallowed a failed launch: if the app had been disabled or removed since the
+  button was drawn, nothing happened and nothing was said. It now says so.
+- The same dialog claimed "the original notification is no longer active" every single time, because
+  the flag behind it was hardcoded. QuietInbox never keeps a source `PendingIntent`, so it cannot know
+  whether the notification is live — the sentence now says what is actually true: the app opens at its
+  own starting screen, not at this chat.
+- An avatar monogram cut a surrogate pair in half, so a name beginning with an emoji ("😀 Mom") drew a
+  lone half-character as tofu. Two call sites, not one.
+- The Traditional Chinese activity tab was labelled 神隱率 — slang for "went dark on you" — which is
+  precisely the claim `ActivityAnalytics` and that catalogue's own header forbid. It is 安靜天數 now,
+  in step with the Japanese and Korean labels. The word also reached the live Play store description.
+
 ### Changed
 - `SHA256SUMS.txt` no longer opens with a comment line: `sha256sum -c` reports one as "improperly
   formatted". Which of its four files the release actually carries is said in the release notes now,

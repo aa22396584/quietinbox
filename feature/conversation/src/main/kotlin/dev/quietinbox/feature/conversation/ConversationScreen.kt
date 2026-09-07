@@ -1,5 +1,6 @@
 package dev.quietinbox.feature.conversation
 
+import android.content.ActivityNotFoundException
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -261,15 +262,33 @@ fun ConversationScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(stringResource(R.string.conv_open_source_body, state.sourceLabel))
-                    if (d.fallbackToHome) Text(stringResource(R.string.conv_open_source_fallback), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.conv_open_source_fallback), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             },
-            confirmButton = { TextButton(onClick = { openDialog = null; runCatching { context.startActivity(d.intent) } }) { Text(stringResource(R.string.action_open)) } },
+            // A launch can still fail: the package may have been disabled or removed since the
+            // button was enabled. Saying nothing would leave the user believing the app opened.
+            confirmButton = {
+                TextButton(onClick = {
+                    openDialog = try {
+                        context.startActivity(d.intent)
+                        null
+                    } catch (_: ActivityNotFoundException) {
+                        OpenSourceResult.LaunchFailed
+                    } catch (_: SecurityException) {
+                        OpenSourceResult.LaunchFailed
+                    }
+                }) { Text(stringResource(R.string.action_open)) }
+            },
             dismissButton = { TextButton(onClick = { openDialog = null }) { Text(stringResource(R.string.action_cancel)) } },
         )
         OpenSourceResult.NotInstalled -> AlertDialog(
             onDismissRequest = { openDialog = null },
             text = { Text(stringResource(R.string.conv_open_source_unavailable)) },
+            confirmButton = { TextButton(onClick = { openDialog = null }) { Text(stringResource(R.string.action_ok)) } },
+        )
+        OpenSourceResult.LaunchFailed -> AlertDialog(
+            onDismissRequest = { openDialog = null },
+            text = { Text(stringResource(R.string.conv_open_source_failed, state.sourceLabel)) },
             confirmButton = { TextButton(onClick = { openDialog = null }) { Text(stringResource(R.string.action_ok)) } },
         )
         null -> Unit

@@ -70,10 +70,27 @@ fun monogram(label: String?): String {
     if (Character.isIdeographic(first) || Character.UnicodeScript.of(first) in SINGLE_GLYPH_SCRIPTS) return firstStr
     val parts = t.split(' ', '　').filter { it.isNotBlank() }
     return if (parts.size >= 2) {
-        (parts[0].take(1) + parts[1].take(1)).uppercase()
+        (parts[0].firstCodePoints(1) + parts[1].firstCodePoints(1)).uppercase()
     } else {
-        t.take(2).uppercase()
+        t.firstCodePoints(2).uppercase()
     }
+}
+
+/**
+ * The first [n] code points, never half of one: `take` counts UTF-16 units, so a label that starts
+ * with an emoji ("😀 Mom") would otherwise yield a lone surrogate and render as tofu.
+ */
+private fun String.firstCodePoints(n: Int): String {
+    val out = StringBuilder()
+    var i = 0
+    var taken = 0
+    while (i < length && taken < n) {
+        val cp = codePointAt(i)
+        out.appendCodePoint(cp)
+        i += Character.charCount(cp)
+        taken++
+    }
+    return out.toString()
 }
 
 /** Loads a launcher icon for [packageName] off the main thread, memoised per composition. */

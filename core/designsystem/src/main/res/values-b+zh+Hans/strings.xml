@@ -82,7 +82,8 @@
     <string name="conv_open_source">在来源应用中打开</string>
     <string name="conv_open_source_title">要打开来源应用吗？</string>
     <string name="conv_open_source_body">QuietInbox 将启动 %1$s。在那边打开聊天可能会在来源应用中把消息标为已读；在这里查看副本则永远不会。</string>
-    <string name="conv_open_source_fallback">原始通知已不存在，将改为打开该应用的首页。</string>
+    <string name="conv_open_source_fallback">QuietInbox 不会保留原始通知的操作，所以打开的是该 App 自己的起始界面，不是这个聊天。</string>
+    <string name="conv_open_source_failed">无法打开 %1$s。它可能在这个界面打开之后被停用或移除了。</string>
     <string name="conv_open_source_unavailable">来源应用未安装。</string>
     <string name="conv_time_source">来源时间</string>
     <string name="conv_time_notification">通知时间</string>
@@ -97,6 +98,7 @@
     <string name="conv_media_expired">媒体链接已失效</string>
     <string name="conv_media_denied">媒体权限不足</string>
     <string name="conv_media_too_large">媒体超过大小上限</string>
+    <string name="conv_media_vault_full">媒体存储空间已满</string>
     <string name="conv_media_disabled">已停用媒体复制</string>
     <string name="conv_media_failed">媒体复制失败</string>
     <string name="conv_origin_resync">重连后核对</string>

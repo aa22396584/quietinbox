@@ -33,6 +33,7 @@ import org.junit.runner.RunWith
 import java.io.File
 import java.io.InputStream
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicReference
 
 
 
@@ -90,15 +91,19 @@ class BackupHangTest {
     @Test
     fun cancellingANeverReturningReadReleasesTheCallerAndDoesNotHoldExclusive() = runBlocking {
         val entered = CountDownLatch(1)
+        val lock = Any()
         service.openInput = {
             object : InputStream() {
                 override fun read(): Int {
-                    entered.countDown()
-                    releaseHung.await()
-                    return -1
+                    synchronized(lock) {
+                        entered.countDown()
+                        releaseHung.await()
+                        return -1
+                    }
                 }
                 override fun close() {
-                    // Close must not be what unblocks the caller; cancel of the waiter is.
+                    // Same monitor as read: a caller that close()s here would wait forever.
+                    synchronized(lock) { }
                 }
             }
         }
@@ -131,6 +136,38 @@ class BackupHangTest {
         val result = service.import(Uri.fromFile(backup), recoveryKey)
         result.shouldBeInstanceOf<BackupResult.Failed>().reason shouldBe BackupResult.Reason.KEY_UNAVAILABLE
         keys.epoch shouldBe epoch + 1
+        Unit
+    }
+
+    @Test
+    fun openAndApplyDoNotRunOnMain() = runBlocking {
+        val snapshot = Fixtures.snapshot(Fixtures.bigText("Alice", "keep", tag = "t1"), packageName = KnownSources.TELEGRAM, eventId = "h2", observedAt = 1_700_000_000_000L)
+        ingest.journal(snapshot, "gen", 60_000) shouldBe true
+        val batch = parser.parse(snapshot)
+        val id = identity.resolve(snapshot, batch)
+        val r = reconciler.reconcile(snapshot.notificationKey, batch.messages, ingest.checkpoint(id.streamKey), lookupById = { null })
+        ingest.commit(snapshot, batch, id, r, "gen", null, mediaAllowed = false)
+        val backup = File(context.cacheDir, "threads.qibk")
+        service.export(Uri.fromFile(backup), "test").shouldBeInstanceOf<BackupResult.Ok>()
+        val recovery = service.recoveryKeyText().shouldBeInstanceOf<KeyResult.Ok<String>>().value
+        holder.closeAndDeleteFiles() shouldBe true
+        holder.retry()
+        ready()
+        val openOn = AtomicReference<String>()
+        val applyOn = AtomicReference<String>()
+        val realOpen = service.openInput
+        service.openInput = { uri ->
+            openOn.set(Thread.currentThread().name)
+            realOpen(uri)
+        }
+        service.applyThreadProbe = { applyOn.set(Thread.currentThread().name) }
+        withTimeout(20_000) {
+            kotlinx.coroutines.withContext(Dispatchers.Main) {
+                service.import(Uri.fromFile(backup), recovery).shouldBeInstanceOf<BackupResult.Ok>()
+            }
+        }
+        openOn.get()!!.startsWith("main") shouldBe false
+        applyOn.get()!!.startsWith("main") shouldBe false
         Unit
     }
 }

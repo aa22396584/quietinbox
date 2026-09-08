@@ -262,7 +262,7 @@ class BackupService @Inject constructor(
      */
     suspend fun import(source: Uri, recoveryKeyText: String): BackupResult {
         val token = importSeq.incrementAndGet()
-        currentImportStream.getAndSet(null)?.let { runCatching { it.close() } }
+        abandonClose(currentImportStream.get())
         val epoch = keyMaterial.epoch
         val staged = try {
             stageFromSource(source, recoveryKeyText)
@@ -284,21 +284,23 @@ class BackupService @Inject constructor(
         afterStaged()
         if (token != importSeq.get()) return BackupResult.Failed(BackupResult.Reason.MAINTENANCE)
         if (keyMaterial.epoch != epoch) return BackupResult.Failed(BackupResult.Reason.KEY_UNAVAILABLE)
-        val mediaBytes = staged.media.sumOf { it.dataBase64.length.toLong() * 3 / 4 }
-        val free = freeBytes()
-        if (free < mediaBytes + LOW_SPACE_FLOOR_BYTES) {
-            return BackupResult.Failed(BackupResult.Reason.LOW_SPACE, "need ${mediaBytes + LOW_SPACE_FLOOR_BYTES}, free $free")
-        }
-        return maintenance.exclusive {
-            if (token != importSeq.get()) return@exclusive BackupResult.Failed(BackupResult.Reason.MAINTENANCE)
-            if (keyMaterial.epoch != epoch) return@exclusive BackupResult.Failed(BackupResult.Reason.KEY_UNAVAILABLE)
-            val db = try {
-                holder.db()
-            } catch (e: Exception) {
-                if (e is CancellationException) throw e
-                return@exclusive BackupResult.Failed(BackupResult.Reason.VAULT_UNAVAILABLE)
+        return withContext(Dispatchers.IO) {
+            val mediaBytes = staged.media.sumOf { it.dataBase64.length.toLong() * 3 / 4 }
+            val free = freeBytes()
+            if (free < mediaBytes + LOW_SPACE_FLOOR_BYTES) {
+                return@withContext BackupResult.Failed(BackupResult.Reason.LOW_SPACE, "need ${mediaBytes + LOW_SPACE_FLOOR_BYTES}, free $free")
             }
-            apply(db, staged)
+            maintenance.exclusive {
+                if (token != importSeq.get()) return@exclusive BackupResult.Failed(BackupResult.Reason.MAINTENANCE)
+                if (keyMaterial.epoch != epoch) return@exclusive BackupResult.Failed(BackupResult.Reason.KEY_UNAVAILABLE)
+                val db = try {
+                    holder.db()
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    return@exclusive BackupResult.Failed(BackupResult.Reason.VAULT_UNAVAILABLE)
+                }
+                apply(db, staged)
+            }
         }
     }
 
@@ -311,40 +313,45 @@ class BackupService @Inject constructor(
      */
     internal var afterStaged: suspend () -> Unit = {}
 
+    /** Test seam: production is a no-op. Called on the thread that is about to write the vault. */
+    internal var applyThreadProbe: () -> Unit = {}
+
+    /** Close a provider stream on the import-read pool without waiting for it. */
+    private fun abandonClose(stream: InputStream?) {
+        if (stream == null) return
+        importReads.launch { runCatching { stream.close() } }
+    }
+
     private suspend fun stageFromSource(source: Uri, recoveryKeyText: String): Staged {
-        val input = openInput(source) ?: throw StagingException(BackupResult.Reason.IO, "open")
-        currentImportStream.getAndSet(input)?.let { runCatching { it.close() } }
         val result = CompletableDeferred<Staged>()
         importReads.launch {
             if (liveImportReads.incrementAndGet() > MAX_LIVE_IMPORT_READS) {
                 liveImportReads.decrementAndGet()
                 result.completeExceptionally(StagingException(BackupResult.Reason.IO, "read slot"))
-                runCatching { input.close() }
                 return@launch
             }
-            val key = RecoveryKeyCodec.decode(recoveryKeyText)
-            if (key == null) {
-                liveImportReads.decrementAndGet()
-                result.completeExceptionally(StagingException(BackupResult.Reason.WRONG_KEY_OR_TAMPERED, "key format"))
-                runCatching { input.close() }
-                return@launch
-            }
+            var input: InputStream? = null
+            var key: ByteArray? = null
             try {
-                val staged = input.use { raw -> readAndStage(raw, key) }
-                result.complete(staged)
+                input = openInput(source) ?: throw StagingException(BackupResult.Reason.IO, "open")
+                currentImportStream.set(input)
+                key = RecoveryKeyCodec.decode(recoveryKeyText)
+                    ?: throw StagingException(BackupResult.Reason.WRONG_KEY_OR_TAMPERED, "key format")
+                result.complete(readAndStage(input, key))
             } catch (e: Throwable) {
                 result.completeExceptionally(e)
             } finally {
-                key.fill(0)
-                liveImportReads.decrementAndGet()
+                key?.fill(0)
                 currentImportStream.compareAndSet(input, null)
-                runCatching { input.close() }
+                runCatching { input?.close() }
+                liveImportReads.decrementAndGet()
             }
         }
         try {
             return result.await()
-        } finally {
-            runCatching { input.close() }
+        } catch (e: CancellationException) {
+            abandonClose(currentImportStream.get())
+            throw e
         }
     }
 
@@ -382,6 +389,7 @@ class BackupService @Inject constructor(
      * time), so legitimate duplicates inside the backup keep their multiplicity.
      */
     private suspend fun apply(db: QuietInboxDatabase, s: Staged): BackupResult {
+        applyThreadProbe()
         // Every blob written to disk and not yet owned by a committed row. Trimmed to the unused
         // ones *inside* the transaction (see below), so the same list is right on every exit.
         val writtenFiles = ArrayList<String>()

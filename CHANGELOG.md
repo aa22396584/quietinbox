@@ -16,7 +16,8 @@ All notable changes to this project are documented here. The format follows Keep
   the blob, kept `LOCAL_COPY`) did not increment the partial-media warning. Backup-absent media is
   counted as `skippedMedia` on restore; decode/write failures stay `mediaNotRestored`.
 - **Import held exclusive vault maintenance across `InputStream.read`.** Staging is outside
-  exclusive; a cancelled never-returning read returns to the caller and leaves maintenance free. A
+  exclusive; cancelling does not `close()` the provider on the caller thread (a `close` that shares
+  a lock with `read` would otherwise hang). Open, decode and apply run on IO, not the UI thread. A
   write after a key-epoch change does not land. Not a timeout around the exclusive section.
 
 ### Tests / CI

@@ -299,7 +299,8 @@
     <string name="backup_import">Restore from backup</string>
     <string name="backup_import_desc">Merges a backup into this vault after verifying every block. This can bring back content you deleted earlier. Restored sources come back disabled; re-enable them in Capture.</string>
     <string name="backup_abort">Stop</string>
-    <string name="backup_stopped">Stopped. Nothing was changed.</string>
+    <string name="backup_stopped">Stopped. The vault was not changed.</string>
+    <string name="backup_export_stopped">Stopped. The destination file may be incomplete.</string>
     <string name="backup_import_key_prompt">Enter the recovery key of the device that made the backup</string>
     <string name="backup_result_ok">Done: %1$d conversations, %2$d messages, %3$d media items.</string>
     <string name="backup_result_partial_media">%1$d media items could not be read and are not in this backup.</string>

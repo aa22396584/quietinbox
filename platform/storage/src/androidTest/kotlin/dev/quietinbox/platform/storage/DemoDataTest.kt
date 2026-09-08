@@ -150,7 +150,9 @@ class DemoDataTest {
             // The projection has to agree with the rows, exactly as commit keeps it.
             conversation.messageCount shouldBe messages.count { it.dedupState != DedupState.AMBIGUOUS_REPEAT }
             conversation.ambiguousCount shouldBe messages.count { it.dedupState == DedupState.AMBIGUOUS_REPEAT }
-            conversation.lastActivityEpochMs shouldBe messages.maxOf { it.sortKey }
+            // Inbox lastActivity is max observedAt of currently visible copies (observeInboxAt),
+            // not sortKey — the two diverge when a later observation keeps an earlier source time.
+            conversation.lastActivityEpochMs shouldBe messages.maxOf { it.observedAtEpochMs }
             // Analytics reads sortKey and asks for the last 30 days; nothing may fall outside it.
             messages.all { it.sortKey in (now - 30L * 24 * 60 * 60 * 1000)..now } shouldBe true
             messages.all { it.observedAtEpochMs >= it.sortKey } shouldBe true

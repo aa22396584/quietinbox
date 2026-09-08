@@ -42,6 +42,7 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -58,7 +59,7 @@ sealed interface BackupResult {
     data class Ok(val counts: Counts, val skippedMedia: Int = 0, val mediaNotRestored: Int = 0) : BackupResult
     data class Failed(val reason: Reason, val detail: String? = null) : BackupResult
 
-    enum class Reason { NO_RECOVERY_KEY, KEY_UNAVAILABLE, IO, BAD_HEADER, WRONG_KEY_OR_TAMPERED, CORRUPT, TRUNCATED, COUNT_MISMATCH, TOO_LARGE, UNSUPPORTED_VERSION, VAULT_UNAVAILABLE, MAINTENANCE, LOW_SPACE, ABORTED }
+    enum class Reason { NO_RECOVERY_KEY, KEY_UNAVAILABLE, IO, BAD_HEADER, WRONG_KEY_OR_TAMPERED, CORRUPT, TRUNCATED, COUNT_MISMATCH, TOO_LARGE, UNSUPPORTED_VERSION, VAULT_UNAVAILABLE, MAINTENANCE, LOW_SPACE, ABORTED, EXPORT_ABORTED }
 }
 
 /**
@@ -100,10 +101,22 @@ class BackupService @Inject constructor(
     private val exportWrites = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val liveImportReads = AtomicInteger(0)
     private val liveExportWrites = AtomicInteger(0)
+    /** Unique stream-map key per import; not an abort signal. */
     private val importSeq = AtomicLong(0)
+    /** Unique stream-map key per export; not an abort signal. */
     private val exportSeq = AtomicLong(0)
+    /** Bumped only by [abort]; a sibling import must not look like a stop. */
+    private val importGen = AtomicLong(0)
+    /** Bumped only by [abort]; a sibling export must not look like a stop. */
+    private val exportGen = AtomicLong(0)
     private val importStreams = ConcurrentHashMap<Long, InputStream>()
     private val exportStreams = ConcurrentHashMap<Long, OutputStream>()
+    private val importIo = Any()
+    private val exportIo = Any()
+    /** Durable restore outcome, independent of the UI waiter's cancellation. */
+    private val settledImportRef = AtomicReference<BackupResult?>(null)
+    /** Durable export outcome (copy and close both succeeded). */
+    private val settledExportRef = AtomicReference<BackupResult?>(null)
 
     private companion object {
         /** Rows per keyset page while exporting. */
@@ -121,15 +134,24 @@ class BackupService @Inject constructor(
      * without waiting. Does not close another operation's stream: each token owns its own.
      */
     fun abort() {
-        importSeq.incrementAndGet()
-        exportSeq.incrementAndGet()
-        for (key in importStreams.keys.toList()) {
-            importStreams.remove(key)?.let { abandonClose(it) }
+        val inputs: List<InputStream>
+        val outputs: List<OutputStream>
+        synchronized(importIo) {
+            importGen.incrementAndGet()
+            inputs = importStreams.values.toList()
+            importStreams.clear()
         }
-        for (key in exportStreams.keys.toList()) {
-            exportStreams.remove(key)?.let { abandonCloseOutput(it) }
+        synchronized(exportIo) {
+            exportGen.incrementAndGet()
+            outputs = exportStreams.values.toList()
+            exportStreams.clear()
         }
+        for (s in inputs) abandonClose(s)
+        for (s in outputs) abandonCloseOutput(s)
     }
+
+    fun settledImport(): BackupResult? = settledImportRef.get()
+    fun settledExport(): BackupResult? = settledExportRef.get()
 
     /** The recovery key as text the user must save; created on first call. */
     fun recoveryKeyText(): KeyResult<String> = when (val r = keyMaterial.recovery.getOrCreate()) {
@@ -138,17 +160,23 @@ class BackupService @Inject constructor(
     }
 
     suspend fun export(target: Uri, appVersion: String): BackupResult {
-        val token = exportSeq.incrementAndGet()
+        settledExportRef.set(null)
+        val token: Long
+        val gen: Long
+        synchronized(exportIo) {
+            token = exportSeq.incrementAndGet()
+            gen = exportGen.get()
+        }
         val staged = maintenance.work { writeStagingFile(appVersion) }
             ?: return BackupResult.Failed(BackupResult.Reason.MAINTENANCE)
         return when (staged) {
             is StagingWrite.Fail -> staged.result
             is StagingWrite.Ok -> {
-                if (token != exportSeq.get()) {
+                if (!exportStillActive(gen)) {
                     staged.file.delete()
-                    BackupResult.Failed(BackupResult.Reason.ABORTED)
+                    BackupResult.Failed(BackupResult.Reason.EXPORT_ABORTED)
                 } else {
-                    copyStagingToTarget(token, staged, target)
+                    copyStagingToTarget(token, gen, staged, target)
                 }
             }
         }
@@ -196,7 +224,7 @@ class BackupService @Inject constructor(
         }
     }
 
-    private suspend fun copyStagingToTarget(token: Long, staged: StagingWrite.Ok, target: Uri): BackupResult {
+    private suspend fun copyStagingToTarget(token: Long, gen: Long, staged: StagingWrite.Ok, target: Uri): BackupResult {
         val result = CompletableDeferred<BackupResult>()
         exportWrites.launch {
             if (liveExportWrites.incrementAndGet() > MAX_LIVE_EXPORT_WRITES) {
@@ -206,24 +234,60 @@ class BackupService @Inject constructor(
                 return@launch
             }
             var dest: OutputStream? = null
+            var closed = false
             try {
-                if (token != exportSeq.get()) {
-                    result.complete(BackupResult.Failed(BackupResult.Reason.ABORTED))
+                if (!exportStillActive(gen)) {
+                    result.complete(BackupResult.Failed(BackupResult.Reason.EXPORT_ABORTED))
                     return@launch
                 }
                 val opened = openOutput(target) ?: throw java.io.IOException("open")
-                dest = opened
-                exportStreams[token] = opened
-                FileInputStream(staged.file).use { input -> input.copyTo(opened) }
-                result.complete(BackupResult.Ok(staged.counts, staged.skippedMedia))
+                val claimed: Boolean
+                synchronized(exportIo) {
+                    if (gen != exportGen.get()) {
+                        dest = opened
+                        claimed = false
+                    } else {
+                        dest = opened
+                        exportStreams[token] = opened
+                        claimed = true
+                    }
+                }
+                if (!claimed) {
+                    result.complete(BackupResult.Failed(BackupResult.Reason.EXPORT_ABORTED))
+                    return@launch
+                }
+                FileInputStream(staged.file).use { input -> copyWhileExportActive(input, opened, gen) }
+                opened.flush()
+                opened.close()
+                closed = true
+                synchronized(exportIo) { exportStreams.remove(token, opened) }
+                dest = null
+                if (!exportStillActive(gen)) {
+                    result.complete(BackupResult.Failed(BackupResult.Reason.EXPORT_ABORTED))
+                } else {
+                    val ok = BackupResult.Ok(staged.counts, staged.skippedMedia)
+                    settledExportRef.set(ok)
+                    result.complete(ok)
+                }
+            } catch (e: BackupAborted) {
+                if (!result.isCompleted) result.complete(BackupResult.Failed(BackupResult.Reason.EXPORT_ABORTED))
             } catch (e: Throwable) {
                 if (!result.isCompleted) {
-                    if (e is CancellationException) result.completeExceptionally(e)
-                    else result.complete(BackupResult.Failed(BackupResult.Reason.IO, e::class.java.simpleName))
+                    val aborted = !exportStillActive(gen)
+                    when {
+                        e is CancellationException && aborted -> result.complete(BackupResult.Failed(BackupResult.Reason.EXPORT_ABORTED))
+                        e is CancellationException -> result.completeExceptionally(e)
+                        aborted -> result.complete(BackupResult.Failed(BackupResult.Reason.EXPORT_ABORTED))
+                        else -> result.complete(BackupResult.Failed(BackupResult.Reason.IO, e::class.java.simpleName))
+                    }
                 }
             } finally {
-                dest?.let { exportStreams.remove(token, it) }
-                runCatching { dest?.close() }
+                if (!closed) {
+                    dest?.let { stream ->
+                        synchronized(exportIo) { exportStreams.remove(token, stream) }
+                        abandonCloseOutput(stream)
+                    }
+                }
                 liveExportWrites.decrementAndGet()
                 staged.file.delete()
             }
@@ -231,8 +295,25 @@ class BackupService @Inject constructor(
         try {
             return result.await()
         } catch (e: CancellationException) {
-            exportStreams.remove(token)?.let { abandonCloseOutput(it) }
-            return BackupResult.Failed(BackupResult.Reason.ABORTED)
+            val leftover: OutputStream?
+            synchronized(exportIo) { leftover = exportStreams.remove(token) }
+            leftover?.let { abandonCloseOutput(it) }
+            return settledExportRef.get() ?: BackupResult.Failed(BackupResult.Reason.EXPORT_ABORTED)
+        }
+    }
+
+    private fun exportStillActive(gen: Long): Boolean = synchronized(exportIo) { gen == exportGen.get() }
+
+    private fun importStillActive(gen: Long): Boolean = synchronized(importIo) { gen == importGen.get() }
+
+    private fun copyWhileExportActive(input: FileInputStream, dest: OutputStream, gen: Long) {
+        val buf = ByteArray(8192)
+        while (true) {
+            if (!exportStillActive(gen)) throw BackupAborted()
+            val n = input.read(buf)
+            if (n < 0) break
+            dest.write(buf, 0, n)
+            if (!exportStillActive(gen)) throw BackupAborted()
         }
     }
 
@@ -346,12 +427,18 @@ class BackupService @Inject constructor(
      * for as long as an uncooperative provider stayed silent.
      */
     suspend fun import(source: Uri, recoveryKeyText: String): BackupResult {
-        val token = importSeq.incrementAndGet()
+        settledImportRef.set(null)
+        val token: Long
+        val gen: Long
+        synchronized(importIo) {
+            token = importSeq.incrementAndGet()
+            gen = importGen.get()
+        }
         val epoch = keyMaterial.epoch
         val staged = try {
-            stageFromSource(token, source, recoveryKeyText)
+            stageFromSource(token, gen, source, recoveryKeyText)
         } catch (e: CancellationException) {
-            return BackupResult.Failed(BackupResult.Reason.ABORTED)
+            return settledImportRef.get() ?: BackupResult.Failed(BackupResult.Reason.ABORTED)
         } catch (e: java.io.IOException) {
             return BackupResult.Failed(BackupResult.Reason.WRONG_KEY_OR_TAMPERED, e::class.java.simpleName)
         } catch (e: java.security.GeneralSecurityException) {
@@ -361,30 +448,34 @@ class BackupService @Inject constructor(
         } catch (e: StagingException) {
             return BackupResult.Failed(e.reason, e.message)
         } catch (e: Exception) {
-            if (e is CancellationException) throw e
+            if (e is CancellationException) return settledImportRef.get() ?: BackupResult.Failed(BackupResult.Reason.ABORTED)
             return BackupResult.Failed(BackupResult.Reason.IO, e::class.java.simpleName)
         }
-        if (token != importSeq.get()) return BackupResult.Failed(BackupResult.Reason.ABORTED)
-        afterStaged()
-        if (token != importSeq.get()) return BackupResult.Failed(BackupResult.Reason.ABORTED)
-        if (keyMaterial.epoch != epoch) return BackupResult.Failed(BackupResult.Reason.KEY_UNAVAILABLE)
-        return withContext(Dispatchers.IO) {
-            val mediaBytes = staged.media.sumOf { it.dataBase64.length.toLong() * 3 / 4 }
-            val free = freeBytes()
-            if (free < mediaBytes + LOW_SPACE_FLOOR_BYTES) {
-                return@withContext BackupResult.Failed(BackupResult.Reason.LOW_SPACE, "need ${mediaBytes + LOW_SPACE_FLOOR_BYTES}, free $free")
-            }
-            maintenance.exclusive {
-                if (token != importSeq.get()) return@exclusive BackupResult.Failed(BackupResult.Reason.ABORTED)
-                if (keyMaterial.epoch != epoch) return@exclusive BackupResult.Failed(BackupResult.Reason.KEY_UNAVAILABLE)
-                val db = try {
-                    holder.db()
-                } catch (e: Exception) {
-                    if (e is CancellationException) throw e
-                    return@exclusive BackupResult.Failed(BackupResult.Reason.VAULT_UNAVAILABLE)
+        try {
+            if (!importStillActive(gen)) return BackupResult.Failed(BackupResult.Reason.ABORTED)
+            afterStaged()
+            if (!importStillActive(gen)) return BackupResult.Failed(BackupResult.Reason.ABORTED)
+            if (keyMaterial.epoch != epoch) return BackupResult.Failed(BackupResult.Reason.KEY_UNAVAILABLE)
+            return withContext(Dispatchers.IO) {
+                val mediaBytes = staged.media.sumOf { it.dataBase64.length.toLong() * 3 / 4 }
+                val free = freeBytes()
+                if (free < mediaBytes + LOW_SPACE_FLOOR_BYTES) {
+                    return@withContext BackupResult.Failed(BackupResult.Reason.LOW_SPACE, "need ${mediaBytes + LOW_SPACE_FLOOR_BYTES}, free $free")
                 }
-                apply(db, staged, token)
+                maintenance.exclusive {
+                    if (!importStillActive(gen)) return@exclusive BackupResult.Failed(BackupResult.Reason.ABORTED)
+                    if (keyMaterial.epoch != epoch) return@exclusive BackupResult.Failed(BackupResult.Reason.KEY_UNAVAILABLE)
+                    val db = try {
+                        holder.db()
+                    } catch (e: Exception) {
+                        if (e is CancellationException) throw e
+                        return@exclusive BackupResult.Failed(BackupResult.Reason.VAULT_UNAVAILABLE)
+                    }
+                    apply(db, staged, gen)
+                }
             }
+        } catch (e: CancellationException) {
+            return settledImportRef.get() ?: BackupResult.Failed(BackupResult.Reason.ABORTED)
         }
     }
 
@@ -421,7 +512,7 @@ class BackupService @Inject constructor(
         exportWrites.launch { runCatching { stream.close() } }
     }
 
-    private suspend fun stageFromSource(token: Long, source: Uri, recoveryKeyText: String): Staged {
+    private suspend fun stageFromSource(token: Long, gen: Long, source: Uri, recoveryKeyText: String): Staged {
         val result = CompletableDeferred<Staged>()
         importReads.launch {
             if (liveImportReads.incrementAndGet() > MAX_LIVE_IMPORT_READS) {
@@ -433,8 +524,18 @@ class BackupService @Inject constructor(
             var key: ByteArray? = null
             try {
                 val opened = openInput(source) ?: throw StagingException(BackupResult.Reason.IO, "open")
-                input = opened
-                importStreams[token] = opened
+                val claimed: Boolean
+                synchronized(importIo) {
+                    if (gen != importGen.get()) {
+                        input = opened
+                        claimed = false
+                    } else {
+                        input = opened
+                        importStreams[token] = opened
+                        claimed = true
+                    }
+                }
+                if (!claimed) throw StagingException(BackupResult.Reason.ABORTED, "aborted")
                 key = RecoveryKeyCodec.decode(recoveryKeyText)
                     ?: throw StagingException(BackupResult.Reason.WRONG_KEY_OR_TAMPERED, "key format")
                 result.complete(readAndStage(opened, key))
@@ -442,15 +543,19 @@ class BackupService @Inject constructor(
                 result.completeExceptionally(e)
             } finally {
                 key?.fill(0)
-                input?.let { importStreams.remove(token, it) }
-                runCatching { input?.close() }
+                input?.let { stream ->
+                    synchronized(importIo) { importStreams.remove(token, stream) }
+                    runCatching { stream.close() }
+                }
                 liveImportReads.decrementAndGet()
             }
         }
         try {
             return result.await()
         } catch (e: CancellationException) {
-            importStreams.remove(token)?.let { abandonClose(it) }
+            val leftover: InputStream?
+            synchronized(importIo) { leftover = importStreams.remove(token) }
+            leftover?.let { abandonClose(it) }
             throw e
         }
     }
@@ -488,10 +593,10 @@ class BackupService @Inject constructor(
      * already existed *before* this import are skipped (same fingerprint + sort key + observed
      * time), so legitimate duplicates inside the backup keep their multiplicity.
      */
-    private suspend fun apply(db: QuietInboxDatabase, s: Staged, token: Long): BackupResult {
+    private suspend fun apply(db: QuietInboxDatabase, s: Staged, abortGen: Long): BackupResult {
         applyThreadProbe()
         fun checkToken() {
-            if (token != importSeq.get()) throw BackupAborted()
+            if (abortGen != importGen.get()) throw BackupAborted()
         }
         // Every blob written to disk and not yet owned by a committed row. Trimmed to the unused
         // ones *inside* the transaction (see below), so the same list is right on every exit.
@@ -668,6 +773,7 @@ class BackupService @Inject constructor(
                 Triple(Counts(s.sources.size, convMap.size, inserted, restoredRevisions, usedFiles.size), mediaNotRestored, mediaAbsent)
             }
             committed = BackupResult.Ok(counts.first, skippedMedia = counts.third, mediaNotRestored = counts.second)
+            settledImportRef.set(committed)
             restoreProbe(RestorePoint.AFTER_COMMIT)
             // Blobs prepared for messages that were skipped (duplicates, orphans) have no row: remove them.
             for (f in writtenFiles) mediaDir.delete(f)

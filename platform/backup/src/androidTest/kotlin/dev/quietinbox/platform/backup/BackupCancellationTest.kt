@@ -19,7 +19,6 @@ import dev.quietinbox.platform.storage.db.VaultState
 import dev.quietinbox.platform.storage.repo.IngestRepository
 import dev.quietinbox.platform.storage.retention.MediaDirectory
 import dev.quietinbox.platform.storage.settings.SettingsRepository
-import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.types.shouldBeInstanceOf
@@ -120,7 +119,8 @@ class BackupCancellationTest {
     @Test
     fun aCancellationLandingAfterTheCommitKeepsTheFilesTheRowsPointAtAndRemovesTheRest() = runBlocking {
         cancelAt(BackupService.RestorePoint.AFTER_COMMIT)
-        shouldThrow<CancellationException> { service.import(Uri.fromFile(backup), recoveryKey) }
+        val first = service.import(Uri.fromFile(backup), recoveryKey).shouldBeInstanceOf<BackupResult.Ok>()
+        first.counts.messages shouldBe 1
         ready()
         val restored = restoredRows()
         restored.size shouldBe 1
@@ -129,9 +129,9 @@ class BackupCancellationTest {
         mediaDir.file(blob.fileName).exists() shouldBe true
         mediaFiles() shouldBe listOf(blob.fileName)
 
-        // The same backup again: its message is a duplicate, so the blob prepared for it has no
-        // row, and the cancellation on the way out must remove that one and only that one.
-        shouldThrow<CancellationException> { service.import(Uri.fromFile(backup), recoveryKey) }
+        // Duplicate import: the extra prepared blob has no row and must be removed; the message is not duplicated.
+        service.restoreProbe = {}
+        service.import(Uri.fromFile(backup), recoveryKey).shouldBeInstanceOf<BackupResult.Ok>()
         ready()
         restoredRows().size shouldBe 1
         mediaFiles() shouldBe listOf(blob.fileName)
@@ -173,7 +173,8 @@ class BackupCancellationTest {
     @Test
     fun aCancellationLandingInsideTheTransactionRollsTheRowsBackAndRemovesEveryFile() = runBlocking {
         cancelAt(BackupService.RestorePoint.IN_TRANSACTION)
-        shouldThrow<CancellationException> { service.import(Uri.fromFile(backup), recoveryKey) }
+        val result = service.import(Uri.fromFile(backup), recoveryKey)
+        result.shouldBeInstanceOf<BackupResult.Failed>().reason shouldBe BackupResult.Reason.ABORTED
         ready()
         restoredRows() shouldBe emptyList()
         mediaFiles() shouldBe emptyList()

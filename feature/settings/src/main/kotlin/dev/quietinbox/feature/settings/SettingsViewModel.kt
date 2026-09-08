@@ -107,7 +107,8 @@ class SettingsViewModel @Inject constructor(
             val result = try {
                 backup.export(target, state.value.versionName)
             } catch (cancellation: CancellationException) {
-                local.update { it.copy(busy = false, backupInProgress = false, lastBackup = BackupResult.Failed(BackupResult.Reason.ABORTED)) }
+                val settled = backup.settledExport() ?: BackupResult.Failed(BackupResult.Reason.EXPORT_ABORTED)
+                local.update { it.copy(busy = false, backupInProgress = false, lastBackup = settled) }
                 throw cancellation
             }
             local.update { it.copy(busy = false, backupInProgress = false, lastBackup = result) }
@@ -120,7 +121,8 @@ class SettingsViewModel @Inject constructor(
             val result = try {
                 backup.import(source, key)
             } catch (cancellation: CancellationException) {
-                local.update { it.copy(busy = false, backupInProgress = false, lastBackup = BackupResult.Failed(BackupResult.Reason.ABORTED)) }
+                val settled = backup.settledImport() ?: BackupResult.Failed(BackupResult.Reason.ABORTED)
+                local.update { it.copy(busy = false, backupInProgress = false, lastBackup = settled) }
                 throw cancellation
             }
             local.update { it.copy(busy = false, backupInProgress = false, lastBackup = result) }

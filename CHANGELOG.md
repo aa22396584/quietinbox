@@ -20,8 +20,10 @@ All notable changes to this project are documented here. The format follows Keep
   close another operation's stream, and an import already in staging/apply could not be aborted.
   Dest-copy is outside the worker gate; each operation owns its stream; Settings can stop an
   in-progress export or import (not "Delete everything"). Stop before the vault write reports
-  "nothing was changed"; stop after the rows are durable still reports the restore, never as a
-  no-op cancel.
+  that the vault was not changed; stop after the rows are durable still reports the restore,
+  even when the waiting job is cancelled. A destination that opens only after Stop is closed
+  unused. Export Ok is published only after a successful close; a throwing close is IO, not
+  Done. Export abort copy does not claim the destination file is unchanged.
 
 - **Search paging could mix a previous query's cursor into a new search**, and a stale page
   completing could clear a newer load-more spinner. Query, sources, frozen time range, cursor and

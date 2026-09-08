@@ -438,6 +438,7 @@ private fun backupResultText(result: BackupResult?): String? = when (result) {
         BackupResult.Reason.MAINTENANCE -> stringResource(R.string.backup_failed_maintenance)
         BackupResult.Reason.LOW_SPACE -> stringResource(R.string.backup_failed_low_space)
         BackupResult.Reason.ABORTED -> stringResource(R.string.backup_stopped)
+        BackupResult.Reason.EXPORT_ABORTED -> stringResource(R.string.backup_export_stopped)
     }
 }
 

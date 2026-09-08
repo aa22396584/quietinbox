@@ -296,7 +296,8 @@
     <string name="backup_import">バックアップから復元</string>
     <string name="backup_import_desc">すべてのブロックを検証したうえで、バックアップをこの保管庫にマージします。以前に削除した内容が戻ることがあります。復元したソースは無効の状態で戻るため、「キャプチャ」で再度有効にしてください。</string>
     <string name="backup_abort">中止</string>
-    <string name="backup_stopped">停止しました。変更はありません。</string>
+    <string name="backup_stopped">停止しました。保管庫は変更されていません。</string>
+    <string name="backup_export_stopped">停止しました。保存先のファイルは不完全な可能性があります。</string>
     <string name="backup_import_key_prompt">バックアップを作成した端末の復旧キーを入力</string>
     <string name="backup_result_ok">完了: 会話 %1$d 件、メッセージ %2$d 件、メディア %3$d 件。</string>
     <string name="backup_result_partial_media">%1$d 件のメディアを読み取れなかったため、このバックアップには含まれていません。</string>

@@ -19,7 +19,6 @@ import dev.quietinbox.platform.storage.retention.MediaDirectory
 import dev.quietinbox.platform.storage.settings.SettingsRepository
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filterIsInstance
@@ -327,14 +326,17 @@ class BackupHangTest {
         holder.closeAndDeleteFiles() shouldBe true
         holder.retry()
         ready()
+        val result = AtomicReference<BackupResult?>(null)
+        var waiter: kotlinx.coroutines.Job? = null
         service.restoreProbe = { point ->
             if (point == BackupService.RestorePoint.AFTER_COMMIT) {
                 service.abort()
-                throw CancellationException()
+                waiter?.cancel()
             }
         }
-        val result = service.import(Uri.fromFile(backup), recoveryKey)
-        result.shouldBeInstanceOf<BackupResult.Ok>()
+        waiter = launch(Dispatchers.IO) { result.set(service.import(Uri.fromFile(backup), recoveryKey)) }
+        withTimeout(20_000) { waiter!!.join() }
+        result.get().shouldBeInstanceOf<BackupResult.Ok>()
         holder.db().messageDao().exportPage(0L, 10, System.currentTimeMillis()).size shouldBe 1
         backup.delete()
         Unit
@@ -376,9 +378,118 @@ class BackupHangTest {
         withTimeout(5_000) { maintenance.exclusive { 7 } shouldBe 7 }
         job.cancel()
         withTimeout(5_000) { job.join() }
-        result.get().shouldBeInstanceOf<BackupResult.Failed>().reason shouldBe BackupResult.Reason.ABORTED
+        result.get().shouldBeInstanceOf<BackupResult.Failed>().reason shouldBe BackupResult.Reason.EXPORT_ABORTED
         maintenance.isActive shouldBe false
         withTimeout(5_000) { maintenance.exclusive { 9 } shouldBe 9 }
+        Unit
+    }
+
+    @Test
+    fun aLateValidExportStreamAfterStopIsNotWritten() = runBlocking {
+        val opened = CountDownLatch(1)
+        val written = AtomicInteger(0)
+        val result = AtomicReference<BackupResult?>(null)
+        service.openOutput = {
+            opened.countDown()
+            releaseHung.await()
+            object : OutputStream() {
+                override fun write(b: Int) { written.incrementAndGet() }
+                override fun write(b: ByteArray, off: Int, len: Int) { written.addAndGet(len) }
+                override fun close() {}
+            }
+        }
+        val job = launch(Dispatchers.IO) { result.set(service.export(Uri.parse("content://quietinbox.test/late-open"), "test")) }
+        withTimeout(15_000) { while (opened.count > 0) delay(10) }
+        job.cancel()
+        service.abort()
+        withTimeout(5_000) { job.join() }
+        result.get().shouldBeInstanceOf<BackupResult.Failed>().reason shouldBe BackupResult.Reason.EXPORT_ABORTED
+        written.get() shouldBe 0
+        releaseHung.countDown()
+        delay(400)
+        written.get() shouldBe 0
+        Unit
+    }
+
+    @Test
+    fun aLateValidImportStreamAfterStopDoesNotApply() = runBlocking {
+        val backup = exportOneMessage("late-import.qibk")
+        holder.closeAndDeleteFiles() shouldBe true
+        holder.retry()
+        ready()
+        val opened = CountDownLatch(1)
+        val reads = AtomicInteger(0)
+        service.openInput = {
+            opened.countDown()
+            releaseHung.await()
+            object : InputStream() {
+                private val inner = java.io.FileInputStream(backup)
+                override fun read(): Int {
+                    reads.incrementAndGet()
+                    return inner.read()
+                }
+                override fun read(b: ByteArray, off: Int, len: Int): Int {
+                    reads.incrementAndGet()
+                    return inner.read(b, off, len)
+                }
+                override fun close() { inner.close() }
+            }
+        }
+        val result = AtomicReference<BackupResult?>(null)
+        val job = launch(Dispatchers.IO) { result.set(service.import(Uri.parse("content://quietinbox.test/late-in"), recoveryKey)) }
+        withTimeout(5_000) { while (opened.count > 0) delay(10) }
+        job.cancel()
+        service.abort()
+        withTimeout(5_000) { job.join() }
+        result.get().shouldBeInstanceOf<BackupResult.Failed>().reason shouldBe BackupResult.Reason.ABORTED
+        releaseHung.countDown()
+        delay(200)
+        reads.get() shouldBe 0
+        holder.db().messageDao().exportPage(0L, 10, System.currentTimeMillis()) shouldBe emptyList()
+        backup.delete()
+        Unit
+    }
+
+    @Test
+    fun exportCloseThrowIsFailedIoNotOk() = runBlocking {
+        service.openOutput = {
+            object : OutputStream() {
+                override fun write(b: Int) {}
+                override fun write(b: ByteArray, off: Int, len: Int) {}
+                override fun flush() {}
+                override fun close() { throw java.io.IOException("close") }
+            }
+        }
+        val result = service.export(Uri.parse("content://quietinbox.test/close-throw"), "test")
+        result.shouldBeInstanceOf<BackupResult.Failed>().reason shouldBe BackupResult.Reason.IO
+        Unit
+    }
+
+    @Test
+    fun aBlockingExportCloseDoesNotReportOkAndDoesNotPinExclusive() = runBlocking {
+        val entered = CountDownLatch(1)
+        val result = AtomicReference<BackupResult?>(null)
+        service.openOutput = {
+            object : OutputStream() {
+                override fun write(b: Int) {}
+                override fun write(b: ByteArray, off: Int, len: Int) {}
+                override fun flush() {}
+                override fun close() {
+                    entered.countDown()
+                    releaseHung.await()
+                }
+            }
+        }
+        val job = launch(Dispatchers.IO) { result.set(service.export(Uri.parse("content://quietinbox.test/close-block"), "test")) }
+        withTimeout(15_000) { while (entered.count > 0) delay(10) }
+        result.get() shouldBe null
+        maintenance.isActive shouldBe false
+        withTimeout(5_000) { maintenance.exclusive { 7 } shouldBe 7 }
+        job.cancel()
+        service.abort()
+        withTimeout(5_000) { job.join() }
+        val seen = result.get()
+        (seen == null || (seen is BackupResult.Failed && seen.reason == BackupResult.Reason.EXPORT_ABORTED)) shouldBe true
         Unit
     }
 

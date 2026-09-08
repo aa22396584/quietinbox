@@ -4,6 +4,28 @@ All notable changes to this project are documented here. The format follows Keep
 
 ## [Unreleased]
 
+### Fixed
+- **Search paging could mix a previous query's cursor into a new search**, and a stale page
+  completing could clear a newer load-more spinner. Query, sources, frozen time range, cursor and
+  results are one session; each page has its own request id. An obsolete completion does not mutate
+  the current session's flags.
+- **A search that threw was shown as no results.** A repository failure is a failed search with
+  retry, not an empty success; a failed load-more keeps the hits and cursor already on screen;
+  `CancellationException` is not mapped to an empty page. Locked/opening (issue #10) is unchanged.
+- **Restoring a backup whose messages claimed local media the file never contained** (export skipped
+  the blob, kept `LOCAL_COPY`) did not increment the partial-media warning. Backup-absent media is
+  counted as `skippedMedia` on restore; decode/write failures stay `mediaNotRestored`.
+- **Import held exclusive vault maintenance across `InputStream.read`.** Staging is outside
+  exclusive; a cancelled never-returning read returns to the caller and leaves maintenance free. A
+  write after a key-epoch change does not land. Not a timeout around the exclusive section.
+
+### Tests / CI
+- Search ViewModel tests cover mixed-cursor paging, stale load-more unlock, A→B→A, a source toggle
+  during debounce, first-page vs load-more interleaving, failed vs empty, load-more failure, and
+  cancellation. Instrumented backup: hung-read cancel, epoch-change refuse, export-skip → wipe →
+  import counts partial media. CI JVM unit tests run `./gradlew test` so `:platform:media`
+  (and every other module with `src/test`) is on the job. Issue #33 stays open.
+
 ## [0.1.4] — 2026-09-08
 
 `versionCode` 8. Losses that used to be silent are now gaps or labels — dropped messages, shortened

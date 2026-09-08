@@ -133,6 +133,8 @@
     <string name="search_no_results_yet">Nothing matched in the part of the index searched so far.</string>
     <string name="search_load_more">Load more</string>
     <string name="search_all_sources">All sources</string>
+    <string name="search_failed_title">Search failed</string>
+    <string name="search_failed_body">The index could not be read. This is not an empty result.</string>
 
     <!-- Analytics -->
     <string name="analytics_title">Activity</string>

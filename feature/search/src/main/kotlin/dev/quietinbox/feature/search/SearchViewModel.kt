@@ -7,12 +7,12 @@ import dev.quietinbox.platform.storage.db.VaultState
 import dev.quietinbox.platform.storage.repo.InboxRepository
 import dev.quietinbox.platform.storage.repo.SearchCursor
 import dev.quietinbox.platform.storage.repo.SearchHit
-import dev.quietinbox.platform.storage.repo.SearchPage
 import dev.quietinbox.platform.storage.repo.SearchRepository
 import dev.quietinbox.platform.storage.repo.VaultRepository
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -41,10 +41,20 @@ data class SearchUiState(
      */
     val next: SearchCursor? = null,
     val loadingMore: Boolean = false,
-    /** Bumped on every query, range or filter change; a page from an older one is discarded. */
-    val generation: Int = 0,
+    /**
+     * Identity of the current search (query, sources, frozen time range, cursor, results).
+     * Bumped when those conditions change; a page from an older session is discarded and must
+     * not clear this session's in-flight flags.
+     */
+    val sessionId: Long = 0,
+    /** Identity of the in-flight first-page or load-more request inside [sessionId]. */
+    val pageRequestId: Long = 0,
     val searching: Boolean = false,
     val searched: Boolean = false,
+    /** A repository throw other than cancellation: not a successful empty page. */
+    val failed: Boolean = false,
+    /** Time range frozen when this [sessionId] started, so paging cannot drift across midnight. */
+    val frozenFromMs: Long? = null,
     /** The vault could not be opened: nothing can be searched and "no results" would be a lie (QI-VAULT-010). */
     val vaultLocked: Boolean = false,
     /** The vault is still opening; a query typed now runs once it is ready. */
@@ -59,19 +69,8 @@ class SearchViewModel @Inject constructor(
     private val vault: VaultRepository,
 ) : ViewModel() {
     private val local = MutableStateFlow(SearchUiState())
-    private var generation = 0
-
-    /**
-     * What the pipeline last actually ran. Typing a character and deleting it again leaves the
-     * three compared fields unchanged, so `distinctUntilChanged` suppresses the re-run — and a
-     * `searching` flag set optimistically by the setter would then never be cleared. It has no
-     * visual effect today (the results are still on screen and `searched` is true), but a flag
-     * that says work is in flight when none is has no business being there.
-     */
-    private var lastRun: Triple<String, SearchRange, Set<String>>? = null
-
-    private fun SearchUiState.willRun(): Boolean =
-        query.isNotBlank() && Triple(query, range, packages) != lastRun
+    private var sessionSeq = 0L
+    private var requestSeq = 0L
 
     val state: StateFlow<SearchUiState> = combine(local, inbox.observePackagesWithData().catch { emit(emptyList()) }, vault.state) { s, p, v ->
         s.copy(availablePackages = p.toImmutableList(), vaultLocked = v is VaultState.Locked, vaultOpening = v is VaultState.Opening)
@@ -81,15 +80,28 @@ class SearchViewModel @Inject constructor(
         viewModelScope.launch {
             // A query is re-run when the vault becomes ready (typed while opening, or after a retry).
             combine(local.debounce(250), vault.state) { s, v -> s to v }
-                .distinctUntilChanged { (a, va), (b, vb) -> a.query == b.query && a.range == b.range && a.packages == b.packages && va == vb }
-                .collect { (s, v) -> if (v is VaultState.Ready) run(s) else if (v is VaultState.Locked) local.update { it.copy(results = persistentListOf(), searching = false, searched = false) } }
+                .distinctUntilChanged { (a, va), (b, vb) -> a.sessionId == b.sessionId && va == vb }
+                .collect { (s, v) ->
+                    if (v is VaultState.Ready) run(s)
+                    else if (v is VaultState.Locked) {
+                        local.update { it.copy(results = persistentListOf(), next = null, searching = false, searched = false, failed = false, loadingMore = false) }
+                    }
+                }
         }
     }
 
     fun retryVault() = viewModelScope.launch { runCatching { vault.retryOpen() } }
 
-    fun setQuery(q: String) = local.update { val n = it.copy(query = q, generation = ++generation); n.copy(searching = n.willRun()) }
-    fun setRange(r: SearchRange) = local.update { val n = it.copy(range = r, generation = ++generation); n.copy(searching = n.willRun()) }
+    /** Re-run the current session after a failed first page. Same query, new request id. */
+    fun retrySearch() {
+        val s = local.value
+        if (s.query.isBlank()) return
+        if (vault.state.value !is VaultState.Ready) return
+        viewModelScope.launch { run(s) }
+    }
+
+    fun setQuery(q: String) = local.update { if (q == it.query) it else newSession(it.copy(query = q)) }
+    fun setRange(r: SearchRange) = local.update { if (r == it.range) it else newSession(it.copy(range = r)) }
 
     /**
      * Appends the next page. The screen used to show the first 100 hits and call them "%d results",
@@ -98,18 +110,25 @@ class SearchViewModel @Inject constructor(
     fun loadMore() {
         val s = local.value
         val cursor = s.next ?: return
-        if (s.loadingMore) return
-        local.update { it.copy(loadingMore = true) }
+        if (s.loadingMore || s.searching || s.failed) return
+        val sessionId = s.sessionId
+        val requestId = ++requestSeq
+        local.update { it.copy(loadingMore = true, pageRequestId = requestId) }
         viewModelScope.launch {
-            val from = fromMs(s.range)
-            val page = runCatching { search.searchPage(s.query, s.packages, from, null, limit = PAGE, cursor = cursor) }
-                .getOrNull()
+            val page = try {
+                search.searchPage(s.query, s.packages, s.frozenFromMs, null, limit = PAGE, cursor = cursor)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                local.update { cur ->
+                    if (cur.sessionId != sessionId || cur.pageRequestId != requestId) cur
+                    else cur.copy(loadingMore = false)
+                }
+                return@launch
+            }
             local.update { cur ->
-                // The query may have changed while the page was in flight; that result is not ours.
-                if (cur.generation != s.generation) {
-                    cur.copy(loadingMore = false)
-                } else if (page == null) {
-                    cur.copy(loadingMore = false)
+                if (cur.sessionId != sessionId || cur.pageRequestId != requestId) {
+                    cur
                 } else {
                     cur.copy(
                         results = (cur.results + page.hits).toImmutableList(),
@@ -124,11 +143,24 @@ class SearchViewModel @Inject constructor(
         }
     }
     fun togglePackage(p: String) = local.update {
-        val n = it.copy(packages = if (p in it.packages) it.packages - p else it.packages + p, generation = ++generation)
-        n.copy(searching = n.willRun())
+        val packages = if (p in it.packages) it.packages - p else it.packages + p
+        if (packages == it.packages) it else newSession(it.copy(packages = packages))
     }
 
-    fun clearPackages() = local.update { val n = it.copy(packages = emptySet(), generation = ++generation); n.copy(searching = n.willRun()) }
+    fun clearPackages() = local.update { if (it.packages.isEmpty()) it else newSession(it.copy(packages = emptySet())) }
+
+    private fun newSession(base: SearchUiState): SearchUiState {
+        return base.copy(
+            sessionId = ++sessionSeq,
+            pageRequestId = 0,
+            next = null,
+            loadingMore = false,
+            searching = base.query.isNotBlank(),
+            searched = false,
+            failed = false,
+            frozenFromMs = fromMs(base.range),
+        )
+    }
 
     private fun fromMs(range: SearchRange): Long? {
         val now = System.currentTimeMillis()
@@ -142,26 +174,45 @@ class SearchViewModel @Inject constructor(
 
     private suspend fun run(s: SearchUiState) {
         if (s.query.isBlank()) {
-            lastRun = null
-            local.update { it.copy(results = persistentListOf(), next = null, searching = false, searched = false) }
+            local.update { cur ->
+                if (cur.sessionId != s.sessionId) cur
+                else cur.copy(results = persistentListOf(), next = null, searching = false, searched = false, failed = false, loadingMore = false)
+            }
             return
         }
-        lastRun = Triple(s.query, s.range, s.packages)
-        val page = runCatching { search.searchPage(s.query, s.packages, fromMs(s.range), null, limit = PAGE, cursor = null) }
-            .getOrDefault(SearchPage(emptyList(), null))
-        local.update {
-            // Compare the same fields the pipeline's `distinctUntilChanged` compares, not the
-            // generation. A generation guard here is *stricter* than the pipeline: type "hello",
-            // then while it is in flight add a character and delete it again — the pipeline sees no
-            // change and does not re-run, but the one run in flight would be discarded, leaving
-            // `searching = true` and a spinner that never stops.
-            if (it.query != s.query || it.range != s.range || it.packages != s.packages) return@update it
-            it.copy(
+        val sessionId = s.sessionId
+        val requestId = ++requestSeq
+        local.update { cur ->
+            if (cur.sessionId != sessionId) cur
+            else cur.copy(pageRequestId = requestId, searching = true, failed = false)
+        }
+        val page = try {
+            search.searchPage(s.query, s.packages, s.frozenFromMs, null, limit = PAGE, cursor = null)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            local.update { cur ->
+                if (cur.sessionId != sessionId || cur.pageRequestId != requestId) cur
+                else cur.copy(
+                    results = persistentListOf(),
+                    next = null,
+                    loadingMore = false,
+                    searching = false,
+                    searched = false,
+                    failed = true,
+                )
+            }
+            return
+        }
+        local.update { cur ->
+            if (cur.sessionId != sessionId || cur.pageRequestId != requestId) return@update cur
+            cur.copy(
                 results = page.hits.toImmutableList(),
                 next = page.next,
                 loadingMore = false,
                 searching = false,
                 searched = true,
+                failed = false,
             )
         }
     }

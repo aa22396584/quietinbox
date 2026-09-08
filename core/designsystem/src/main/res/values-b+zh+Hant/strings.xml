@@ -131,6 +131,8 @@
     <string name="search_no_results_yet">在目前已搜尋過的索引範圍內沒有符合的內容。</string>
     <string name="search_load_more">載入更多</string>
     <string name="search_all_sources">所有來源</string>
+    <string name="search_failed_title">搜尋失敗</string>
+    <string name="search_failed_body">無法讀取索引。這不是「沒有結果」。</string>
 
     <!-- Analytics -->
     <string name="analytics_title">活動統計</string>

@@ -131,6 +131,8 @@
     <string name="search_no_results_yet">지금까지 검색한 범위에서는 일치하는 것이 없습니다.</string>
     <string name="search_load_more">더 불러오기</string>
     <string name="search_all_sources">모든 소스</string>
+    <string name="search_failed_title">검색 실패</string>
+    <string name="search_failed_body">색인을 읽을 수 없습니다. 결과가 없는 것이 아닙니다.</string>
 
     <!-- Analytics -->
     <string name="analytics_title">활동</string>

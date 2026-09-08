@@ -131,6 +131,8 @@
     <string name="search_no_results_yet">ここまで検索した範囲では一致するものはありません。</string>
     <string name="search_load_more">さらに読み込む</string>
     <string name="search_all_sources">すべてのソース</string>
+    <string name="search_failed_title">検索に失敗しました</string>
+    <string name="search_failed_body">索引を読めませんでした。これは結果なしではありません。</string>
 
     <!-- Analytics -->
     <string name="analytics_title">活動</string>

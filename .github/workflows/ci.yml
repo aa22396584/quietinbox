@@ -32,12 +32,10 @@ jobs:
         with:
           cache-provider: basic
       - name: Unit tests
-        run: >
-          ./gradlew --no-daemon --console=plain
-          :core:model:test :core:parser:test :core:identity:test :core:reconcile:test
-          :core:analytics:test :parsers:apps:test
-          :platform:crypto:testDebugUnitTest :platform:storage:testDebugUnitTest :platform:backup:testDebugUnitTest :platform:capture:testDebugUnitTest
-          :feature:analytics:testDebugUnitTest :feature:search:testDebugUnitTest :feature:conversation:testDebugUnitTest :feature:health:testDebugUnitTest :feature:onboarding:testDebugUnitTest :app:testDebugUnitTest
+        # One aggregate so a module with src/test (including :platform:media) cannot be omitted
+        # from a hand-maintained list. Root `test` schedules JVM `test` and Android
+        # `testDebugUnitTest`. Instrumented androidTest is a different job.
+        run: ./gradlew --no-daemon --console=plain test
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:

@@ -120,6 +120,11 @@ class BackupRoundTripTest {
         val restored = service.import(Uri.fromFile(target), recoveryKey).shouldBeInstanceOf<BackupResult.Ok>()
         restored.counts.messages shouldBe 2
         restored.counts.media shouldBe 1
+        // Export skipped the missing blob and kept the LOCAL_COPY message; restore must count that
+        // as partial media so Settings can warn. A present-but-undecodable Media record is a
+        // different path (BackupCancellationTest) and must not be the only count.
+        restored.skippedMedia shouldBe 1
+        restored.mediaNotRestored shouldBe 0
 
         val db2 = holder.db()
         val conversations = db2.conversationDao().exportPage(0L, 10)

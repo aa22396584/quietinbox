@@ -132,7 +132,13 @@ fun SearchScreen(
                     body = stringResource(R.string.search_empty_hint),
                     icon = Icons.Outlined.Search,
                 )
-                state.vaultOpening || (state.searching && !state.searched) -> Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) { LoadingIndicator() }
+                state.vaultOpening || (state.searching && !state.searched && !state.failed) -> Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) { LoadingIndicator() }
+                state.failed -> EmptyState(
+                    title = stringResource(R.string.search_failed_title),
+                    body = stringResource(R.string.search_failed_body),
+                    icon = Icons.Outlined.SearchOff,
+                    actions = { TextButton(onClick = viewModel::retrySearch) { Text(stringResource(R.string.action_retry)) } },
+                )
                 // "No matches" may only be said once the index really was exhausted. A first page
                 // that verified nothing while a cursor survives means the candidate scan budget ran
                 // out, and the Load more control lives in the branch below — so this branch used to

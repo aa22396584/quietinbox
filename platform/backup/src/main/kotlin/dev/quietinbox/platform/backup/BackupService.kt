@@ -23,7 +23,11 @@ import dev.quietinbox.platform.storage.db.SourceConfigurationEntity
 import dev.quietinbox.platform.storage.retention.MediaDirectory
 import dev.quietinbox.core.model.SearchNormalizer
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import java.io.BufferedReader
@@ -35,16 +39,21 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.security.SecureRandom
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 import javax.inject.Singleton
 
 sealed interface BackupResult {
     /**
-     * [skippedMedia] > 0 means the file is a partial backup: media that could not be read or was
-     * too large is not in it (export). [mediaNotRestored] > 0 means a restore inserted messages
-     * whose media was in the file but could not be written to the vault (a bad or oversized blob,
-     * a failed encryption); those rows carry `FAILED`, and the count is what the "Done" line
-     * qualifies itself with (audit-2 ATOM-3).
+     * [skippedMedia] > 0 means media is missing from the file: on export, rows that could not be
+     * read or were too large; on restore, messages that still claim `LOCAL_COPY` but the backup
+     * never contained a Media record. [mediaNotRestored] > 0 means a restore inserted messages
+     * whose media *was* in the file but could not be written to the vault (a bad or oversized blob,
+     * a failed encryption). The two are counted separately so one message is never both. Those
+     * rows carry `FAILED`, and either count is what the "Done" line qualifies itself with
+     * (audit-2 ATOM-3).
      */
     data class Ok(val counts: Counts, val skippedMedia: Int = 0, val mediaNotRestored: Int = 0) : BackupResult
     data class Failed(val reason: Reason, val detail: String? = null) : BackupResult
@@ -60,8 +69,9 @@ sealed interface BackupResult {
  * transaction. Wrong key, truncation and tampering leave the existing vault untouched.
  *
  * Both run under the maintenance gate (QI-BACKUP-016): export is cancellable vault work, so a
- * reset can stop it; import is an exclusive run, so capture, media copies, retention and a reset
- * cannot interleave with it (the window is recorded as a capture gap).
+ * reset can stop it; import stages and verifies the file outside exclusive maintenance (so an
+ * uncooperative `read` cannot pin "Delete everything"), then applies as an exclusive run so
+ * capture, media copies, retention and a reset cannot interleave with the write.
  */
 @Singleton
 class BackupService @Inject constructor(
@@ -75,9 +85,24 @@ class BackupService @Inject constructor(
 ) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true; classDiscriminator = "type" }
 
+    /**
+     * Provider reads for restore run in this scope, not in the caller's job. `InputStream.read`
+     * is a blocking call with no suspension point, so a source that never delivers bytes cannot
+     * be cancelled cooperatively. Staging therefore waits on a [CompletableDeferred] the IO job
+     * completes, and cancellation closes the stream and returns without joining that job — so
+     * exclusive maintenance is never held across the hang, and a later exclusive run (including
+     * "Delete everything") can start. [MAX_LIVE_IMPORT_READS] bounds abandoned threads.
+     */
+    private val importReads = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val liveImportReads = AtomicInteger(0)
+    private val importSeq = AtomicLong(0)
+    private val currentImportStream = AtomicReference<InputStream?>(null)
+
     private companion object {
         /** Rows per keyset page while exporting. */
         const val PAGE = 500
+        /** Abandoned uncooperative backup reads; a third import is refused until one finishes. */
+        const val MAX_LIVE_IMPORT_READS = 2
     }
 
     /** The recovery key as text the user must save; created on first call. */
@@ -230,61 +255,115 @@ class BackupService @Inject constructor(
         return Written(actual, skipped)
     }
 
-    /** Exclusive: nothing else writes the vault while a restore is applied. */
-    suspend fun import(source: Uri, recoveryKeyText: String): BackupResult = maintenance.exclusive { importNow(source, recoveryKeyText) }
-
-    private suspend fun importNow(source: Uri, recoveryKeyText: String): BackupResult = withContext(Dispatchers.IO) {
-        val key = RecoveryKeyCodec.decode(recoveryKeyText) ?: return@withContext BackupResult.Failed(BackupResult.Reason.WRONG_KEY_OR_TAMPERED, "key format")
-        val db = try {
-            holder.db()
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
-            return@withContext BackupResult.Failed(BackupResult.Reason.VAULT_UNAVAILABLE)
-        }
+    /**
+     * Stage and verify the file *outside* exclusive maintenance, then apply under a short exclusive
+     * section. Holding the exclusive lock across `InputStream.read` used to pin "Delete everything"
+     * for as long as an uncooperative provider stayed silent.
+     */
+    suspend fun import(source: Uri, recoveryKeyText: String): BackupResult {
+        val token = importSeq.incrementAndGet()
+        currentImportStream.getAndSet(null)?.let { runCatching { it.close() } }
+        val epoch = keyMaterial.epoch
         val staged = try {
-            val input: InputStream = context.contentResolver.openInputStream(source)
-                ?: return@withContext BackupResult.Failed(BackupResult.Reason.IO, "open")
-            input.use { raw ->
-                val header = ByteArray(BackupCrypto.HEADER_BYTES)
-                var read = 0
-                while (read < header.size) {
-                    val n = raw.read(header, read, header.size - read)
-                    if (n < 0) break
-                    read += n
-                }
-                // A file that ends inside its own header is a half-copied file, not a foreign one:
-                // the zero-filled tail used to pass the magic and version checks and die in Tink
-                // as "wrong key or modified" (audit-2 ATOM-2).
-                if (read < header.size) return@withContext BackupResult.Failed(BackupResult.Reason.TRUNCATED, "header $read/${header.size}")
-                val salt = BackupCrypto.parseHeader(header) ?: return@withContext BackupResult.Failed(BackupResult.Reason.BAD_HEADER)
-                val saead = BackupCrypto.streamingAead(key, salt)
-                val dec = saead.newDecryptingStream(raw, header)
-                stage(dec.bufferedReader(Charsets.UTF_8))
-            }
+            stageFromSource(source, recoveryKeyText)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: java.io.IOException) {
-            return@withContext BackupResult.Failed(BackupResult.Reason.WRONG_KEY_OR_TAMPERED, e::class.java.simpleName)
+            return BackupResult.Failed(BackupResult.Reason.WRONG_KEY_OR_TAMPERED, e::class.java.simpleName)
         } catch (e: java.security.GeneralSecurityException) {
-            return@withContext BackupResult.Failed(BackupResult.Reason.WRONG_KEY_OR_TAMPERED, e::class.java.simpleName)
+            return BackupResult.Failed(BackupResult.Reason.WRONG_KEY_OR_TAMPERED, e::class.java.simpleName)
         } catch (e: kotlinx.serialization.SerializationException) {
-            return@withContext BackupResult.Failed(BackupResult.Reason.CORRUPT, "record")
+            return BackupResult.Failed(BackupResult.Reason.CORRUPT, "record")
         } catch (e: StagingException) {
-            return@withContext BackupResult.Failed(e.reason, e.message)
+            return BackupResult.Failed(e.reason, e.message)
         } catch (e: Exception) {
             if (e is CancellationException) throw e
-            return@withContext BackupResult.Failed(BackupResult.Reason.IO, e::class.java.simpleName)
-        } finally {
-            key.fill(0)
+            return BackupResult.Failed(BackupResult.Reason.IO, e::class.java.simpleName)
         }
-        // Every blob is written to disk before the transaction, and a vault that runs out of space
-        // half-way through used to end as messages labelled FAILED under an unqualified "Done".
-        // The check is coarse (decoded media bytes plus a floor for the rows), and it refuses
-        // before anything is written, so a refused restore changes nothing (audit-2 ATOM-3).
+        if (token != importSeq.get()) return BackupResult.Failed(BackupResult.Reason.MAINTENANCE)
+        afterStaged()
+        if (token != importSeq.get()) return BackupResult.Failed(BackupResult.Reason.MAINTENANCE)
+        if (keyMaterial.epoch != epoch) return BackupResult.Failed(BackupResult.Reason.KEY_UNAVAILABLE)
         val mediaBytes = staged.media.sumOf { it.dataBase64.length.toLong() * 3 / 4 }
         val free = freeBytes()
         if (free < mediaBytes + LOW_SPACE_FLOOR_BYTES) {
-            return@withContext BackupResult.Failed(BackupResult.Reason.LOW_SPACE, "need ${mediaBytes + LOW_SPACE_FLOOR_BYTES}, free $free")
+            return BackupResult.Failed(BackupResult.Reason.LOW_SPACE, "need ${mediaBytes + LOW_SPACE_FLOOR_BYTES}, free $free")
         }
-        apply(db, staged)
+        return maintenance.exclusive {
+            if (token != importSeq.get()) return@exclusive BackupResult.Failed(BackupResult.Reason.MAINTENANCE)
+            if (keyMaterial.epoch != epoch) return@exclusive BackupResult.Failed(BackupResult.Reason.KEY_UNAVAILABLE)
+            val db = try {
+                holder.db()
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                return@exclusive BackupResult.Failed(BackupResult.Reason.VAULT_UNAVAILABLE)
+            }
+            apply(db, staged)
+        }
+    }
+
+    /** Test seam: production opens the user's document. */
+    internal var openInput: (Uri) -> InputStream? = { context.contentResolver.openInputStream(it) }
+
+    /**
+     * Test seam: called after the stream has been staged and verified, before exclusive apply.
+     * Production is a no-op.
+     */
+    internal var afterStaged: suspend () -> Unit = {}
+
+    private suspend fun stageFromSource(source: Uri, recoveryKeyText: String): Staged {
+        val input = openInput(source) ?: throw StagingException(BackupResult.Reason.IO, "open")
+        currentImportStream.getAndSet(input)?.let { runCatching { it.close() } }
+        val result = CompletableDeferred<Staged>()
+        importReads.launch {
+            if (liveImportReads.incrementAndGet() > MAX_LIVE_IMPORT_READS) {
+                liveImportReads.decrementAndGet()
+                result.completeExceptionally(StagingException(BackupResult.Reason.IO, "read slot"))
+                runCatching { input.close() }
+                return@launch
+            }
+            val key = RecoveryKeyCodec.decode(recoveryKeyText)
+            if (key == null) {
+                liveImportReads.decrementAndGet()
+                result.completeExceptionally(StagingException(BackupResult.Reason.WRONG_KEY_OR_TAMPERED, "key format"))
+                runCatching { input.close() }
+                return@launch
+            }
+            try {
+                val staged = input.use { raw -> readAndStage(raw, key) }
+                result.complete(staged)
+            } catch (e: Throwable) {
+                result.completeExceptionally(e)
+            } finally {
+                key.fill(0)
+                liveImportReads.decrementAndGet()
+                currentImportStream.compareAndSet(input, null)
+                runCatching { input.close() }
+            }
+        }
+        try {
+            return result.await()
+        } finally {
+            runCatching { input.close() }
+        }
+    }
+
+    private fun readAndStage(raw: InputStream, key: ByteArray): Staged {
+        val header = ByteArray(BackupCrypto.HEADER_BYTES)
+        var read = 0
+        while (read < header.size) {
+            val n = raw.read(header, read, header.size - read)
+            if (n < 0) break
+            read += n
+        }
+        // A file that ends inside its own header is a half-copied file, not a foreign one:
+        // the zero-filled tail used to pass the magic and version checks and die in Tink
+        // as "wrong key or modified" (audit-2 ATOM-2).
+        if (read < header.size) throw StagingException(BackupResult.Reason.TRUNCATED, "header $read/${header.size}")
+        val salt = BackupCrypto.parseHeader(header) ?: throw StagingException(BackupResult.Reason.BAD_HEADER)
+        val saead = BackupCrypto.streamingAead(key, salt)
+        val dec = saead.newDecryptingStream(raw, header)
+        return stage(dec.bufferedReader(Charsets.UTF_8))
     }
 
     /** Bytes the restore wants free beyond the decoded media: room for the rows and the WAL. */
@@ -364,6 +443,7 @@ class BackupService @Inject constructor(
                 }
                 var inserted = 0
                 var mediaNotRestored = 0
+                var mediaAbsent = 0
                 var skippedOrphans = 0
                 for (m in s.messages) {
                     val cid = convMap[m.conversationId]
@@ -395,8 +475,11 @@ class BackupService @Inject constructor(
                         // In the file, not in the vault: the row says so, and so does the result.
                         mediaState = MediaState.FAILED.name
                         mediaNotRestored++
+                    } else if (media == null && m.mediaState == MediaState.LOCAL_COPY.name) {
+                        // Export skipped the blob and kept the message. Distinct from a decode/write fail.
+                        mediaState = MediaState.FAILED.name
+                        mediaAbsent++
                     }
-                    if (media == null && m.mediaState == MediaState.LOCAL_COPY.name) mediaState = MediaState.FAILED.name
                     if (blob != null) mediaState = MediaState.PENDING.name
                     val newId = db.messageDao().insert(
                         MessageEntity(
@@ -446,12 +529,12 @@ class BackupService @Inject constructor(
                 // leaves used files on the cleanup list, and a cancellation on the way out deletes
                 // the blobs the committed rows point at (round 40, Codex I2).
                 check(usedFiles.none { it in writtenFiles })
-                Counts(s.sources.size, convMap.size, inserted, restoredRevisions, usedFiles.size) to mediaNotRestored
+                Triple(Counts(s.sources.size, convMap.size, inserted, restoredRevisions, usedFiles.size), mediaNotRestored, mediaAbsent)
             }
             restoreProbe(RestorePoint.AFTER_COMMIT)
             // Blobs prepared for messages that were skipped (duplicates, orphans) have no row: remove them.
             for (f in writtenFiles) mediaDir.delete(f)
-            BackupResult.Ok(counts.first, mediaNotRestored = counts.second)
+            BackupResult.Ok(counts.first, skippedMedia = counts.third, mediaNotRestored = counts.second)
         } catch (e: Exception) {
             // Before the commit every blob is an orphan; after it only the unreferenced ones are
             // still on the list. Runs before the rethrow.

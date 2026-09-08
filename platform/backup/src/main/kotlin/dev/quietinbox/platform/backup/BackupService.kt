@@ -262,7 +262,7 @@ class BackupService @Inject constructor(
      */
     suspend fun import(source: Uri, recoveryKeyText: String): BackupResult {
         val token = importSeq.incrementAndGet()
-        abandonClose(currentImportStream.get())
+        currentImportStream.getAndSet(null)?.let { abandonClose(it) }
         val epoch = keyMaterial.epoch
         val staged = try {
             stageFromSource(source, recoveryKeyText)
@@ -316,9 +316,12 @@ class BackupService @Inject constructor(
     /** Test seam: production is a no-op. Called on the thread that is about to write the vault. */
     internal var applyThreadProbe: () -> Unit = {}
 
-    /** Close a provider stream on the import-read pool without waiting for it. */
-    private fun abandonClose(stream: InputStream?) {
-        if (stream == null) return
+    /**
+     * Close a provider stream on the import-read pool without waiting. Callers must pass a stream
+     * they have already taken off [currentImportStream] so each stream is closed at most once from
+     * here; retries must not enqueue another blocked close.
+     */
+    private fun abandonClose(stream: InputStream) {
         importReads.launch { runCatching { stream.close() } }
     }
 
@@ -350,7 +353,7 @@ class BackupService @Inject constructor(
         try {
             return result.await()
         } catch (e: CancellationException) {
-            abandonClose(currentImportStream.get())
+            currentImportStream.getAndSet(null)?.let { abandonClose(it) }
             throw e
         }
     }

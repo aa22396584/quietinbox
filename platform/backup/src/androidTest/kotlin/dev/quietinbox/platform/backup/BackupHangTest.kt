@@ -33,6 +33,7 @@ import org.junit.runner.RunWith
 import java.io.File
 import java.io.InputStream
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 
@@ -168,6 +169,44 @@ class BackupHangTest {
         }
         openOn.get()!!.startsWith("main") shouldBe false
         applyOn.get()!!.startsWith("main") shouldBe false
+        Unit
+    }
+
+    @Test
+    fun retriesDoNotEnqueueAnotherBlockedCloseOnTheSameStream() = runBlocking {
+        val entered = CountDownLatch(2)
+        val closes = AtomicInteger(0)
+        fun hung(): InputStream {
+            val lock = Any()
+            return object : InputStream() {
+                override fun read(): Int {
+                    synchronized(lock) {
+                        entered.countDown()
+                        releaseHung.await()
+                        return -1
+                    }
+                }
+                override fun close() {
+                    closes.incrementAndGet()
+                    synchronized(lock) { }
+                }
+            }
+        }
+        service.openInput = { hung() }
+        val first = launch(Dispatchers.IO) { service.import(Uri.parse("content://quietinbox.test/hang"), recoveryKey) }
+        val second = launch(Dispatchers.IO) { service.import(Uri.parse("content://quietinbox.test/hang"), recoveryKey) }
+        withTimeout(5_000) { while (entered.count > 0) delay(10) }
+        first.cancel()
+        second.cancel()
+        withTimeout(5_000) { first.join(); second.join() }
+        val before = closes.get()
+        repeat(8) {
+            withTimeout(5_000) {
+                service.import(Uri.parse("content://quietinbox.test/hang"), recoveryKey)
+                    .shouldBeInstanceOf<BackupResult.Failed>().reason shouldBe BackupResult.Reason.IO
+            }
+        }
+        closes.get() shouldBe before
         Unit
     }
 }

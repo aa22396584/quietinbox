@@ -18,6 +18,7 @@ import dev.quietinbox.platform.storage.settings.SettingsRepository
 import dev.quietinbox.platform.storage.settings.ThemeMode
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -32,6 +33,8 @@ data class SettingsUiState(
     val versionName: String = "",
     val recoveryKey: String? = null,
     val busy: Boolean = false,
+    /** True only while an export or import is running; abort must not cancel delete-everything. */
+    val backupInProgress: Boolean = false,
     /** Set when "delete everything" did not complete; names the step that failed. */
     val resetFailedStep: String? = null,
     val lastBackup: BackupResult? = null,
@@ -63,6 +66,7 @@ class SettingsViewModel @Inject constructor(
     buildInfo: BuildInfo,
 ) : ViewModel() {
     private val local = MutableStateFlow(SettingsUiState(versionName = versionName(), developerTools = buildInfo.debug))
+    private var backupJob: Job? = null
 
     val state: StateFlow<SettingsUiState> = combine(settings.settings, local) { s, l -> l.copy(settings = s) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), local.value)
@@ -97,16 +101,36 @@ class SettingsViewModel @Inject constructor(
 
     fun acknowledgeRecoveryKey() = viewModelScope.launch { settings.setRecoveryKeyAcknowledged(true) }
 
-    fun export(target: Uri) = viewModelScope.launch {
-        local.update { it.copy(busy = true, lastBackup = null) }
-        val result = backup.export(target, state.value.versionName)
-        local.update { it.copy(busy = false, lastBackup = result) }
+    fun export(target: Uri) {
+        backupJob = viewModelScope.launch {
+            local.update { it.copy(busy = true, backupInProgress = true, lastBackup = null) }
+            val result = try {
+                backup.export(target, state.value.versionName)
+            } catch (cancellation: CancellationException) {
+                local.update { it.copy(busy = false, backupInProgress = false, lastBackup = BackupResult.Failed(BackupResult.Reason.ABORTED)) }
+                throw cancellation
+            }
+            local.update { it.copy(busy = false, backupInProgress = false, lastBackup = result) }
+        }
     }
 
-    fun import(source: Uri, key: String) = viewModelScope.launch {
-        local.update { it.copy(busy = true, lastBackup = null) }
-        val result = backup.import(source, key)
-        local.update { it.copy(busy = false, lastBackup = result) }
+    fun import(source: Uri, key: String) {
+        backupJob = viewModelScope.launch {
+            local.update { it.copy(busy = true, backupInProgress = true, lastBackup = null) }
+            val result = try {
+                backup.import(source, key)
+            } catch (cancellation: CancellationException) {
+                local.update { it.copy(busy = false, backupInProgress = false, lastBackup = BackupResult.Failed(BackupResult.Reason.ABORTED)) }
+                throw cancellation
+            }
+            local.update { it.copy(busy = false, backupInProgress = false, lastBackup = result) }
+        }
+    }
+
+    /** Stops an in-progress export or import only; does not cancel "Delete everything". */
+    fun abortBackup() {
+        backup.abort()
+        backupJob?.cancel()
     }
 
     fun clearBackupResult() = local.update { it.copy(lastBackup = null) }

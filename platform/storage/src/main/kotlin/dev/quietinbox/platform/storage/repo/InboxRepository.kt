@@ -11,9 +11,16 @@ import dev.quietinbox.platform.storage.db.DeletionSuppressionEntity
 import dev.quietinbox.platform.storage.db.MediaBlobEntity
 import dev.quietinbox.platform.storage.db.VaultState
 import dev.quietinbox.platform.storage.retention.MediaDirectory
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -21,36 +28,71 @@ data class InboxCounts(val conversations: Int, val messages: Int, val ambiguous:
 
 /** Read side for the inbox and conversation screens; local-only state changes. */
 @Singleton
+@OptIn(ExperimentalCoroutinesApi::class)
 class InboxRepository @Inject constructor(
     private val holder: DatabaseHolder,
     private val mediaDir: MediaDirectory,
 ) {
     val vaultState: Flow<VaultState> get() = holder.state
 
+    /**
+     * Instant used for visible-copy filters. Tests replace this and call [tickVisibility] so a
+     * Flow can cross an expiry boundary without a database write (Room keeps query args frozen).
+     */
+    internal var nowMs: () -> Long = { System.currentTimeMillis() }
+    internal var visibilityTickMs: Long = 1_000L
+    private val extraTicks = MutableSharedFlow<Long>(extraBufferCapacity = 16)
+
+    fun tickVisibility(at: Long = nowMs()) { extraTicks.tryEmit(at) }
+
+    private fun visibilityNow(): Flow<Long> = merge(
+        extraTicks,
+        flow {
+            while (true) {
+                emit(nowMs())
+                delay(visibilityTickMs)
+            }
+        },
+    )
+
     fun observeConversations(archived: Boolean, packages: Set<String>): Flow<List<Conversation>> =
         holder.flowWithDb { db ->
-            db.conversationDao().observeInbox(archived, packages.isEmpty(), packages.toList())
-        }.map { rows -> rows.map { it.toDomain() } }
+            visibilityNow().flatMapLatest { t ->
+                db.conversationDao().observeInboxAt(archived, packages.isEmpty(), packages.toList(), t)
+            }.map { rows -> rows.map { it.toDomain() } }
+        }
 
     fun observeConversation(id: Long): Flow<Conversation?> =
-        holder.flowWithDb { db -> db.conversationDao().observe(id) }.map { it?.toDomain() }
+        holder.flowWithDb { db ->
+            visibilityNow().flatMapLatest { t -> db.conversationDao().observeAt(id, t) }
+        }.map { it?.toDomain() }
 
-    /** Expired copies are hidden from the moment of collection, not only once retention ran (QI-DATA-007). */
-    fun observeMessages(conversationId: Long, now: Long = System.currentTimeMillis()): Flow<List<Message>> =
-        holder.flowWithDb { db -> db.messageDao().observeForConversation(conversationId, now) }.map { rows -> rows.map { it.toDomain() } }
+    /**
+     * Expired copies are hidden from the moment of each emission, not only once retention ran
+     * (QI-DATA-007). [now] if passed is a one-shot bound (tests); otherwise the clock can move
+     * without a write.
+     */
+    fun observeMessages(conversationId: Long, now: Long? = null): Flow<List<Message>> =
+        holder.flowWithDb { db ->
+            if (now != null) db.messageDao().observeForConversation(conversationId, now)
+            else visibilityNow().flatMapLatest { t -> db.messageDao().observeForConversation(conversationId, t) }
+        }.map { rows -> rows.map { it.toDomain() } }
 
     fun observeRevisions(messageId: Long): Flow<List<MessageRevision>> =
         holder.flowWithDb { db -> db.revisionDao().observeForMessage(messageId) }.map { rows -> rows.map { it.toDomain() } }
 
     fun observePackagesWithData(): Flow<List<String>> = holder.flowWithDb { db -> db.conversationDao().observePackages() }
 
-    fun observeCounts(now: Long = System.currentTimeMillis()): Flow<InboxCounts> = holder.flowWithDb { db ->
-        combine(
-            db.conversationDao().observeCount(),
-            db.messageDao().observeCount(now),
-            db.messageDao().observeAmbiguousCount(now),
-            db.healthDao().observeSummaryCount(),
-        ) { c, m, a, s -> InboxCounts(c, m, a, s) }
+    fun observeCounts(now: Long? = null): Flow<InboxCounts> = holder.flowWithDb { db ->
+        val times: Flow<Long> = if (now != null) flowOf(now) else visibilityNow()
+        times.flatMapLatest { t ->
+            combine(
+                db.conversationDao().observeCount(),
+                db.messageDao().observeCount(t),
+                db.messageDao().observeAmbiguousCount(t),
+                db.healthDao().observeSummaryCount(),
+            ) { c, m, a, s -> InboxCounts(c, m, a, s) }
+        }
     }
 
     /** Messages of one package observed since [since] — onboarding's proof that a capture worked. */
@@ -61,7 +103,7 @@ class InboxRepository @Inject constructor(
 
     /** How many conversations (of [packages], or all when empty) have copies the user has not looked at yet (QI-REMIND-015). */
     suspend fun unviewedConversationCount(packages: Set<String> = emptySet()): Int =
-        holder.db().conversationDao().unviewedCount(packages.isEmpty(), packages.toList())
+        holder.db().conversationDao().unviewedCount(packages.isEmpty(), packages.toList(), nowMs())
     suspend fun setPinned(conversationId: Long, pinned: Boolean) = holder.db().conversationDao().setPinned(conversationId, pinned)
     suspend fun setArchived(conversationId: Long, archived: Boolean) = holder.db().conversationDao().setArchived(conversationId, archived)
 

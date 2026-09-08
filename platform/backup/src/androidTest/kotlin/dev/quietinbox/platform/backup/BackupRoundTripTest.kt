@@ -190,4 +190,55 @@ class BackupRoundTripTest {
         after.delete()
         Unit
     }
+
+    @Test
+    fun aSecondCompleteImportAttachesMediaToAnExistingFailedCopy() = runBlocking {
+        ready()
+        val db = holder.db()
+        val live = commit(Fixtures.snapshot(Fixtures.bigText("Alice", "keep me", tag = "t1"), packageName = KnownSources.TELEGRAM, eventId = "r1", observedAt = 1_700_000_000_000L))
+        val liveId = live.newMessageIds.single()
+        cipher.encryptToFile("picture".toByteArray(), mediaDir.file("blob-ok")).shouldBeInstanceOf<KeyResult.Ok<Unit>>()
+        val okBlob = db.mediaDao().insert(MediaBlobEntity(messageId = liveId, fileName = "blob-ok", thumbFileName = null, mimeType = "image/png", byteCount = 7, width = 1, height = 1, state = MediaState.LOCAL_COPY.name, failureReason = null, createdAtEpochMs = 1L))
+        db.messageDao().setMedia(liveId, MediaState.LOCAL_COPY.name, okBlob)
+        val target = File(context.cacheDir, "repair.qibk")
+        service.export(Uri.fromFile(target), "test").shouldBeInstanceOf<BackupResult.Ok>()
+        val recoveryKey = service.recoveryKeyText().shouldBeInstanceOf<KeyResult.Ok<String>>().value
+
+        holder.closeAndDeleteFiles() shouldBe true
+        mediaDir.deleteAll() shouldBe true
+        holder.retry()
+        ready()
+        service.writeMedia = { _, _ -> false }
+        val first = service.import(Uri.fromFile(target), recoveryKey).shouldBeInstanceOf<BackupResult.Ok>()
+        first.counts.messages shouldBe 1
+        first.mediaNotRestored shouldBe 1
+        val failed = holder.db().messageDao().exportPage(0L, 10, System.currentTimeMillis()).single { it.body == "keep me" }
+        failed.mediaState shouldBe MediaState.FAILED.name
+        failed.mediaBlobId shouldBe null
+
+        service.writeMedia = { bytes, file -> cipher.encryptToFile(bytes, file) is KeyResult.Ok }
+        val second = service.import(Uri.fromFile(target), recoveryKey).shouldBeInstanceOf<BackupResult.Ok>()
+        second.counts.messages shouldBe 0
+        second.counts.media shouldBe 1
+        second.mediaNotRestored shouldBe 0
+        val rows = holder.db().messageDao().exportPage(0L, 10, System.currentTimeMillis())
+        rows.size shouldBe 1
+        val repaired = rows.single()
+        repaired.mediaState shouldBe MediaState.LOCAL_COPY.name
+        val blob = holder.db().mediaDao().get(repaired.mediaBlobId!!)!!
+        BlobCipher(KeyMaterial(context)).decryptFile(mediaDir.file(blob.fileName)).shouldBeInstanceOf<KeyResult.Ok<ByteArray>>().value.decodeToString() shouldBe "picture"
+        val blobId = repaired.mediaBlobId
+
+        service.import(Uri.fromFile(target), recoveryKey).shouldBeInstanceOf<BackupResult.Ok>()
+        holder.db().messageDao().exportPage(0L, 10, System.currentTimeMillis()).size shouldBe 1
+        holder.db().messageDao().get(repaired.id)!!.mediaBlobId shouldBe blobId
+
+        holder.db().messageDao().setMedia(repaired.id, MediaState.DISABLED_BY_USER.name, blobId)
+        service.import(Uri.fromFile(target), recoveryKey).shouldBeInstanceOf<BackupResult.Ok>()
+        val left = holder.db().messageDao().get(repaired.id)!!
+        left.mediaState shouldBe MediaState.DISABLED_BY_USER.name
+        left.mediaBlobId shouldBe blobId
+        target.delete()
+        Unit
+    }
 }

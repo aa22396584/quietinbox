@@ -19,6 +19,7 @@ import dev.quietinbox.platform.storage.retention.MediaDirectory
 import dev.quietinbox.platform.storage.settings.SettingsRepository
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filterIsInstance
@@ -32,6 +33,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
 import java.io.InputStream
+import java.io.OutputStream
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
@@ -208,5 +210,187 @@ class BackupHangTest {
         }
         closes.get() shouldBe before
         Unit
+    }
+
+    @Test
+    fun cancellingANeverReturningExportWriteReleasesTheCallerAndDoesNotHoldExclusive() = runBlocking {
+        val entered = CountDownLatch(1)
+        val lock = Any()
+        service.openOutput = {
+            object : OutputStream() {
+                override fun write(b: Int) {
+                    synchronized(lock) {
+                        entered.countDown()
+                        releaseHung.await()
+                    }
+                }
+                override fun close() {
+                    synchronized(lock) { }
+                }
+            }
+        }
+        val job = launch(Dispatchers.IO) { service.export(Uri.parse("content://quietinbox.test/hang-out"), "test") }
+        withTimeout(15_000) { while (entered.count > 0) delay(10) }
+        maintenance.isActive shouldBe false
+        withTimeout(5_000) { maintenance.exclusive { 7 } shouldBe 7 }
+        job.cancel()
+        withTimeout(5_000) { job.join() }
+        maintenance.isActive shouldBe false
+        withTimeout(5_000) { maintenance.exclusive { 9 } shouldBe 9 }
+        Unit
+    }
+
+    @Test
+    fun cancellingOneHungImportDoesNotCloseAnotherStream() = runBlocking {
+        val firstEntered = CountDownLatch(1)
+        val secondEntered = CountDownLatch(1)
+        val secondCloses = AtomicInteger(0)
+        val n = AtomicInteger(0)
+        service.openInput = {
+            if (n.getAndIncrement() == 0) {
+                val lock = Any()
+                object : InputStream() {
+                    override fun read(): Int {
+                        synchronized(lock) {
+                            firstEntered.countDown()
+                            releaseHung.await()
+                            return -1
+                        }
+                    }
+                    override fun close() { synchronized(lock) { } }
+                }
+            } else {
+                val lock = Any()
+                object : InputStream() {
+                    override fun read(): Int {
+                        synchronized(lock) {
+                            secondEntered.countDown()
+                            releaseHung.await()
+                            return -1
+                        }
+                    }
+                    override fun close() {
+                        secondCloses.incrementAndGet()
+                        synchronized(lock) { }
+                    }
+                }
+            }
+        }
+        val first = launch(Dispatchers.IO) { service.import(Uri.parse("content://quietinbox.test/hang-a"), recoveryKey) }
+        withTimeout(5_000) { while (firstEntered.count > 0) delay(10) }
+        val second = launch(Dispatchers.IO) { service.import(Uri.parse("content://quietinbox.test/hang-b"), recoveryKey) }
+        withTimeout(5_000) { while (secondEntered.count > 0) delay(10) }
+        first.cancel()
+        withTimeout(5_000) { first.join() }
+        repeat(8) {
+            delay(25)
+            secondCloses.get() shouldBe 0
+        }
+        second.cancel()
+        withTimeout(5_000) { second.join() }
+        Unit
+    }
+
+    @Test
+    fun abortAfterStagingDoesNotApply() = runBlocking {
+        val backup = exportOneMessage("abort-stage.qibk")
+        holder.closeAndDeleteFiles() shouldBe true
+        holder.retry()
+        ready()
+        service.afterStaged = { service.abort() }
+        val result = service.import(Uri.fromFile(backup), recoveryKey)
+        result.shouldBeInstanceOf<BackupResult.Failed>().reason shouldBe BackupResult.Reason.ABORTED
+        holder.db().messageDao().exportPage(0L, 10, System.currentTimeMillis()) shouldBe emptyList()
+        backup.delete()
+        Unit
+    }
+
+    @Test
+    fun abortInsideApplyDoesNotLandTheWrite() = runBlocking {
+        val backup = exportOneMessage("abort-apply.qibk")
+        holder.closeAndDeleteFiles() shouldBe true
+        holder.retry()
+        ready()
+        service.restoreProbe = { point ->
+            if (point == BackupService.RestorePoint.IN_TRANSACTION) service.abort()
+        }
+        val result = service.import(Uri.fromFile(backup), recoveryKey)
+        result.shouldBeInstanceOf<BackupResult.Failed>().reason shouldBe BackupResult.Reason.ABORTED
+        holder.db().messageDao().exportPage(0L, 10, System.currentTimeMillis()) shouldBe emptyList()
+        backup.delete()
+        Unit
+    }
+
+    @Test
+    fun abortAfterCommitStillReportsTheRestore() = runBlocking {
+        val backup = exportOneMessage("abort-after-commit.qibk")
+        holder.closeAndDeleteFiles() shouldBe true
+        holder.retry()
+        ready()
+        service.restoreProbe = { point ->
+            if (point == BackupService.RestorePoint.AFTER_COMMIT) {
+                service.abort()
+                throw CancellationException()
+            }
+        }
+        val result = service.import(Uri.fromFile(backup), recoveryKey)
+        result.shouldBeInstanceOf<BackupResult.Ok>()
+        holder.db().messageDao().exportPage(0L, 10, System.currentTimeMillis()).size shouldBe 1
+        backup.delete()
+        Unit
+    }
+
+    @Test
+    fun cancellingANeverReturningImportOpenReleasesTheCallerAndDoesNotHoldExclusive() = runBlocking {
+        val entered = CountDownLatch(1)
+        val result = AtomicReference<BackupResult?>(null)
+        service.openInput = {
+            entered.countDown()
+            releaseHung.await()
+            null
+        }
+        val job = launch(Dispatchers.IO) { result.set(service.import(Uri.parse("content://quietinbox.test/hang-open-in"), recoveryKey)) }
+        withTimeout(5_000) { while (entered.count > 0) delay(10) }
+        maintenance.isActive shouldBe false
+        withTimeout(5_000) { maintenance.exclusive { 7 } shouldBe 7 }
+        job.cancel()
+        withTimeout(5_000) { job.join() }
+        result.get().shouldBeInstanceOf<BackupResult.Failed>().reason shouldBe BackupResult.Reason.ABORTED
+        maintenance.isActive shouldBe false
+        withTimeout(5_000) { maintenance.exclusive { 9 } shouldBe 9 }
+        Unit
+    }
+
+    @Test
+    fun cancellingANeverReturningExportOpenReleasesTheCallerAndDoesNotHoldExclusive() = runBlocking {
+        val entered = CountDownLatch(1)
+        val result = AtomicReference<BackupResult?>(null)
+        service.openOutput = {
+            entered.countDown()
+            releaseHung.await()
+            null
+        }
+        val job = launch(Dispatchers.IO) { result.set(service.export(Uri.parse("content://quietinbox.test/hang-open-out"), "test")) }
+        withTimeout(15_000) { while (entered.count > 0) delay(10) }
+        maintenance.isActive shouldBe false
+        withTimeout(5_000) { maintenance.exclusive { 7 } shouldBe 7 }
+        job.cancel()
+        withTimeout(5_000) { job.join() }
+        result.get().shouldBeInstanceOf<BackupResult.Failed>().reason shouldBe BackupResult.Reason.ABORTED
+        maintenance.isActive shouldBe false
+        withTimeout(5_000) { maintenance.exclusive { 9 } shouldBe 9 }
+        Unit
+    }
+
+    private suspend fun exportOneMessage(name: String): File {
+        val snapshot = Fixtures.snapshot(Fixtures.bigText("Alice", "keep", tag = "t1"), packageName = KnownSources.TELEGRAM, eventId = "h-abort", observedAt = 1_700_000_000_000L)
+        ingest.journal(snapshot, "gen", 60_000) shouldBe true
+        val batch = parser.parse(snapshot)
+        val id = identity.resolve(snapshot, batch)
+        val r = reconciler.reconcile(snapshot.notificationKey, batch.messages, ingest.checkpoint(id.streamKey), lookupById = { null })
+        ingest.commit(snapshot, batch, id, r, "gen", null, mediaAllowed = false)
+        val backup = File(context.cacheDir, name)
+        service.export(Uri.fromFile(backup), "test").shouldBeInstanceOf<BackupResult.Ok>()
+        return backup
     }
 }

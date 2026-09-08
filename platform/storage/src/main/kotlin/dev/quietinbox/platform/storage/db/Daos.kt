@@ -298,15 +298,29 @@ interface ConversationDao {
     @Query("SELECT COUNT(*) FROM conversation")
     fun observeCount(): Flow<Int>
 
-    /** Conversations with copies newer than the last time they were opened, optionally limited to some sources. */
+    /**
+     * Conversations with *currently visible* copies newer than the last time they were opened.
+     * Cached `messageCount` / `lastActivityEpochMs` can still describe an expired copy.
+     */
     @Query(
         """
         SELECT COUNT(*) FROM conversation
-        WHERE archived = 0 AND messageCount > 0 AND lastActivityEpochMs > COALESCE(lastViewedEpochMs, 0)
+        WHERE archived = 0
           AND (:allPackages = 1 OR packageName IN (:packages))
+          AND EXISTS (
+            SELECT 1 FROM message m
+            WHERE m.conversationId = conversation.id
+              AND (m.expiresAtEpochMs IS NULL OR m.expiresAtEpochMs > :now)
+          )
+          AND COALESCE(
+            (SELECT MAX(m.observedAtEpochMs) FROM message m
+             WHERE m.conversationId = conversation.id
+               AND (m.expiresAtEpochMs IS NULL OR m.expiresAtEpochMs > :now)),
+            0
+          ) > COALESCE(lastViewedEpochMs, 0)
         """,
     )
-    suspend fun unviewedCount(allPackages: Boolean, packages: List<String>): Int
+    suspend fun unviewedCount(allPackages: Boolean, packages: List<String>, now: Long): Int
 
     /**
      * Recomputes the projection (counts, preview, last sender, last activity) from the messages
@@ -331,8 +345,104 @@ interface ConversationDao {
     )
     suspend fun rebuildProjection(ids: List<Long>, now: Long)
 
+    /**
+     * Inbox rows with preview, sender, counts and last activity taken from copies still visible
+     * at [now] — not from the cached projection, which lags expiry until retention rebuilds it.
+     */
+    @Query(
+        """
+        SELECT
+          id, packageName, profileKey, accountKey, identityKey, identityConfidence, title, isGroup,
+          pinned, archived, createdAtEpochMs,
+          COALESCE(
+            (SELECT MAX(m.observedAtEpochMs) FROM message m
+             WHERE m.conversationId = conversation.id
+               AND (m.expiresAtEpochMs IS NULL OR m.expiresAtEpochMs > :now)),
+            createdAtEpochMs
+          ) AS lastActivityEpochMs,
+          lastViewedEpochMs,
+          (SELECT COUNT(*) FROM message m WHERE m.conversationId = conversation.id
+             AND m.dedupState != 'AMBIGUOUS_REPEAT'
+             AND (m.expiresAtEpochMs IS NULL OR m.expiresAtEpochMs > :now)) AS messageCount,
+          (SELECT COUNT(*) FROM message m WHERE m.conversationId = conversation.id
+             AND m.dedupState = 'AMBIGUOUS_REPEAT'
+             AND (m.expiresAtEpochMs IS NULL OR m.expiresAtEpochMs > :now)) AS ambiguousCount,
+          summaryOnlyCount,
+          (SELECT substr(m.body, 1, 200) FROM message m
+             WHERE m.conversationId = conversation.id
+               AND (m.expiresAtEpochMs IS NULL OR m.expiresAtEpochMs > :now)
+             ORDER BY m.sortKey DESC, m.id DESC LIMIT 1) AS lastMessagePreview,
+          (SELECT m.senderName FROM message m
+             WHERE m.conversationId = conversation.id
+               AND (m.expiresAtEpochMs IS NULL OR m.expiresAtEpochMs > :now)
+             ORDER BY m.sortKey DESC, m.id DESC LIMIT 1) AS lastSenderName
+        FROM conversation
+        WHERE archived = :archived
+          AND (:allPackages = 1 OR packageName IN (:packages))
+        ORDER BY pinned DESC, lastActivityEpochMs DESC
+        """,
+    )
+    fun observeInboxAt(archived: Boolean, allPackages: Boolean, packages: List<String>, now: Long): Flow<List<ConversationEntity>>
+
+    @Query(
+        """
+        SELECT
+          id, packageName, profileKey, accountKey, identityKey, identityConfidence, title, isGroup,
+          pinned, archived, createdAtEpochMs,
+          COALESCE(
+            (SELECT MAX(m.observedAtEpochMs) FROM message m
+             WHERE m.conversationId = conversation.id
+               AND (m.expiresAtEpochMs IS NULL OR m.expiresAtEpochMs > :now)),
+            createdAtEpochMs
+          ) AS lastActivityEpochMs,
+          lastViewedEpochMs,
+          (SELECT COUNT(*) FROM message m WHERE m.conversationId = conversation.id
+             AND m.dedupState != 'AMBIGUOUS_REPEAT'
+             AND (m.expiresAtEpochMs IS NULL OR m.expiresAtEpochMs > :now)) AS messageCount,
+          (SELECT COUNT(*) FROM message m WHERE m.conversationId = conversation.id
+             AND m.dedupState = 'AMBIGUOUS_REPEAT'
+             AND (m.expiresAtEpochMs IS NULL OR m.expiresAtEpochMs > :now)) AS ambiguousCount,
+          summaryOnlyCount,
+          (SELECT substr(m.body, 1, 200) FROM message m
+             WHERE m.conversationId = conversation.id
+               AND (m.expiresAtEpochMs IS NULL OR m.expiresAtEpochMs > :now)
+             ORDER BY m.sortKey DESC, m.id DESC LIMIT 1) AS lastMessagePreview,
+          (SELECT m.senderName FROM message m
+             WHERE m.conversationId = conversation.id
+               AND (m.expiresAtEpochMs IS NULL OR m.expiresAtEpochMs > :now)
+             ORDER BY m.sortKey DESC, m.id DESC LIMIT 1) AS lastSenderName
+        FROM conversation
+        WHERE id = :id
+        """,
+    )
+    fun observeAt(id: Long, now: Long): Flow<ConversationEntity?>
+
     @Query("SELECT id FROM conversation WHERE messageCount = 0 AND createdAtEpochMs < :before")
     suspend fun emptyOlderThan(before: Long): List<Long>
+
+    /**
+     * Removes old conversations that have *no message rows* at the moment of the delete.
+     * `messageCount = 0` is not enough: that projection excludes `AMBIGUOUS_REPEAT`, and a
+     * scan-then-delete would still drop a copy committed between the two statements.
+     */
+    @Query(
+        """
+        DELETE FROM conversation
+        WHERE createdAtEpochMs < :before
+          AND NOT EXISTS (SELECT 1 FROM message m WHERE m.conversationId = conversation.id)
+        """,
+    )
+    suspend fun deleteEmptyOlderThan(before: Long): Int
+
+    @Query(
+        """
+        DELETE FROM conversation
+        WHERE id = :id
+          AND createdAtEpochMs < :before
+          AND NOT EXISTS (SELECT 1 FROM message m WHERE m.conversationId = conversation.id)
+        """,
+    )
+    suspend fun deleteIfEmptyAndOlderThan(id: Long, before: Long): Int
 
     @Query("SELECT DISTINCT packageName FROM conversation")
     fun observePackages(): Flow<List<String>>
@@ -371,6 +481,9 @@ interface MessageDao {
 
     @Query("SELECT * FROM message WHERE conversationId = :conversationId")
     suspend fun forConversation(conversationId: Long): List<MessageEntity>
+
+    @Query("UPDATE message SET dedupState = :state WHERE id = :id")
+    suspend fun setDedupState(id: Long, state: String)
 
     @Query("SELECT * FROM message WHERE conversationId = :conversationId AND sourceMessageId = :sourceMessageId LIMIT 1")
     suspend fun findBySourceId(conversationId: Long, sourceMessageId: String): MessageEntity?

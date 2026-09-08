@@ -295,6 +295,8 @@
     <string name="backup_export_desc">以流式方式把加密文件写到你选择的位置。若选择云端文件夹，密文会离开这台设备。</string>
     <string name="backup_import">从备份恢复</string>
     <string name="backup_import_desc">验证每个数据块后合并到这个保险库。这可能把你先前删除的内容带回来。恢复的来源会保持停用，请到“捕获”页重新启用。</string>
+    <string name="backup_abort">停止</string>
+    <string name="backup_stopped">已停止。没有变更。</string>
     <string name="backup_import_key_prompt">输入创建这份备份的设备的恢复密钥</string>
     <string name="backup_result_ok">完成：%1$d 个对话、%2$d 条消息、%3$d 个媒体。</string>
     <string name="backup_result_partial_media">有 %1$d 个媒体无法读取，未包含在此备份中。</string>

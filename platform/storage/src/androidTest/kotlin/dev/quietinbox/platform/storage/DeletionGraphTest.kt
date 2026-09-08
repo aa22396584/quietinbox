@@ -3,6 +3,7 @@ package dev.quietinbox.platform.storage
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.quietinbox.core.identity.IdentityResolver
+import dev.quietinbox.core.model.DedupState
 import dev.quietinbox.core.model.KnownSources
 import dev.quietinbox.core.model.MediaState
 import dev.quietinbox.core.model.NotificationSnapshot
@@ -32,8 +33,10 @@ import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.types.shouldBeInstanceOf
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
@@ -107,6 +110,13 @@ class DeletionGraphTest {
 
     private fun bigText(sender: String, body: String, eventId: String, tag: String, pkg: String = KnownSources.TELEGRAM, observedAt: Long = 1_700_000_000_000L) =
         Fixtures.snapshot(Fixtures.bigText(sender, body, tag = tag), packageName = pkg, eventId = eventId, observedAt = observedAt)
+
+    /** Empty-conversation age is seven days; a just-created row is otherwise never a candidate. */
+    private suspend fun ageConversation(id: Long) {
+        val dao = holder.db().conversationDao()
+        val row = dao.get(id)!!
+        dao.update(row.copy(createdAtEpochMs = System.currentTimeMillis() - 8L * RetentionService.DAY_MS))
+    }
 
     @Test
     fun journalPayloadIsClearedTheMomentTheRowLeavesPending() = runBlocking {
@@ -250,5 +260,132 @@ class DeletionGraphTest {
         oldFile.writeBytes(oldCiphertext)
         freshProcess.decryptFile(oldFile).shouldBeInstanceOf<KeyResult.Failed>().failure shouldBe KeyFailure.Tampered
         Unit
+    }
+
+    @Test
+    fun emptyConversationSweepKeepsAnUnexpiredAmbiguousRepeat() = runBlocking {
+        ready()
+        val stored = commit(bigText("Alice", "maybe a repeat", "a1", "t1"))
+        val conversationId = stored.conversationId!!
+        val messageId = stored.newMessageIds.single()
+        val db = holder.db()
+        db.messageDao().setDedupState(messageId, DedupState.AMBIGUOUS_REPEAT.name)
+        db.conversationDao().rebuildProjection(listOf(conversationId), System.currentTimeMillis())
+        val row = db.conversationDao().get(conversationId)!!
+        row.messageCount shouldBe 0
+        row.ambiguousCount shouldBe 1
+        ageConversation(conversationId)
+        RetentionService(holder, settings, mediaDir, maintenance).runOnce(System.currentTimeMillis())
+        db.messageDao().get(messageId) shouldNotBe null
+        db.conversationDao().get(conversationId) shouldNotBe null
+        Unit
+    }
+
+    @Test
+    fun emptyConversationSweepDoesNotDeleteACopyCommittedAfterTheEmptyScan() = runBlocking {
+        ready()
+        val first = commit(bigText("Alice", "going", "s1", "t1"))
+        val conversationId = first.conversationId!!
+        inbox.deleteMessages(first.newMessageIds, System.currentTimeMillis(), 86_400_000)
+        val db = holder.db()
+        db.messageDao().forConversation(conversationId) shouldBe emptyList()
+        ageConversation(conversationId)
+        val cutoff = System.currentTimeMillis() - 7L * RetentionService.DAY_MS
+        val scanned = db.conversationDao().emptyOlderThan(cutoff)
+        scanned.contains(conversationId) shouldBe true
+        val again = commit(bigText("Alice", "arrived after the scan", "s2", "t1"))
+        again.conversationId shouldBe conversationId
+        val newId = again.newMessageIds.single()
+        for (id in scanned) db.conversationDao().deleteIfEmptyAndOlderThan(id, cutoff)
+        db.messageDao().get(newId) shouldNotBe null
+        db.conversationDao().get(conversationId) shouldNotBe null
+        Unit
+    }
+
+    @Test
+    fun emptyConversationSweepStillRemovesATrulyEmptyOldConversation() = runBlocking {
+        ready()
+        val stored = commit(bigText("Alice", "gone", "e1", "t1"))
+        val conversationId = stored.conversationId!!
+        inbox.deleteMessages(stored.newMessageIds, System.currentTimeMillis(), 86_400_000)
+        holder.db().messageDao().forConversation(conversationId) shouldBe emptyList()
+        ageConversation(conversationId)
+        RetentionService(holder, settings, mediaDir, maintenance).runOnce(System.currentTimeMillis())
+        holder.db().conversationDao().get(conversationId) shouldBe null
+        Unit
+    }
+
+    @Test
+    fun inboxPreviewIsNotAnExpiredCopyOnAFreshQuery() = runBlocking {
+        ready()
+        val keep = commit(bigText("Alice", "keep me", "i1", "t1", observedAt = 1_700_000_000_000L))
+        val conversationId = keep.conversationId!!
+        commit(bigText("Bob", "EXPIRED_PRIVATE_TEXT", "i2", "t1", observedAt = 1_700_000_001_000L), retentionMs = 1)
+        val later = System.currentTimeMillis() + 5_000L
+        inbox.nowMs = { later }
+        inbox.observeMessages(conversationId).first().map { it.body } shouldBe listOf("keep me")
+        val row = inbox.observeConversations(false, emptySet()).first().single { it.id == conversationId }
+        row.lastMessagePreview shouldBe "keep me"
+        row.lastSenderName shouldBe "Alice"
+        row.messageCount shouldBe 1
+        inbox.observeConversation(conversationId).first()!!.lastMessagePreview shouldBe "keep me"
+        Unit
+    }
+
+    @Test
+    fun inboxAndThreadHideACopyWhenTheClockCrossesExpiryWithNoWrite() = runBlocking {
+        ready()
+        val t0 = System.currentTimeMillis()
+        inbox.nowMs = { t0 }
+        inbox.visibilityTickMs = 60_000L
+        val keep = commit(bigText("Alice", "keep me", "c1", "t1", observedAt = t0))
+        val conversationId = keep.conversationId!!
+        commit(bigText("Bob", "EXPIRED_PRIVATE_TEXT", "c2", "t1", observedAt = t0 + 1), retentionMs = 5_000)
+        val seen = ArrayList<Pair<List<String>, String?>>()
+        val job = launch {
+            combineInbox(conversationId).collect { seen += it }
+        }
+        withTimeout(5_000) {
+            while (seen.none { it.first.contains("EXPIRED_PRIVATE_TEXT") || it.second == "EXPIRED_PRIVATE_TEXT" }) delay(10)
+        }
+        val t1 = t0 + 10_000
+        inbox.nowMs = { t1 }
+        inbox.tickVisibility(t1)
+        withTimeout(5_000) {
+            while (seen.last().first.contains("EXPIRED_PRIVATE_TEXT") || seen.last().second == "EXPIRED_PRIVATE_TEXT") delay(10)
+        }
+        seen.last().first shouldBe listOf("keep me")
+        seen.last().second shouldBe "keep me"
+        inbox.observeConversation(conversationId).first()!!.lastMessagePreview shouldBe "keep me"
+        job.cancel()
+        Unit
+    }
+
+    @Test
+    fun leavingAndReturningStillHidesAnExpiredCopyWithNoWrite() = runBlocking {
+        ready()
+        val t0 = System.currentTimeMillis()
+        inbox.nowMs = { t0 }
+        inbox.visibilityTickMs = 60_000L
+        val keep = commit(bigText("Alice", "keep me", "b1", "t1", observedAt = t0))
+        val conversationId = keep.conversationId!!
+        commit(bigText("Bob", "EXPIRED_PRIVATE_TEXT", "b2", "t1", observedAt = t0 + 1), retentionMs = 5_000)
+        val first = combineInbox(conversationId).first()
+        first.first.contains("EXPIRED_PRIVATE_TEXT") shouldBe true
+        first.second shouldBe "EXPIRED_PRIVATE_TEXT"
+        val t1 = t0 + 10_000
+        inbox.nowMs = { t1 }
+        val again = combineInbox(conversationId).first()
+        again.first shouldBe listOf("keep me")
+        again.second shouldBe "keep me"
+        inbox.observeConversation(conversationId).first()!!.lastMessagePreview shouldBe "keep me"
+        Unit
+    }
+
+    private fun combineInbox(conversationId: Long) = kotlinx.coroutines.flow.combine(
+        inbox.observeMessages(conversationId),
+        inbox.observeConversations(false, emptySet()),
+    ) { messages, convs ->
+        messages.map { it.body } to convs.firstOrNull { it.id == conversationId }?.lastMessagePreview
     }
 }

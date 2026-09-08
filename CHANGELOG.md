@@ -5,6 +5,24 @@ All notable changes to this project are documented here. The format follows Keep
 ## [Unreleased]
 
 ### Fixed
+- **Empty-conversation cleanup treated `messageCount = 0` as empty** and then cascade-deleted
+  remaining rows. That projection excludes `AMBIGUOUS_REPEAT`, and a scan-then-delete could also
+  drop a copy committed between the two statements. The sweep now deletes only conversations with
+  no message rows at the moment of the delete.
+- **The inbox kept showing an expired copy's preview and sender** (and cached counts / unviewed)
+  after the thread had already hidden it. Inbox and conversation-header reads now use currently
+  visible copies, including when the clock crosses expiry with no database write.
+- **A restore that inserted a message but failed to attach its media** left that row `FAILED` for
+  ever. A later import of a complete backup of the same copies now attaches a healthy local file
+  without duplicating the row, without replacing an already-healthy attach, and without overriding
+  `DISABLED_BY_USER`. An incomplete repair is counted on the existing partial-media warning.
+- **A stuck export dest-copy pinned exclusive vault maintenance**, cancelling one import could
+  close another operation's stream, and an import already in staging/apply could not be aborted.
+  Dest-copy is outside the worker gate; each operation owns its stream; Settings can stop an
+  in-progress export or import (not "Delete everything"). Stop before the vault write reports
+  "nothing was changed"; stop after the rows are durable still reports the restore, never as a
+  no-op cancel.
+
 - **Search paging could mix a previous query's cursor into a new search**, and a stale page
   completing could clear a newer load-more spinner. Query, sources, frozen time range, cursor and
   results are one session; each page has its own request id. An obsolete completion does not mutate
@@ -21,11 +39,16 @@ All notable changes to this project are documented here. The format follows Keep
   write after a key-epoch change does not land. Not a timeout around the exclusive section.
 
 ### Tests / CI
-- Search ViewModel tests cover mixed-cursor paging, stale load-more unlock, A→B→A, a source toggle
-  during debounce, first-page vs load-more interleaving, failed vs empty, load-more failure, and
-  cancellation. Instrumented backup: hung-read cancel, epoch-change refuse, export-skip → wipe →
-  import counts partial media. CI JVM unit tests run `./gradlew test` so `:platform:media`
-  (and every other module with `src/test`) is on the job. Issue #33 stays open.
+- Instrumented storage: empty-conversation sweep keeps an unexpired `AMBIGUOUS_REPEAT` and a copy
+  committed after the empty-id scan, and still removes a truly empty old conversation; inbox
+  preview/counts hide an expired copy on a fresh query, when the clock crosses expiry with no
+  write, and after leaving and returning. Instrumented backup: second complete import repairs
+  `FAILED` media and the result counts that attach; hung export write and hung import/export
+  open; cancelling one hung import does not close another stream; abort after staging and abort
+  inside apply do not land the write; abort after commit still reports Done. Search ViewModel tests cover mixed-cursor paging, stale load-more
+  unlock, A→B→A, a source toggle during debounce, first-page vs load-more interleaving, failed vs
+  empty, load-more failure, and cancellation. CI JVM unit tests run `./gradlew test` so
+  `:platform:media` (and every other module with `src/test`) is on the job. Issue #33 stays open.
 
 ## [0.1.4] — 2026-09-08
 

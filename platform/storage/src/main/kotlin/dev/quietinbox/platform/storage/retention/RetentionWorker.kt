@@ -112,9 +112,8 @@ class RetentionService @Inject constructor(
         db.healthDao().deleteSessionsBefore(gapCutoff)
         db.healthDao().deleteSummariesBefore(gapCutoff)
         db.checkpointDao().deleteStale(now - 14L * DAY_MS)
-        val emptyConversations = db.conversationDao().emptyOlderThan(now - 7L * DAY_MS)
-        for (id in emptyConversations) db.conversationDao().delete(id)
-        return RetentionReport(deletedMessages, orphans.size, journal, suppression, diagnostics, emptyConversations.size, stray.size, stalePending)
+        val deletedEmpty = db.conversationDao().deleteEmptyOlderThan(now - 7L * DAY_MS)
+        return RetentionReport(deletedMessages, orphans.size, journal, suppression, diagnostics, deletedEmpty, stray.size, stalePending)
     }
 
     companion object {

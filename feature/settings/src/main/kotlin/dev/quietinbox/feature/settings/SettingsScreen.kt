@@ -258,7 +258,11 @@ fun SettingsScreen(
                     headlineContent = { Text(stringResource(R.string.backup_export)) },
                     supportingContent = { Text(stringResource(R.string.backup_export_desc)) },
                     trailingContent = {
-                        if (state.busy) LoadingIndicator() else TextButton(onClick = { exportLauncher.launch(fileName) }, enabled = s.recoveryKeyAcknowledged) { Text(stringResource(R.string.backup_export)) }
+                        when {
+                            state.backupInProgress -> TextButton(onClick = viewModel::abortBackup) { Text(stringResource(R.string.backup_abort)) }
+                            state.busy -> LoadingIndicator()
+                            else -> TextButton(onClick = { exportLauncher.launch(fileName) }, enabled = s.recoveryKeyAcknowledged) { Text(stringResource(R.string.backup_export)) }
+                        }
                     },
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                 )
@@ -268,7 +272,12 @@ fun SettingsScreen(
                     leadingContent = { Icon(Icons.Outlined.Restore, null) },
                     headlineContent = { Text(stringResource(R.string.backup_import)) },
                     supportingContent = { Text(stringResource(R.string.backup_import_desc)) },
-                    trailingContent = { TextButton(onClick = { importLauncher.launch(arrayOf("*/*")) }, enabled = !state.busy) { Text(stringResource(R.string.backup_import)) } },
+                    trailingContent = {
+                        when {
+                            state.backupInProgress -> TextButton(onClick = viewModel::abortBackup) { Text(stringResource(R.string.backup_abort)) }
+                            else -> TextButton(onClick = { importLauncher.launch(arrayOf("*/*")) }, enabled = !state.busy) { Text(stringResource(R.string.backup_import)) }
+                        }
+                    },
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                 )
             }
@@ -428,6 +437,7 @@ private fun backupResultText(result: BackupResult?): String? = when (result) {
         BackupResult.Reason.VAULT_UNAVAILABLE -> stringResource(R.string.backup_failed_vault)
         BackupResult.Reason.MAINTENANCE -> stringResource(R.string.backup_failed_maintenance)
         BackupResult.Reason.LOW_SPACE -> stringResource(R.string.backup_failed_low_space)
+        BackupResult.Reason.ABORTED -> stringResource(R.string.backup_stopped)
     }
 }
 

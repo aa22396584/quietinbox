@@ -39,9 +39,9 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.security.SecureRandom
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
-import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -58,7 +58,7 @@ sealed interface BackupResult {
     data class Ok(val counts: Counts, val skippedMedia: Int = 0, val mediaNotRestored: Int = 0) : BackupResult
     data class Failed(val reason: Reason, val detail: String? = null) : BackupResult
 
-    enum class Reason { NO_RECOVERY_KEY, KEY_UNAVAILABLE, IO, BAD_HEADER, WRONG_KEY_OR_TAMPERED, CORRUPT, TRUNCATED, COUNT_MISMATCH, TOO_LARGE, UNSUPPORTED_VERSION, VAULT_UNAVAILABLE, MAINTENANCE, LOW_SPACE }
+    enum class Reason { NO_RECOVERY_KEY, KEY_UNAVAILABLE, IO, BAD_HEADER, WRONG_KEY_OR_TAMPERED, CORRUPT, TRUNCATED, COUNT_MISMATCH, TOO_LARGE, UNSUPPORTED_VERSION, VAULT_UNAVAILABLE, MAINTENANCE, LOW_SPACE, ABORTED }
 }
 
 /**
@@ -68,10 +68,13 @@ sealed interface BackupResult {
  * everything, verifies EOF, counts and every authentication tag, and only then applies in one
  * transaction. Wrong key, truncation and tampering leave the existing vault untouched.
  *
- * Both run under the maintenance gate (QI-BACKUP-016): export is cancellable vault work, so a
- * reset can stop it; import stages and verifies the file outside exclusive maintenance (so an
- * uncooperative `read` cannot pin "Delete everything"), then applies as an exclusive run so
- * capture, media copies, retention and a reset cannot interleave with the write.
+ * Both run under the maintenance gate (QI-BACKUP-016): export snapshots the vault as cancellable
+ * work, then copies the finished ciphertext to the user's document *outside* that gate so an
+ * uncooperative sink cannot pin "Delete everything"; import stages and verifies the file outside
+ * exclusive maintenance (so an uncooperative `read` cannot pin it either), then applies as an
+ * exclusive run so capture, media copies, retention and a reset cannot interleave with the write.
+ * Each operation owns its own stream; [abort] invalidates in-flight apply/copy without closing
+ * another operation's stream.
  */
 @Singleton
 class BackupService @Inject constructor(
@@ -94,15 +97,38 @@ class BackupService @Inject constructor(
      * "Delete everything") can start. [MAX_LIVE_IMPORT_READS] bounds abandoned threads.
      */
     private val importReads = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val exportWrites = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val liveImportReads = AtomicInteger(0)
+    private val liveExportWrites = AtomicInteger(0)
     private val importSeq = AtomicLong(0)
-    private val currentImportStream = AtomicReference<InputStream?>(null)
+    private val exportSeq = AtomicLong(0)
+    private val importStreams = ConcurrentHashMap<Long, InputStream>()
+    private val exportStreams = ConcurrentHashMap<Long, OutputStream>()
 
     private companion object {
         /** Rows per keyset page while exporting. */
         const val PAGE = 500
         /** Abandoned uncooperative backup reads; a third import is refused until one finishes. */
         const val MAX_LIVE_IMPORT_READS = 2
+        /** Abandoned uncooperative backup writes; a third export is refused until one finishes. */
+        const val MAX_LIVE_EXPORT_WRITES = 2
+    }
+
+    private class BackupAborted : RuntimeException()
+
+    /**
+     * Invalidates in-flight import apply and export dest-copy, and closes this service's streams
+     * without waiting. Does not close another operation's stream: each token owns its own.
+     */
+    fun abort() {
+        importSeq.incrementAndGet()
+        exportSeq.incrementAndGet()
+        for (key in importStreams.keys.toList()) {
+            importStreams.remove(key)?.let { abandonClose(it) }
+        }
+        for (key in exportStreams.keys.toList()) {
+            exportStreams.remove(key)?.let { abandonCloseOutput(it) }
+        }
     }
 
     /** The recovery key as text the user must save; created on first call. */
@@ -111,22 +137,44 @@ class BackupService @Inject constructor(
         is KeyResult.Ok -> KeyResult.Ok(RecoveryKeyCodec.encode(r.value)).also { r.value.fill(0) }
     }
 
-    suspend fun export(target: Uri, appVersion: String): BackupResult =
-        maintenance.work { exportNow(target, appVersion) } ?: BackupResult.Failed(BackupResult.Reason.MAINTENANCE)
+    suspend fun export(target: Uri, appVersion: String): BackupResult {
+        val token = exportSeq.incrementAndGet()
+        val staged = maintenance.work { writeStagingFile(appVersion) }
+            ?: return BackupResult.Failed(BackupResult.Reason.MAINTENANCE)
+        return when (staged) {
+            is StagingWrite.Fail -> staged.result
+            is StagingWrite.Ok -> {
+                if (token != exportSeq.get()) {
+                    staged.file.delete()
+                    BackupResult.Failed(BackupResult.Reason.ABORTED)
+                } else {
+                    copyStagingToTarget(token, staged, target)
+                }
+            }
+        }
+    }
 
-    private suspend fun exportNow(target: Uri, appVersion: String): BackupResult = withContext(Dispatchers.IO) {
+    private sealed class StagingWrite {
+        class Ok(val file: File, val counts: Counts, val skippedMedia: Int) : StagingWrite()
+        class Fail(val result: BackupResult.Failed) : StagingWrite()
+    }
+
+    /**
+     * Builds the ciphertext in a private temp file under cancellable vault work. The copy to the
+     * user's document is [copyStagingToTarget], outside this gate: a sink that never accepts bytes
+     * must not stay registered as a worker that exclusive maintenance has to join.
+     */
+    private suspend fun writeStagingFile(appVersion: String): StagingWrite = withContext(Dispatchers.IO) {
         val key = when (val r = keyMaterial.recovery.getOrCreate()) {
-            is KeyResult.Failed -> return@withContext BackupResult.Failed(BackupResult.Reason.KEY_UNAVAILABLE)
+            is KeyResult.Failed -> return@withContext StagingWrite.Fail(BackupResult.Failed(BackupResult.Reason.KEY_UNAVAILABLE))
             is KeyResult.Ok -> r.value
         }
         val db = try {
             holder.db()
         } catch (e: Exception) {
             if (e is CancellationException) throw e
-            return@withContext BackupResult.Failed(BackupResult.Reason.VAULT_UNAVAILABLE)
+            return@withContext StagingWrite.Fail(BackupResult.Failed(BackupResult.Reason.VAULT_UNAVAILABLE))
         }
-        // The ciphertext is produced into a private temp file first and copied to the user's
-        // document only once it is complete, so a failure never damages a pre-existing backup.
         val staging = File(context.cacheDir, "backup-" + UUID.randomUUID().toString().replace("-", "") + ".qibk")
         try {
             val salt = ByteArray(BackupCrypto.SALT_BYTES).also { SecureRandom().nextBytes(it) }
@@ -138,16 +186,53 @@ class BackupService @Inject constructor(
                     writeRecords(db, enc.bufferedWriter(Charsets.UTF_8), appVersion)
                 }
             }
-            val out: OutputStream = context.contentResolver.openOutputStream(target, "wt")
-                ?: return@withContext BackupResult.Failed(BackupResult.Reason.IO, "open")
-            out.use { dest -> FileInputStream(staging).use { it.copyTo(dest) } }
-            BackupResult.Ok(written.counts, written.skippedMedia)
+            StagingWrite.Ok(staging, written.counts, written.skippedMedia)
         } catch (e: Exception) {
+            staging.delete()
             if (e is CancellationException) throw e
-            BackupResult.Failed(BackupResult.Reason.IO, e::class.java.simpleName)
+            StagingWrite.Fail(BackupResult.Failed(BackupResult.Reason.IO, e::class.java.simpleName))
         } finally {
             key.fill(0)
-            staging.delete()
+        }
+    }
+
+    private suspend fun copyStagingToTarget(token: Long, staged: StagingWrite.Ok, target: Uri): BackupResult {
+        val result = CompletableDeferred<BackupResult>()
+        exportWrites.launch {
+            if (liveExportWrites.incrementAndGet() > MAX_LIVE_EXPORT_WRITES) {
+                liveExportWrites.decrementAndGet()
+                staged.file.delete()
+                result.complete(BackupResult.Failed(BackupResult.Reason.IO, "write slot"))
+                return@launch
+            }
+            var dest: OutputStream? = null
+            try {
+                if (token != exportSeq.get()) {
+                    result.complete(BackupResult.Failed(BackupResult.Reason.ABORTED))
+                    return@launch
+                }
+                val opened = openOutput(target) ?: throw java.io.IOException("open")
+                dest = opened
+                exportStreams[token] = opened
+                FileInputStream(staged.file).use { input -> input.copyTo(opened) }
+                result.complete(BackupResult.Ok(staged.counts, staged.skippedMedia))
+            } catch (e: Throwable) {
+                if (!result.isCompleted) {
+                    if (e is CancellationException) result.completeExceptionally(e)
+                    else result.complete(BackupResult.Failed(BackupResult.Reason.IO, e::class.java.simpleName))
+                }
+            } finally {
+                dest?.let { exportStreams.remove(token, it) }
+                runCatching { dest?.close() }
+                liveExportWrites.decrementAndGet()
+                staged.file.delete()
+            }
+        }
+        try {
+            return result.await()
+        } catch (e: CancellationException) {
+            exportStreams.remove(token)?.let { abandonCloseOutput(it) }
+            return BackupResult.Failed(BackupResult.Reason.ABORTED)
         }
     }
 
@@ -262,12 +347,11 @@ class BackupService @Inject constructor(
      */
     suspend fun import(source: Uri, recoveryKeyText: String): BackupResult {
         val token = importSeq.incrementAndGet()
-        currentImportStream.getAndSet(null)?.let { abandonClose(it) }
         val epoch = keyMaterial.epoch
         val staged = try {
-            stageFromSource(source, recoveryKeyText)
+            stageFromSource(token, source, recoveryKeyText)
         } catch (e: CancellationException) {
-            throw e
+            return BackupResult.Failed(BackupResult.Reason.ABORTED)
         } catch (e: java.io.IOException) {
             return BackupResult.Failed(BackupResult.Reason.WRONG_KEY_OR_TAMPERED, e::class.java.simpleName)
         } catch (e: java.security.GeneralSecurityException) {
@@ -280,9 +364,9 @@ class BackupService @Inject constructor(
             if (e is CancellationException) throw e
             return BackupResult.Failed(BackupResult.Reason.IO, e::class.java.simpleName)
         }
-        if (token != importSeq.get()) return BackupResult.Failed(BackupResult.Reason.MAINTENANCE)
+        if (token != importSeq.get()) return BackupResult.Failed(BackupResult.Reason.ABORTED)
         afterStaged()
-        if (token != importSeq.get()) return BackupResult.Failed(BackupResult.Reason.MAINTENANCE)
+        if (token != importSeq.get()) return BackupResult.Failed(BackupResult.Reason.ABORTED)
         if (keyMaterial.epoch != epoch) return BackupResult.Failed(BackupResult.Reason.KEY_UNAVAILABLE)
         return withContext(Dispatchers.IO) {
             val mediaBytes = staged.media.sumOf { it.dataBase64.length.toLong() * 3 / 4 }
@@ -291,7 +375,7 @@ class BackupService @Inject constructor(
                 return@withContext BackupResult.Failed(BackupResult.Reason.LOW_SPACE, "need ${mediaBytes + LOW_SPACE_FLOOR_BYTES}, free $free")
             }
             maintenance.exclusive {
-                if (token != importSeq.get()) return@exclusive BackupResult.Failed(BackupResult.Reason.MAINTENANCE)
+                if (token != importSeq.get()) return@exclusive BackupResult.Failed(BackupResult.Reason.ABORTED)
                 if (keyMaterial.epoch != epoch) return@exclusive BackupResult.Failed(BackupResult.Reason.KEY_UNAVAILABLE)
                 val db = try {
                     holder.db()
@@ -299,13 +383,21 @@ class BackupService @Inject constructor(
                     if (e is CancellationException) throw e
                     return@exclusive BackupResult.Failed(BackupResult.Reason.VAULT_UNAVAILABLE)
                 }
-                apply(db, staged)
+                apply(db, staged, token)
             }
         }
     }
 
     /** Test seam: production opens the user's document. */
     internal var openInput: (Uri) -> InputStream? = { context.contentResolver.openInputStream(it) }
+
+    /** Test seam: production opens the user's chosen destination. */
+    internal var openOutput: (Uri) -> OutputStream? = { context.contentResolver.openOutputStream(it, "wt") }
+
+    /** Test seam: production encrypts a restored blob to a vault file. */
+    internal var writeMedia: (ByteArray, File) -> Boolean = { bytes, file ->
+        blobCipher.encryptToFile(bytes, file) is KeyResult.Ok
+    }
 
     /**
      * Test seam: called after the stream has been staged and verified, before exclusive apply.
@@ -318,14 +410,18 @@ class BackupService @Inject constructor(
 
     /**
      * Close a provider stream on the import-read pool without waiting. Callers must pass a stream
-     * they have already taken off [currentImportStream] so each stream is closed at most once from
+     * they have already taken off [importStreams] so each stream is closed at most once from
      * here; retries must not enqueue another blocked close.
      */
     private fun abandonClose(stream: InputStream) {
         importReads.launch { runCatching { stream.close() } }
     }
 
-    private suspend fun stageFromSource(source: Uri, recoveryKeyText: String): Staged {
+    private fun abandonCloseOutput(stream: OutputStream) {
+        exportWrites.launch { runCatching { stream.close() } }
+    }
+
+    private suspend fun stageFromSource(token: Long, source: Uri, recoveryKeyText: String): Staged {
         val result = CompletableDeferred<Staged>()
         importReads.launch {
             if (liveImportReads.incrementAndGet() > MAX_LIVE_IMPORT_READS) {
@@ -336,16 +432,17 @@ class BackupService @Inject constructor(
             var input: InputStream? = null
             var key: ByteArray? = null
             try {
-                input = openInput(source) ?: throw StagingException(BackupResult.Reason.IO, "open")
-                currentImportStream.set(input)
+                val opened = openInput(source) ?: throw StagingException(BackupResult.Reason.IO, "open")
+                input = opened
+                importStreams[token] = opened
                 key = RecoveryKeyCodec.decode(recoveryKeyText)
                     ?: throw StagingException(BackupResult.Reason.WRONG_KEY_OR_TAMPERED, "key format")
-                result.complete(readAndStage(input, key))
+                result.complete(readAndStage(opened, key))
             } catch (e: Throwable) {
                 result.completeExceptionally(e)
             } finally {
                 key?.fill(0)
-                currentImportStream.compareAndSet(input, null)
+                input?.let { importStreams.remove(token, it) }
                 runCatching { input?.close() }
                 liveImportReads.decrementAndGet()
             }
@@ -353,7 +450,7 @@ class BackupService @Inject constructor(
         try {
             return result.await()
         } catch (e: CancellationException) {
-            currentImportStream.getAndSet(null)?.let { abandonClose(it) }
+            importStreams.remove(token)?.let { abandonClose(it) }
             throw e
         }
     }
@@ -391,12 +488,16 @@ class BackupService @Inject constructor(
      * already existed *before* this import are skipped (same fingerprint + sort key + observed
      * time), so legitimate duplicates inside the backup keep their multiplicity.
      */
-    private suspend fun apply(db: QuietInboxDatabase, s: Staged): BackupResult {
+    private suspend fun apply(db: QuietInboxDatabase, s: Staged, token: Long): BackupResult {
         applyThreadProbe()
+        fun checkToken() {
+            if (token != importSeq.get()) throw BackupAborted()
+        }
         // Every blob written to disk and not yet owned by a committed row. Trimmed to the unused
         // ones *inside* the transaction (see below), so the same list is right on every exit.
         val writtenFiles = ArrayList<String>()
         val usedFiles = HashSet<String>() // blobs referenced by a message that was actually inserted
+        var committed: BackupResult.Ok? = null
         // Blobs are decoded and encrypted to disk BEFORE the write transaction so the SQLite write
         // lock is never held during Tink work and file I/O (live capture would otherwise stall).
         class Prepared(val fileName: String, val byteCount: Long)
@@ -406,6 +507,7 @@ class BackupService @Inject constructor(
         return try {
             // Inside the try so a failure or cancellation while encrypting still removes every file.
             for (media in s.media) {
+                checkToken()
                 val oldId = media.messageId ?: continue
                 val bytes = runCatching { Base64.decode(media.dataBase64, Base64.NO_WRAP) }.getOrNull()
                 // Empty is what Android Base64 returns for a string of invalid characters: it is
@@ -415,7 +517,7 @@ class BackupService @Inject constructor(
                     continue
                 }
                 val name = UUID.randomUUID().toString().replace("-", "")
-                if (blobCipher.encryptToFile(bytes, mediaDir.file(name)) is KeyResult.Ok) {
+                if (writeMedia(bytes, mediaDir.file(name))) {
                     writtenFiles += name
                     prepared[oldId] = Prepared(name, bytes.size.toLong())
                 } else {
@@ -423,6 +525,7 @@ class BackupService @Inject constructor(
                 }
             }
             val counts = db.withTransaction {
+                checkToken()
                 for (src in s.sources) {
                     if (db.sourceDao().get(src.packageName) == null) {
                         // Restoring never silently starts capturing: sources come back disabled and are re-enabled in Capture.
@@ -475,6 +578,27 @@ class BackupService @Inject constructor(
                         // the live path makes; nothing here ever clears a flag the row already has.
                         val flag = m.truncationFlags
                         if (flag != null && existing.truncationFlags == null) db.messageDao().markTruncated(existing.id, flag)
+                        val media = mediaByOldMessage[m.id]
+                        val blob = media?.let { prepared[m.id] }
+                        val leaveAttach = existing.mediaState == MediaState.DISABLED_BY_USER.name ||
+                            (existing.mediaState == MediaState.LOCAL_COPY.name && existing.mediaBlobId != null)
+                        if (leaveAttach) continue
+                        if (media != null && blob == null) {
+                            mediaNotRestored++
+                            continue
+                        }
+                        if (blob != null) {
+                            usedFiles += blob.fileName
+                            val blobId = db.mediaDao().insert(
+                                MediaBlobEntity(
+                                    messageId = existing.id, fileName = blob.fileName, thumbFileName = null,
+                                    mimeType = media.mimeType, byteCount = blob.byteCount, width = media.width,
+                                    height = media.height, state = MediaState.LOCAL_COPY.name, failureReason = null,
+                                    createdAtEpochMs = media.createdAtEpochMs,
+                                ),
+                            )
+                            db.messageDao().setMedia(existing.id, MediaState.LOCAL_COPY.name, blobId)
+                        }
                         continue
                     }
                     // Insert the message first, then the blob bound to its new id (retention treats
@@ -527,6 +651,7 @@ class BackupService @Inject constructor(
                     db.diagnosticsDao().insert(dev.quietinbox.platform.storage.db.DiagnosticEventEntity(code = "RESTORE_ORPHAN_MESSAGES", detail = skippedOrphans.toString(), packageName = null, atEpochMs = System.currentTimeMillis()))
                 }
                 restoreProbe(RestorePoint.IN_TRANSACTION)
+                checkToken()
                 // Trimmed inside the transaction, as MediaCopier.store clears its list: a
                 // cancellation landing between the commit and the return of withTransaction is
                 // delivered as an exception from a call whose rows are already durable, and a flag
@@ -542,14 +667,18 @@ class BackupService @Inject constructor(
                 check(usedFiles.none { it in writtenFiles })
                 Triple(Counts(s.sources.size, convMap.size, inserted, restoredRevisions, usedFiles.size), mediaNotRestored, mediaAbsent)
             }
+            committed = BackupResult.Ok(counts.first, skippedMedia = counts.third, mediaNotRestored = counts.second)
             restoreProbe(RestorePoint.AFTER_COMMIT)
             // Blobs prepared for messages that were skipped (duplicates, orphans) have no row: remove them.
             for (f in writtenFiles) mediaDir.delete(f)
-            BackupResult.Ok(counts.first, skippedMedia = counts.third, mediaNotRestored = counts.second)
+            committed
         } catch (e: Exception) {
             // Before the commit every blob is an orphan; after it only the unreferenced ones are
-            // still on the list. Runs before the rethrow.
+            // still on the list. Runs before the rethrow. A stop after the rows are durable is
+            // still a completed restore, not "cancelled, nothing changed".
             for (f in writtenFiles) mediaDir.delete(f)
+            committed?.let { return it }
+            if (e is BackupAborted) return BackupResult.Failed(BackupResult.Reason.ABORTED)
             if (e is CancellationException) throw e
             BackupResult.Failed(BackupResult.Reason.IO, "apply:${e::class.java.simpleName}")
         }

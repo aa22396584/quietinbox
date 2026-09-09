@@ -33,6 +33,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import java.io.BufferedReader
 import java.io.BufferedWriter
+import java.io.Closeable
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -41,6 +42,7 @@ import java.io.OutputStream
 import java.security.SecureRandom
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
@@ -111,8 +113,9 @@ class BackupService @Inject constructor(
     private val importGen = AtomicLong(0)
     /** Bumped only by [abort]; a sibling export must not look like a stop. */
     private val exportGen = AtomicLong(0)
-    private val importStreams = ConcurrentHashMap<Long, InputStream>()
-    private val exportStreams = ConcurrentHashMap<Long, OutputStream>()
+    private val importStreams = ConcurrentHashMap<Long, OnceClose>()
+    private val exportStreams = ConcurrentHashMap<Long, OnceClose>()
+    private val liveExports = ConcurrentHashMap<Long, BackupOp>()
     private val importIo = Any()
     private val exportIo = Any()
     private val lastImportOp = AtomicReference<BackupOp?>(null)
@@ -122,6 +125,30 @@ class BackupService @Inject constructor(
         val settled = AtomicReference<BackupResult?>(null)
         /** This waiter's Job.cancel; [abort] still only bumps gen so a sibling is not stopped. */
         val cancelled = AtomicBoolean(false)
+        val stagingFile = AtomicReference<File?>(null)
+    }
+
+    /**
+     * One close, one completion. A second close() that returns immediately is not proof the first
+     * cleanup finished; waiters and the worker both observe [done].
+     */
+    private class OnceClose(private val closeable: Closeable) {
+        private val started = AtomicBoolean(false)
+        private val done = CountDownLatch(1)
+
+        fun start() {
+            if (!started.compareAndSet(false, true)) return
+            try {
+                closeable.close()
+            } finally {
+                done.countDown()
+            }
+        }
+
+        fun await() {
+            start()
+            done.await()
+        }
     }
 
     private companion object {
@@ -140,8 +167,9 @@ class BackupService @Inject constructor(
      * without waiting. Does not close another operation's stream: each token owns its own.
      */
     fun abort() {
-        val inputs: List<InputStream>
-        val outputs: List<OutputStream>
+        val inputs: List<OnceClose>
+        val outputs: List<OnceClose>
+        val staging: List<File>
         synchronized(importIo) {
             importGen.incrementAndGet()
             inputs = importStreams.values.toList()
@@ -151,9 +179,11 @@ class BackupService @Inject constructor(
             exportGen.incrementAndGet()
             outputs = exportStreams.values.toList()
             exportStreams.clear()
+            staging = liveExports.values.mapNotNull { it.stagingFile.getAndSet(null) }
         }
         for (s in inputs) abandonClose(s)
         for (s in outputs) abandonCloseOutput(s)
+        for (f in staging) f.delete()
     }
 
     fun settledImport(): BackupResult? = lastImportOp.get()?.settled?.get()
@@ -170,15 +200,15 @@ class BackupService @Inject constructor(
         synchronized(exportIo) {
             op = BackupOp(exportSeq.incrementAndGet(), exportGen.get())
             lastExportOp.set(op)
+            liveExports[op.token] = op
         }
-        return try {
-            val staged = maintenance.work { writeStagingFile(appVersion) }
+        try {
+            val staged = maintenance.work { writeStagingFile(op, appVersion) }
                 ?: return BackupResult.Failed(BackupResult.Reason.MAINTENANCE)
-            when (staged) {
+            return when (staged) {
                 is StagingWrite.Fail -> staged.result
                 is StagingWrite.Ok -> {
                     if (!exportOpActive(op)) {
-                        staged.file.delete()
                         BackupResult.Failed(BackupResult.Reason.EXPORT_ABORTED)
                     } else {
                         copyStagingToTarget(op, staged, target)
@@ -187,7 +217,10 @@ class BackupService @Inject constructor(
             }
         } catch (e: CancellationException) {
             dropExport(op)?.let { abandonCloseOutput(it) }
-            op.settled.get() ?: BackupResult.Failed(BackupResult.Reason.EXPORT_ABORTED)
+            return op.settled.get() ?: BackupResult.Failed(BackupResult.Reason.EXPORT_ABORTED)
+        } finally {
+            liveExports.remove(op.token)
+            takeStaging(op)?.delete()
         }
     }
 
@@ -201,48 +234,66 @@ class BackupService @Inject constructor(
      * user's document is [copyStagingToTarget], outside this gate: a sink that never accepts bytes
      * must not stay registered as a worker that exclusive maintenance has to join.
      */
-    private suspend fun writeStagingFile(appVersion: String): StagingWrite = withContext(Dispatchers.IO) {
-        val key = when (val r = keyMaterial.recovery.getOrCreate()) {
-            is KeyResult.Failed -> return@withContext StagingWrite.Fail(BackupResult.Failed(BackupResult.Reason.KEY_UNAVAILABLE))
-            is KeyResult.Ok -> r.value
-        }
-        val db = try {
-            holder.db()
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
-            return@withContext StagingWrite.Fail(BackupResult.Failed(BackupResult.Reason.VAULT_UNAVAILABLE))
-        }
-        val staging = File(context.cacheDir, "backup-" + UUID.randomUUID().toString().replace("-", "") + ".qibk")
-        try {
-            val salt = ByteArray(BackupCrypto.SALT_BYTES).also { SecureRandom().nextBytes(it) }
-            val header = BackupCrypto.header(salt)
-            val saead = BackupCrypto.streamingAead(key, salt)
-            val written = FileOutputStream(staging).use { raw ->
-                raw.write(header)
-                saead.newEncryptingStream(raw, header).use { enc ->
-                    writeRecords(db, enc.bufferedWriter(Charsets.UTF_8), appVersion)
-                }
+    private suspend fun writeStagingFile(op: BackupOp, appVersion: String): StagingWrite {
+        val written = withContext(Dispatchers.IO) {
+            val key = when (val r = keyMaterial.recovery.getOrCreate()) {
+                is KeyResult.Failed -> return@withContext StagingWrite.Fail(BackupResult.Failed(BackupResult.Reason.KEY_UNAVAILABLE))
+                is KeyResult.Ok -> r.value
             }
-            StagingWrite.Ok(staging, written.counts, written.skippedMedia)
-        } catch (e: Exception) {
-            staging.delete()
-            if (e is CancellationException) throw e
-            StagingWrite.Fail(BackupResult.Failed(BackupResult.Reason.IO, e::class.java.simpleName))
-        } finally {
-            key.fill(0)
+            val db = try {
+                holder.db()
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                return@withContext StagingWrite.Fail(BackupResult.Failed(BackupResult.Reason.VAULT_UNAVAILABLE))
+            }
+            val staging = File(context.cacheDir, "backup-" + UUID.randomUUID().toString().replace("-", "") + ".qibk")
+            try {
+                val salt = ByteArray(BackupCrypto.SALT_BYTES).also { SecureRandom().nextBytes(it) }
+                val header = BackupCrypto.header(salt)
+                val saead = BackupCrypto.streamingAead(key, salt)
+                val written = FileOutputStream(staging).use { raw ->
+                    raw.write(header)
+                    saead.newEncryptingStream(raw, header).use { enc ->
+                        writeRecords(db, enc.bufferedWriter(Charsets.UTF_8), appVersion)
+                    }
+                }
+                op.stagingFile.set(staging)
+                StagingWrite.Ok(staging, written.counts, written.skippedMedia)
+            } catch (e: Exception) {
+                op.stagingFile.compareAndSet(staging, null)
+                staging.delete()
+                if (e is CancellationException) throw e
+                StagingWrite.Fail(BackupResult.Failed(BackupResult.Reason.IO, e::class.java.simpleName))
+            } finally {
+                key.fill(0)
+            }
         }
+        if (written is StagingWrite.Ok) afterEncryptedStagingReady(written.file)
+        return written
     }
 
     private suspend fun copyStagingToTarget(op: BackupOp, staged: StagingWrite.Ok, target: Uri): BackupResult {
         val result = CompletableDeferred<BackupResult>()
         exportWrites.launch {
+            val file = synchronized(exportIo) {
+                if (op.cancelled.get() || op.gen != exportGen.get()) {
+                    takeStaging(op)?.delete()
+                    null
+                } else {
+                    takeStaging(op) ?: staged.file
+                }
+            }
+            if (file == null) {
+                result.complete(BackupResult.Failed(BackupResult.Reason.EXPORT_ABORTED))
+                return@launch
+            }
             if (liveExportWrites.incrementAndGet() > MAX_LIVE_EXPORT_WRITES) {
                 liveExportWrites.decrementAndGet()
-                staged.file.delete()
+                file.delete()
                 result.complete(BackupResult.Failed(BackupResult.Reason.IO, "write slot"))
                 return@launch
             }
-            var dest: OutputStream? = null
+            var dest: OnceClose? = null
             var closed = false
             try {
                 if (!exportOpActive(op)) {
@@ -250,14 +301,15 @@ class BackupService @Inject constructor(
                     return@launch
                 }
                 val opened = openOutput(target) ?: throw java.io.IOException("open")
+                val owned = OnceClose(opened)
                 val claimed: Boolean
                 synchronized(exportIo) {
                     if (op.cancelled.get() || op.gen != exportGen.get()) {
-                        dest = opened
+                        dest = owned
                         claimed = false
                     } else {
-                        dest = opened
-                        exportStreams[op.token] = opened
+                        dest = owned
+                        exportStreams[op.token] = owned
                         claimed = true
                     }
                 }
@@ -265,11 +317,11 @@ class BackupService @Inject constructor(
                     result.complete(BackupResult.Failed(BackupResult.Reason.EXPORT_ABORTED))
                     return@launch
                 }
-                FileInputStream(staged.file).use { input -> copyWhileExportActive(input, opened, op) }
+                FileInputStream(file).use { input -> copyWhileExportActive(input, opened, op) }
                 opened.flush()
-                opened.close()
+                owned.await()
                 closed = true
-                synchronized(exportIo) { exportStreams.remove(op.token, opened) }
+                synchronized(exportIo) { exportStreams.remove(op.token, owned) }
                 dest = null
                 if (!exportOpActive(op)) {
                     result.complete(BackupResult.Failed(BackupResult.Reason.EXPORT_ABORTED))
@@ -292,14 +344,14 @@ class BackupService @Inject constructor(
                 }
             } finally {
                 if (!closed) {
-                    dest?.let { stream ->
-                        synchronized(exportIo) { exportStreams.remove(op.token, stream) }
-                        // Same thread as the slot: a close that never returns keeps the cap.
-                        runCatching { stream.close() }
+                    dest?.let { owned ->
+                        synchronized(exportIo) { exportStreams.remove(op.token, owned) }
+                        // Same completion as abandonClose: a close that never returns keeps the cap.
+                        runCatching { owned.await() }
                     }
                 }
                 liveExportWrites.decrementAndGet()
-                staged.file.delete()
+                file.delete()
             }
         }
         try {
@@ -320,15 +372,17 @@ class BackupService @Inject constructor(
 
     private fun importStillActive(gen: Long): Boolean = synchronized(importIo) { gen == importGen.get() }
 
-    private fun dropExport(op: BackupOp): OutputStream? = synchronized(exportIo) {
+    private fun dropExport(op: BackupOp): OnceClose? = synchronized(exportIo) {
         op.cancelled.set(true)
         exportStreams.remove(op.token)
     }
 
-    private fun dropImport(op: BackupOp): InputStream? = synchronized(importIo) {
+    private fun dropImport(op: BackupOp): OnceClose? = synchronized(importIo) {
         op.cancelled.set(true)
         importStreams.remove(op.token)
     }
+
+    private fun takeStaging(op: BackupOp): File? = op.stagingFile.getAndSet(null)
 
     private fun copyWhileExportActive(input: FileInputStream, dest: OutputStream, op: BackupOp) {
         val buf = ByteArray(8192)
@@ -548,16 +602,22 @@ class BackupService @Inject constructor(
     internal var applyThreadProbe: () -> Unit = {}
 
     /**
-     * Close a provider stream on the import-read pool without waiting. Callers must pass a stream
-     * they have already taken off [importStreams] so each stream is closed at most once from
-     * here; retries must not enqueue another blocked close.
+     * Test seam: after the encrypted staging file exists and is registered on the op, before
+     * [writeStagingFile] returns that result to [export]. Production is a no-op.
      */
-    private fun abandonClose(stream: InputStream) {
-        importReads.launch { runCatching { stream.close() } }
+    internal var afterEncryptedStagingReady: suspend (File) -> Unit = {}
+
+    /**
+     * Start close on the import-read pool without waiting. Callers must pass a [OnceClose] they
+     * have already taken off [importStreams] so each stream is closed at most once; retries must
+     * not enqueue another blocked close.
+     */
+    private fun abandonClose(owned: OnceClose) {
+        importReads.launch { runCatching { owned.start() } }
     }
 
-    private fun abandonCloseOutput(stream: OutputStream) {
-        exportWrites.launch { runCatching { stream.close() } }
+    private fun abandonCloseOutput(owned: OnceClose) {
+        exportWrites.launch { runCatching { owned.start() } }
     }
 
     private suspend fun stageFromSource(op: BackupOp, source: Uri, recoveryKeyText: String): Staged {
@@ -568,18 +628,19 @@ class BackupService @Inject constructor(
                 result.completeExceptionally(StagingException(BackupResult.Reason.IO, "read slot"))
                 return@launch
             }
-            var input: InputStream? = null
+            var input: OnceClose? = null
             var key: ByteArray? = null
             try {
                 val opened = openInput(source) ?: throw StagingException(BackupResult.Reason.IO, "open")
+                val owned = OnceClose(opened)
                 val claimed: Boolean
                 synchronized(importIo) {
                     if (op.cancelled.get() || op.gen != importGen.get()) {
-                        input = opened
+                        input = owned
                         claimed = false
                     } else {
-                        input = opened
-                        importStreams[op.token] = opened
+                        input = owned
+                        importStreams[op.token] = owned
                         claimed = true
                     }
                 }
@@ -591,9 +652,9 @@ class BackupService @Inject constructor(
                 result.completeExceptionally(e)
             } finally {
                 key?.fill(0)
-                input?.let { stream ->
-                    synchronized(importIo) { importStreams.remove(op.token, stream) }
-                    runCatching { stream.close() }
+                input?.let { owned ->
+                    synchronized(importIo) { importStreams.remove(op.token, owned) }
+                    runCatching { owned.await() }
                 }
                 liveImportReads.decrementAndGet()
             }

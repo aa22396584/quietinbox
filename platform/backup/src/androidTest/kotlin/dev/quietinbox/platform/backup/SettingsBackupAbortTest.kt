@@ -24,9 +24,11 @@ import dev.quietinbox.platform.storage.retention.MediaDirectory
 import dev.quietinbox.platform.storage.settings.SettingsRepository
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -188,6 +190,39 @@ class SettingsBackupAbortTest {
             collector.cancel()
             holder.db().afterEndTransaction = null
             backup.delete()
+        }
+        Unit
+    }
+
+    @Test
+    fun settingsStopAfterEncryptedStagingIsReadyDoesNotLeaveAStagingFile() = runBlocking {
+        val ready = CountDownLatch(1)
+        val dest = File(context.cacheDir, "settings-dest.qibk")
+        dest.delete()
+        service.afterEncryptedStagingReady = { file ->
+            file.exists() shouldBe true
+            ready.countDown()
+            while (currentCoroutineContext().isActive) delay(10)
+        }
+        val before = context.cacheDir.listFiles()?.filter { it.name.startsWith("backup-") && it.name.endsWith(".qibk") }.orEmpty().toSet()
+        val collector = launch { vm.state.collect { } }
+        delay(50)
+        try {
+            vm.export(Uri.fromFile(dest))
+            withTimeout(15_000) { while (ready.count > 0) delay(10) }
+            (context.cacheDir.listFiles()?.filter { it.name.startsWith("backup-") && it.name.endsWith(".qibk") }.orEmpty().toSet() - before).size shouldBe 1
+            vm.abortBackup()
+            withTimeout(20_000) {
+                while (vm.state.value.backupInProgress || vm.state.value.lastBackup == null) delay(10)
+            }
+            vm.state.value.lastBackup.shouldBeInstanceOf<BackupResult.Failed>().reason shouldBe BackupResult.Reason.EXPORT_ABORTED
+            delay(200)
+            (context.cacheDir.listFiles()?.filter { it.name.startsWith("backup-") && it.name.endsWith(".qibk") }.orEmpty().toSet() - before) shouldBe emptySet()
+            dest.exists() shouldBe false
+        } finally {
+            collector.cancel()
+            dest.delete()
+            service.afterEncryptedStagingReady = {}
         }
         Unit
     }

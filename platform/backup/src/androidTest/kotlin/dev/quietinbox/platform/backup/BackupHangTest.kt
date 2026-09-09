@@ -20,9 +20,11 @@ import dev.quietinbox.platform.storage.settings.SettingsRepository
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -34,6 +36,7 @@ import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
@@ -647,6 +650,107 @@ class BackupHangTest {
         }
         Unit
     }
+
+    @Test
+    fun aSecondIdempotentCloseDoesNotReleaseTheWriteSlotBeforeTheFirstCloseFinishes() = runBlocking {
+        val closeHolds = ArrayList<CountDownLatch>()
+        try {
+            repeat(2) { i ->
+                val enteredWrite = CountDownLatch(1)
+                val holdWrite = CountDownLatch(1)
+                val enteredClose = CountDownLatch(1)
+                val holdClose = CountDownLatch(1)
+                closeHolds += holdClose
+                service.openOutput = {
+                    object : OutputStream() {
+                        private val firstClose = AtomicBoolean(true)
+                        override fun write(b: Int) {
+                            enteredWrite.countDown()
+                            holdWrite.await()
+                        }
+                        override fun write(b: ByteArray, off: Int, len: Int) {
+                            enteredWrite.countDown()
+                            holdWrite.await()
+                        }
+                        override fun close() {
+                            if (firstClose.getAndSet(false)) {
+                                enteredClose.countDown()
+                                holdClose.await()
+                            }
+                        }
+                    }
+                }
+                val job = launch(Dispatchers.IO) { service.export(Uri.parse("content://quietinbox.test/double-close-$i"), "test") }
+                withTimeout(15_000) { while (enteredWrite.count > 0) delay(10) }
+                job.cancel()
+                withTimeout(5_000) { job.join() }
+                withTimeout(5_000) { while (enteredClose.count > 0) delay(10) }
+                holdWrite.countDown()
+                delay(200)
+            }
+            withTimeout(5_000) {
+                service.export(Uri.parse("content://quietinbox.test/double-close-third"), "test")
+                    .shouldBeInstanceOf<BackupResult.Failed>().reason shouldBe BackupResult.Reason.IO
+            }
+            closeHolds[0].countDown()
+            val fourthOpen = CountDownLatch(1)
+            val fourthHold = CountDownLatch(1)
+            service.openOutput = {
+                fourthOpen.countDown()
+                fourthHold.await()
+                object : OutputStream() {
+                    override fun write(b: Int) {}
+                    override fun write(b: ByteArray, off: Int, len: Int) {}
+                    override fun close() {}
+                }
+            }
+            val fourth = launch(Dispatchers.IO) { service.export(Uri.parse("content://quietinbox.test/double-close-fourth"), "test") }
+            try {
+                withTimeout(15_000) { while (fourthOpen.count > 0) delay(10) }
+            } finally {
+                fourth.cancel()
+                service.abort()
+                withTimeout(5_000) { fourth.join() }
+                fourthHold.countDown()
+            }
+        } finally {
+            for (hold in closeHolds) hold.countDown()
+        }
+        Unit
+    }
+
+    @Test
+    fun cancellingAfterEncryptedStagingIsReadyDoesNotLeaveAStagingFile() = runBlocking {
+        val ready = CountDownLatch(1)
+        val written = AtomicInteger(0)
+        service.openOutput = {
+            object : OutputStream() {
+                override fun write(b: Int) { written.incrementAndGet() }
+                override fun write(b: ByteArray, off: Int, len: Int) { written.addAndGet(len) }
+                override fun close() {}
+            }
+        }
+        service.afterEncryptedStagingReady = { file ->
+            file.exists() shouldBe true
+            ready.countDown()
+            while (currentCoroutineContext().isActive) delay(10)
+        }
+        val before = stagingBackupFiles().toSet()
+        val result = AtomicReference<BackupResult?>(null)
+        val job = launch(Dispatchers.IO) { result.set(service.export(Uri.parse("content://quietinbox.test/staging-cancel"), "test")) }
+        withTimeout(15_000) { while (ready.count > 0) delay(10) }
+        (stagingBackupFiles().toSet() - before).size shouldBe 1
+        job.cancel()
+        withTimeout(5_000) { job.join() }
+        result.get().shouldBeInstanceOf<BackupResult.Failed>().reason shouldBe BackupResult.Reason.EXPORT_ABORTED
+        written.get() shouldBe 0
+        delay(200)
+        (stagingBackupFiles().toSet() - before) shouldBe emptySet()
+        Unit
+    }
+
+    private fun stagingBackupFiles(): List<File> =
+        context.cacheDir.listFiles()?.filter { it.name.startsWith("backup-") && it.name.endsWith(".qibk") }.orEmpty()
 
     private suspend fun exportOneMessage(name: String): File {
         val snapshot = Fixtures.snapshot(Fixtures.bigText("Alice", "keep", tag = "t1"), packageName = KnownSources.TELEGRAM, eventId = "h-abort", observedAt = 1_700_000_000_000L)

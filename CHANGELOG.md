@@ -27,7 +27,11 @@ All notable changes to this project are documented here. The format follows Keep
   the destination file is unchanged. A Stop that lands after SQL COMMIT, before Room returns
   the transaction, still reports the restore. Each operation keeps its own result, so
   cancelling B cannot surface A's Ok, and B's late-open stream writes nothing. A close that
-  never returns keeps its write slot until it finishes.
+  never returns keeps its write slot until it finishes. Each acquired stream has one close
+  owner: a second close that returns immediately does not release the write slot while the
+  first cleanup is still running. An encrypted staging file is registered on the operation
+  before a cancellable return; cancel before dest-copy handoff deletes it, so
+  `backup-*.qibk` does not accumulate in cache.
 
 - **Search paging could mix a previous query's cursor into a new search**, and a stale page
   completing could clear a newer load-more spinner. Query, sources, frozen time range, cursor and
@@ -54,7 +58,10 @@ All notable changes to this project are documented here. The format follows Keep
   inside apply do not land the write; abort after commit still reports Done, including Stop
   after SQL COMMIT before Room returns; cancelling export B does not surface A's Ok and B's
   late-open stream writes nothing; waiter cancel without abort leaves a late export/import
-  stream unused; abandoned blocked closes hold the write-slot cap. Search ViewModel tests cover mixed-cursor paging, stale load-more
+  stream unused; abandoned blocked closes hold the write-slot cap; a second idempotent close
+  does not free the write slot before the first close finishes; cancelling after the encrypted
+  staging file is ready leaves no `backup-*.qibk`; Settings Stop at that point leaves none
+  either. Search ViewModel tests cover mixed-cursor paging, stale load-more
   unlock, A→B→A, a source toggle during debounce, first-page vs load-more interleaving, failed vs
   empty, load-more failure, and cancellation. CI JVM unit tests run `./gradlew test` so
   `:platform:media` (and every other module with `src/test`) is on the job. Issue #33 stays open.

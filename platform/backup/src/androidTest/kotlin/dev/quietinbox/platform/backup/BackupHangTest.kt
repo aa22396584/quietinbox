@@ -200,7 +200,9 @@ class BackupHangTest {
         first.cancel()
         second.cancel()
         withTimeout(5_000) { first.join(); second.join() }
+        withTimeout(5_000) { while (closes.get() < 2) delay(10) }
         val before = closes.get()
+        before shouldBe 2
         repeat(8) {
             withTimeout(5_000) {
                 service.import(Uri.parse("content://quietinbox.test/hang"), recoveryKey)
@@ -412,6 +414,32 @@ class BackupHangTest {
     }
 
     @Test
+    fun aLateValidExportStreamAfterWaiterCancelIsNotWritten() = runBlocking {
+        val opened = CountDownLatch(1)
+        val written = AtomicInteger(0)
+        val result = AtomicReference<BackupResult?>(null)
+        service.openOutput = {
+            opened.countDown()
+            releaseHung.await()
+            object : OutputStream() {
+                override fun write(b: Int) { written.incrementAndGet() }
+                override fun write(b: ByteArray, off: Int, len: Int) { written.addAndGet(len) }
+                override fun close() {}
+            }
+        }
+        val job = launch(Dispatchers.IO) { result.set(service.export(Uri.parse("content://quietinbox.test/late-open-cancel"), "test")) }
+        withTimeout(15_000) { while (opened.count > 0) delay(10) }
+        job.cancel()
+        withTimeout(5_000) { job.join() }
+        result.get().shouldBeInstanceOf<BackupResult.Failed>().reason shouldBe BackupResult.Reason.EXPORT_ABORTED
+        written.get() shouldBe 0
+        releaseHung.countDown()
+        delay(400)
+        written.get() shouldBe 0
+        Unit
+    }
+
+    @Test
     fun aLateValidImportStreamAfterStopDoesNotApply() = runBlocking {
         val backup = exportOneMessage("late-import.qibk")
         holder.closeAndDeleteFiles() shouldBe true
@@ -440,6 +468,44 @@ class BackupHangTest {
         withTimeout(5_000) { while (opened.count > 0) delay(10) }
         job.cancel()
         service.abort()
+        withTimeout(5_000) { job.join() }
+        result.get().shouldBeInstanceOf<BackupResult.Failed>().reason shouldBe BackupResult.Reason.ABORTED
+        releaseHung.countDown()
+        delay(200)
+        reads.get() shouldBe 0
+        holder.db().messageDao().exportPage(0L, 10, System.currentTimeMillis()) shouldBe emptyList()
+        backup.delete()
+        Unit
+    }
+
+    @Test
+    fun aLateValidImportStreamAfterWaiterCancelDoesNotApply() = runBlocking {
+        val backup = exportOneMessage("late-import-cancel.qibk")
+        holder.closeAndDeleteFiles() shouldBe true
+        holder.retry()
+        ready()
+        val opened = CountDownLatch(1)
+        val reads = AtomicInteger(0)
+        service.openInput = {
+            opened.countDown()
+            releaseHung.await()
+            object : InputStream() {
+                private val inner = java.io.FileInputStream(backup)
+                override fun read(): Int {
+                    reads.incrementAndGet()
+                    return inner.read()
+                }
+                override fun read(b: ByteArray, off: Int, len: Int): Int {
+                    reads.incrementAndGet()
+                    return inner.read(b, off, len)
+                }
+                override fun close() { inner.close() }
+            }
+        }
+        val result = AtomicReference<BackupResult?>(null)
+        val job = launch(Dispatchers.IO) { result.set(service.import(Uri.parse("content://quietinbox.test/late-in-cancel"), recoveryKey)) }
+        withTimeout(5_000) { while (opened.count > 0) delay(10) }
+        job.cancel()
         withTimeout(5_000) { job.join() }
         result.get().shouldBeInstanceOf<BackupResult.Failed>().reason shouldBe BackupResult.Reason.ABORTED
         releaseHung.countDown()
@@ -500,6 +566,7 @@ class BackupHangTest {
         val bEntered = CountDownLatch(1)
         val bRelease = CountDownLatch(1)
         val n = AtomicInteger(0)
+        val bWritten = AtomicInteger(0)
         service.openOutput = {
             if (n.getAndIncrement() == 0) {
                 aEntered.countDown()
@@ -513,8 +580,8 @@ class BackupHangTest {
                 bEntered.countDown()
                 bRelease.await()
                 object : OutputStream() {
-                    override fun write(b: Int) {}
-                    override fun write(b: ByteArray, off: Int, len: Int) {}
+                    override fun write(b: Int) { bWritten.incrementAndGet() }
+                    override fun write(b: ByteArray, off: Int, len: Int) { bWritten.addAndGet(len) }
                     override fun close() {}
                 }
             }
@@ -532,7 +599,9 @@ class BackupHangTest {
         withTimeout(5_000) { b.join() }
         bResult.get().shouldBeInstanceOf<BackupResult.Failed>().reason shouldBe BackupResult.Reason.EXPORT_ABORTED
         bRelease.countDown()
-        delay(200)
+        delay(400)
+        bWritten.get() shouldBe 0
+        aResult.get().shouldBeInstanceOf<BackupResult.Ok>()
         Unit
     }
 

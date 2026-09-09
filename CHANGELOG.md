@@ -21,12 +21,13 @@ All notable changes to this project are documented here. The format follows Keep
   Dest-copy is outside the worker gate; each operation owns its stream; Settings can stop an
   in-progress export or import (not "Delete everything"). Stop before the vault write reports
   that the vault was not changed; stop after the rows are durable still reports the restore,
-  even when the waiting job is cancelled. A destination that opens only after Stop is closed
-  unused. Export Ok is published only after a successful close; a throwing close is IO, not
-  Done. Export abort copy does not claim the destination file is unchanged. A Stop that lands
-  after SQL COMMIT, before Room returns the transaction, still reports the restore. Each
-  operation keeps its own result, so cancelling B cannot surface A's Ok. A close that never
-  returns keeps its write slot until it finishes.
+  even when the waiting job is cancelled. A destination that opens only after Stop, or after
+  the waiting job is cancelled without abort(), is closed unused. Export Ok is published only
+  after a successful close; a throwing close is IO, not Done. Export abort copy does not claim
+  the destination file is unchanged. A Stop that lands after SQL COMMIT, before Room returns
+  the transaction, still reports the restore. Each operation keeps its own result, so
+  cancelling B cannot surface A's Ok, and B's late-open stream writes nothing. A close that
+  never returns keeps its write slot until it finishes.
 
 - **Search paging could mix a previous query's cursor into a new search**, and a stale page
   completing could clear a newer load-more spinner. Query, sources, frozen time range, cursor and
@@ -51,8 +52,9 @@ All notable changes to this project are documented here. The format follows Keep
   `FAILED` media and the result counts that attach; hung export write and hung import/export
   open; cancelling one hung import does not close another stream; abort after staging and abort
   inside apply do not land the write; abort after commit still reports Done, including Stop
-  after SQL COMMIT before Room returns; cancelling export B does not surface A's Ok; abandoned
-  blocked closes hold the write-slot cap. Search ViewModel tests cover mixed-cursor paging, stale load-more
+  after SQL COMMIT before Room returns; cancelling export B does not surface A's Ok and B's
+  late-open stream writes nothing; waiter cancel without abort leaves a late export/import
+  stream unused; abandoned blocked closes hold the write-slot cap. Search ViewModel tests cover mixed-cursor paging, stale load-more
   unlock, A→B→A, a source toggle during debounce, first-page vs load-more interleaving, failed vs
   empty, load-more failure, and cancellation. CI JVM unit tests run `./gradlew test` so
   `:platform:media` (and every other module with `src/test`) is on the job. Issue #33 stays open.

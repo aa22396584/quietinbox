@@ -493,6 +493,92 @@ class BackupHangTest {
         Unit
     }
 
+    @Test
+    fun cancellingExportBDoesNotSurfaceExportAResult() = runBlocking {
+        val aEntered = CountDownLatch(1)
+        val aRelease = CountDownLatch(1)
+        val bEntered = CountDownLatch(1)
+        val bRelease = CountDownLatch(1)
+        val n = AtomicInteger(0)
+        service.openOutput = {
+            if (n.getAndIncrement() == 0) {
+                aEntered.countDown()
+                aRelease.await()
+                object : OutputStream() {
+                    override fun write(b: Int) {}
+                    override fun write(b: ByteArray, off: Int, len: Int) {}
+                    override fun close() {}
+                }
+            } else {
+                bEntered.countDown()
+                bRelease.await()
+                object : OutputStream() {
+                    override fun write(b: Int) {}
+                    override fun write(b: ByteArray, off: Int, len: Int) {}
+                    override fun close() {}
+                }
+            }
+        }
+        val aResult = AtomicReference<BackupResult?>(null)
+        val bResult = AtomicReference<BackupResult?>(null)
+        val a = launch(Dispatchers.IO) { aResult.set(service.export(Uri.parse("content://quietinbox.test/op-a"), "test")) }
+        withTimeout(15_000) { while (aEntered.count > 0) delay(10) }
+        val b = launch(Dispatchers.IO) { bResult.set(service.export(Uri.parse("content://quietinbox.test/op-b"), "test")) }
+        withTimeout(15_000) { while (bEntered.count > 0) delay(10) }
+        aRelease.countDown()
+        withTimeout(15_000) { a.join() }
+        aResult.get().shouldBeInstanceOf<BackupResult.Ok>()
+        b.cancel()
+        withTimeout(5_000) { b.join() }
+        bResult.get().shouldBeInstanceOf<BackupResult.Failed>().reason shouldBe BackupResult.Reason.EXPORT_ABORTED
+        bRelease.countDown()
+        delay(200)
+        Unit
+    }
+
+    @Test
+    fun abandonedBlockedExportClosesHoldTheWriteSlotCap() = runBlocking {
+        val closes = AtomicInteger(0)
+        val releaseClose = CountDownLatch(1)
+        val openHold = AtomicReference(CountDownLatch(1))
+        val opened = AtomicInteger(0)
+        service.openOutput = {
+            opened.incrementAndGet()
+            openHold.get().await()
+            object : OutputStream() {
+                override fun write(b: Int) {}
+                override fun write(b: ByteArray, off: Int, len: Int) {}
+                override fun close() {
+                    closes.incrementAndGet()
+                    releaseClose.await()
+                }
+            }
+        }
+        try {
+            repeat(2) {
+                val hold = CountDownLatch(1)
+                openHold.set(hold)
+                val beforeOpen = opened.get()
+                val beforeClose = closes.get()
+                val job = launch(Dispatchers.IO) { service.export(Uri.parse("content://quietinbox.test/slot-cap"), "test") }
+                withTimeout(15_000) { while (opened.get() == beforeOpen) delay(10) }
+                job.cancel()
+                service.abort()
+                withTimeout(5_000) { job.join() }
+                hold.countDown()
+                withTimeout(5_000) { while (closes.get() == beforeClose) delay(10) }
+            }
+            withTimeout(5_000) {
+                service.export(Uri.parse("content://quietinbox.test/slot-cap"), "test")
+                    .shouldBeInstanceOf<BackupResult.Failed>().reason shouldBe BackupResult.Reason.IO
+            }
+            closes.get() shouldBe 2
+        } finally {
+            releaseClose.countDown()
+        }
+        Unit
+    }
+
     private suspend fun exportOneMessage(name: String): File {
         val snapshot = Fixtures.snapshot(Fixtures.bigText("Alice", "keep", tag = "t1"), packageName = KnownSources.TELEGRAM, eventId = "h-abort", observedAt = 1_700_000_000_000L)
         ingest.journal(snapshot, "gen", 60_000) shouldBe true

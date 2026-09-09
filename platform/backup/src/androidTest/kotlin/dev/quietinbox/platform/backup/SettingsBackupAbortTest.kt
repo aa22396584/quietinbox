@@ -35,6 +35,8 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Stop after a durable restore must surface Ok through the shipped Settings abort path
@@ -149,6 +151,44 @@ class SettingsBackupAbortTest {
         holder.db().messageDao().exportPage(0L, 10, System.currentTimeMillis()) shouldBe emptyList()
         collector.cancel()
         backup.delete()
+        Unit
+    }
+
+    @Test
+    fun settingsStopBetweenSqlCommitAndTransactionReturnShowsTheRestore() = runBlocking {
+        val backup = exportOne()
+        holder.closeAndDeleteFiles() shouldBe true
+        holder.retry()
+        ready()
+        val entered = CountDownLatch(1)
+        val pause = CountDownLatch(1)
+        val once = AtomicBoolean(false)
+        holder.db().afterEndTransaction = {
+            if (once.compareAndSet(false, true)) {
+                entered.countDown()
+                pause.await()
+            }
+        }
+        val collector = launch { vm.state.collect { } }
+        delay(50)
+        vm.import(Uri.fromFile(backup), recoveryKey)
+        try {
+            withTimeout(20_000) { while (entered.count > 0) delay(10) }
+            vm.abortBackup()
+            val mid = vm.state.value.lastBackup
+            (mid == null || mid is BackupResult.Ok) shouldBe true
+            pause.countDown()
+            withTimeout(20_000) {
+                while (vm.state.value.backupInProgress || vm.state.value.lastBackup == null) delay(10)
+            }
+            vm.state.value.lastBackup.shouldBeInstanceOf<BackupResult.Ok>()
+            holder.db().messageDao().exportPage(0L, 10, System.currentTimeMillis()).size shouldBe 1
+        } finally {
+            pause.countDown()
+            collector.cancel()
+            holder.db().afterEndTransaction = null
+            backup.delete()
+        }
         Unit
     }
 }

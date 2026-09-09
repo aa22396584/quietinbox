@@ -32,6 +32,19 @@ import androidx.sqlite.db.SupportSQLiteDatabase
     exportSchema = true,
 )
 abstract class QuietInboxDatabase : RoomDatabase() {
+    /**
+     * Test seam: after SQL COMMIT/rollback ([endTransaction]) and before Room resumes a
+     * suspending [androidx.room.withTransaction]. Production never sets this.
+     */
+    @Volatile var afterEndTransaction: (() -> Unit)? = null
+
+    @Deprecated("Room still calls this from withTransaction; the test seam must wrap that call.")
+    @Suppress("DEPRECATION")
+    override fun endTransaction() {
+        super.endTransaction()
+        afterEndTransaction?.invoke()
+    }
+
     abstract fun sourceDao(): SourceDao
     abstract fun journalDao(): JournalDao
     abstract fun checkpointDao(): CheckpointDao

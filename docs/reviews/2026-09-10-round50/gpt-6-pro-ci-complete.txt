@@ -1,0 +1,87 @@
+QuietInbox PR #34 — CI completion verification
+Verified: 2026-09-10 (UTC+08:00)
+Head SHA: 306a011465d8aeedce88e25dda4fab0974318aaa
+Run ID: 34381608087
+PR: https://github.com/ImL1s/quietinbox/pull/34
+Run: https://github.com/ImL1s/quietinbox/actions/runs/34381608087
+PR state read from GitHub: open; merged=false; draft=false.
+Run state read from GitHub: completed; conclusion=success; attempt=1.
+All four jobs completed successfully. Both Android module-coverage gates succeeded.
+Assemble/string-catalogue/release-APK permission gates succeeded (job 102569823413).
+
+Scope: closes the previously pending CI evidence for the already-reviewed 306a011.
+This verification downloads and parses existing CI reports. It does not execute Gradle,
+emulators, product code, or local reproductions. No GitHub write, merge, tag or release.
+
+API29
+Artifact ID: 10116763026
+SHA-256: 11b9faaefa5f745958cb02f6780d2fbf0a638e9245d79e2bb87262e9db3231d2 (MATCH)
+Total: {'tests': 123, 'failures': 0, 'skipped': 0}
+  feature/conversation: 5 tests, 0 failures, 0 skipped
+  feature/health: 6 tests, 0 failures, 0 skipped
+  platform/backup: 39 tests, 0 failures, 0 skipped
+  platform/crypto: 2 tests, 0 failures, 0 skipped
+  platform/media: 2 tests, 0 failures, 0 skipped
+  platform/storage: 69 tests, 0 failures, 0 skipped
+  BackupCancellationTest: 3 tests, 0 failures, 0 skipped
+  BackupHangTest: 21 tests, 0 failures, 0 skipped
+  BackupRejectionTest: 7 tests, 0 failures, 0 skipped
+  BackupRoundTripTest: 4 tests, 0 failures, 0 skipped
+  SettingsBackupAbortTest: 4 tests, 0 failures, 0 skipped
+  aLateValidExportStreamAfterWaiterCancelIsNotWritten: passed (0.987s)
+  aLateValidImportStreamAfterWaiterCancelDoesNotApply: passed (1.313s)
+  aSecondIdempotentCloseDoesNotReleaseTheWriteSlotBeforeTheFirstCloseFinishes: passed (1.039s)
+  cancellingAfterEncryptedStagingIsReadyDoesNotLeaveAStagingFile: passed (0.774s)
+  cancellingExportBDoesNotSurfaceExportAResult: passed (0.984s)
+  settingsStopAfterEncryptedStagingIsReadyDoesNotLeaveAStagingFile: passed (0.841s)
+  settingsStopBetweenSqlCommitAndTransactionReturnShowsTheRestore: passed (1.173s)
+
+API35
+Artifact ID: 10116752480
+SHA-256: 3237f17179c96d078d0ed8b0bca96debe7ebffc3eb4b3cf973190d7304d84309 (MATCH)
+Total: {'tests': 123, 'failures': 0, 'skipped': 0}
+  feature/conversation: 5 tests, 0 failures, 0 skipped
+  feature/health: 6 tests, 0 failures, 0 skipped
+  platform/backup: 39 tests, 0 failures, 0 skipped
+  platform/crypto: 2 tests, 0 failures, 0 skipped
+  platform/media: 2 tests, 0 failures, 0 skipped
+  platform/storage: 69 tests, 0 failures, 0 skipped
+  BackupCancellationTest: 3 tests, 0 failures, 0 skipped
+  BackupHangTest: 21 tests, 0 failures, 0 skipped
+  BackupRejectionTest: 7 tests, 0 failures, 0 skipped
+  BackupRoundTripTest: 4 tests, 0 failures, 0 skipped
+  SettingsBackupAbortTest: 4 tests, 0 failures, 0 skipped
+  aLateValidExportStreamAfterWaiterCancelIsNotWritten: passed (0.975s)
+  aLateValidImportStreamAfterWaiterCancelDoesNotApply: passed (1.327s)
+  aSecondIdempotentCloseDoesNotReleaseTheWriteSlotBeforeTheFirstCloseFinishes: passed (1.026s)
+  cancellingAfterEncryptedStagingIsReadyDoesNotLeaveAStagingFile: passed (0.774s)
+  cancellingExportBDoesNotSurfaceExportAResult: passed (0.996s)
+  settingsStopAfterEncryptedStagingIsReadyDoesNotLeaveAStagingFile: passed (0.842s)
+  settingsStopBetweenSqlCommitAndTransactionReturnShowsTheRestore: passed (1.211s)
+
+JVM
+Artifact ID: 10116318155
+SHA-256: 1292e465af5d98538c6d37a409ef6cb59c69cd351fd898e7b36be98a4dc17c38 (MATCH)
+Total: {'tests': 302, 'failures': 0, 'skipped': 0}
+  app: 5 tests, 0 failures, 0 skipped
+  core/analytics: 34 tests, 0 failures, 0 skipped
+  core/designsystem: 8 tests, 0 failures, 0 skipped
+  core/identity: 5 tests, 0 failures, 0 skipped
+  core/model: 6 tests, 0 failures, 0 skipped
+  core/parser: 13 tests, 0 failures, 0 skipped
+  core/reconcile: 22 tests, 0 failures, 0 skipped
+  feature/analytics: 8 tests, 0 failures, 0 skipped
+  feature/conversation: 1 tests, 0 failures, 0 skipped
+  feature/health: 8 tests, 0 failures, 0 skipped
+  feature/onboarding: 6 tests, 0 failures, 0 skipped
+  feature/search: 13 tests, 0 failures, 0 skipped
+  parsers/apps: 47 tests, 0 failures, 0 skipped
+  platform/backup: 24 tests, 0 failures, 0 skipped
+  platform/capture: 77 tests, 0 failures, 0 skipped
+  platform/crypto: 3 tests, 0 failures, 0 skipped
+  platform/media: 10 tests, 0 failures, 0 skipped
+  platform/storage: 12 tests, 0 failures, 0 skipped
+
+Disposition: previous CI-pending condition is now satisfied.
+Previous close-owner and staging-ownership review findings remain PASS.
+This is not a new whole-product review, a merge action, or release authorization.

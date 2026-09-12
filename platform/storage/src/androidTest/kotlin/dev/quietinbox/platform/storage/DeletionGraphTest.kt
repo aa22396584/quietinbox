@@ -3,6 +3,7 @@ package dev.quietinbox.platform.storage
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.quietinbox.core.identity.IdentityResolver
+import dev.quietinbox.core.model.DedupState
 import dev.quietinbox.core.model.KnownSources
 import dev.quietinbox.core.model.MediaState
 import dev.quietinbox.core.model.NotificationSnapshot
@@ -249,6 +250,81 @@ class DeletionGraphTest {
         // ...and the ciphertext made before the reset no longer authenticates under the new key.
         oldFile.writeBytes(oldCiphertext)
         freshProcess.decryptFile(oldFile).shouldBeInstanceOf<KeyResult.Failed>().failure shouldBe KeyFailure.Tampered
+        Unit
+    }
+
+    private suspend fun ageConversation(id: Long) {
+        val dao = holder.db().conversationDao()
+        val row = dao.get(id)!!
+        dao.update(row.copy(createdAtEpochMs = System.currentTimeMillis() - 8L * RetentionService.DAY_MS))
+    }
+
+    @Test
+    fun emptyConversationSweepKeepsAnUnexpiredAmbiguousRepeat() = runBlocking {
+        ready()
+        val stored = commit(bigText("Alice", "maybe a repeat", "a1", "t1"))
+        val conversationId = stored.conversationId!!
+        val messageId = stored.newMessageIds.single()
+        val db = holder.db()
+        db.messageDao().setDedupState(messageId, DedupState.AMBIGUOUS_REPEAT.name)
+        db.conversationDao().rebuildProjection(listOf(conversationId), System.currentTimeMillis())
+        val row = db.conversationDao().get(conversationId)!!
+        row.messageCount shouldBe 0
+        row.ambiguousCount shouldBe 1
+        ageConversation(conversationId)
+        RetentionService(holder, settings, mediaDir, maintenance).runOnce(System.currentTimeMillis())
+        db.messageDao().get(messageId) shouldNotBe null
+        db.conversationDao().get(conversationId) shouldNotBe null
+        Unit
+    }
+
+    @Test
+    fun emptyOlderThanDoesNotReturnConversationWithUnexpiredAmbiguousRepeat() = runBlocking {
+        ready()
+        val stored = commit(bigText("Alice", "maybe a repeat 2", "a2", "t2"))
+        val conversationId = stored.conversationId!!
+        val messageId = stored.newMessageIds.single()
+        val db = holder.db()
+        db.messageDao().setDedupState(messageId, DedupState.AMBIGUOUS_REPEAT.name)
+        db.conversationDao().rebuildProjection(listOf(conversationId), System.currentTimeMillis())
+        ageConversation(conversationId)
+        val cutoff = System.currentTimeMillis() - 7L * RetentionService.DAY_MS
+        val scanned = db.conversationDao().emptyOlderThan(cutoff)
+        scanned.contains(conversationId) shouldBe false
+        Unit
+    }
+
+    @Test
+    fun emptyConversationSweepDoesNotDeleteACopyCommittedAfterTheEmptyScan() = runBlocking {
+        ready()
+        val first = commit(bigText("Alice", "going", "s1", "t1"))
+        val conversationId = first.conversationId!!
+        inbox.deleteMessages(first.newMessageIds, System.currentTimeMillis(), 86_400_000)
+        val db = holder.db()
+        db.messageDao().forConversation(conversationId) shouldBe emptyList()
+        ageConversation(conversationId)
+        val cutoff = System.currentTimeMillis() - 7L * RetentionService.DAY_MS
+        val scanned = db.conversationDao().emptyOlderThan(cutoff)
+        scanned.contains(conversationId) shouldBe true
+        val again = commit(bigText("Alice", "arrived after the scan", "s2", "t1"))
+        again.conversationId shouldBe conversationId
+        val newId = again.newMessageIds.single()
+        for (id in scanned) db.conversationDao().deleteIfEmptyAndOlderThan(id, cutoff)
+        db.messageDao().get(newId) shouldNotBe null
+        db.conversationDao().get(conversationId) shouldNotBe null
+        Unit
+    }
+
+    @Test
+    fun emptyConversationSweepStillRemovesATrulyEmptyOldConversation() = runBlocking {
+        ready()
+        val stored = commit(bigText("Alice", "gone", "e1", "t1"))
+        val conversationId = stored.conversationId!!
+        inbox.deleteMessages(stored.newMessageIds, System.currentTimeMillis(), 86_400_000)
+        holder.db().messageDao().forConversation(conversationId) shouldBe emptyList()
+        ageConversation(conversationId)
+        RetentionService(holder, settings, mediaDir, maintenance).runOnce(System.currentTimeMillis())
+        holder.db().conversationDao().get(conversationId) shouldBe null
         Unit
     }
 }

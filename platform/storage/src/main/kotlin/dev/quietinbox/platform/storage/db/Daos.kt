@@ -331,8 +331,38 @@ interface ConversationDao {
     )
     suspend fun rebuildProjection(ids: List<Long>, now: Long)
 
-    @Query("SELECT id FROM conversation WHERE messageCount = 0 AND createdAtEpochMs < :before")
+    @Query(
+        """
+        SELECT id FROM conversation
+        WHERE createdAtEpochMs < :before
+          AND NOT EXISTS (SELECT 1 FROM message m WHERE m.conversationId = conversation.id)
+        """,
+    )
     suspend fun emptyOlderThan(before: Long): List<Long>
+
+    /**
+     * Removes old conversations that have *no message rows* at the moment of the delete.
+     * `messageCount = 0` is not enough: that projection excludes `AMBIGUOUS_REPEAT`, and a
+     * scan-then-delete would still drop a copy committed between the two statements.
+     */
+    @Query(
+        """
+        DELETE FROM conversation
+        WHERE createdAtEpochMs < :before
+          AND NOT EXISTS (SELECT 1 FROM message m WHERE m.conversationId = conversation.id)
+        """,
+    )
+    suspend fun deleteEmptyOlderThan(before: Long): Int
+
+    @Query(
+        """
+        DELETE FROM conversation
+        WHERE id = :id
+          AND createdAtEpochMs < :before
+          AND NOT EXISTS (SELECT 1 FROM message m WHERE m.conversationId = conversation.id)
+        """,
+    )
+    suspend fun deleteIfEmptyAndOlderThan(id: Long, before: Long): Int
 
     @Query("SELECT DISTINCT packageName FROM conversation")
     fun observePackages(): Flow<List<String>>
@@ -425,6 +455,9 @@ interface MessageDao {
      */
     @Query("UPDATE message SET mediaState = :state, mediaBlobId = NULL WHERE id = :id AND mediaState = 'PENDING'")
     suspend fun settlePendingMedia(id: Long, state: String): Int
+
+    @Query("UPDATE message SET dedupState = :state WHERE id = :id")
+    suspend fun setDedupState(id: Long, state: String)
 
     @Query("DELETE FROM message WHERE id IN (:ids)")
     suspend fun delete(ids: List<Long>)

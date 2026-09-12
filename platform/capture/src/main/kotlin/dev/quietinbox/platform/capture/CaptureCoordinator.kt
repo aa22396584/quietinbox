@@ -1254,7 +1254,7 @@ class CaptureCoordinator @Inject constructor(
     }
 
     @androidx.annotation.VisibleForTesting(otherwise = androidx.annotation.VisibleForTesting.PRIVATE)
-    suspend fun replayPassForTesting(): Boolean = replayPass()
+    suspend fun replayPassForTesting(): Boolean = replayGate.withLock { replayPass() }
 
     /** One pass over the pending rows; false when maintenance was active and nothing ran. */
     private suspend fun replayPass(): Boolean = maintenance.work {

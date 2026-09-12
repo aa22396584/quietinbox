@@ -1,5 +1,10 @@
 # QuietInbox／靜讀
 
+> **Development home:** https://github.com/ImL1s/quietinbox  
+> Please open issues and pull requests there.  
+> **Mirrors:** [Codeberg](https://codeberg.org/ImL1s/quietinbox) · [GitLab](https://gitlab.com/aa22396584/quietinbox)
+
+
 > 使用者自主啟用、本機優先、對資料來源與缺口誠實的 Android 通知副本收件匣。
 > A user-enabled, local-first Android inbox that keeps encrypted copies of messaging notifications and is honest about what it could not observe.
 

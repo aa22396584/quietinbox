@@ -26,6 +26,7 @@ import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.filterIsInstance
@@ -944,11 +945,15 @@ class JournalLossTransactionTest {
         ready()
         ingest.journal(snapshot("evt-policy-discard"), "gen", 60_000) shouldBe true
 
-        // User disables source: row becomes DISCARDED with SOURCE_DISABLED
+        // 1. Raw page is read while row is PENDING
+        val preRead = holder.db().journalDao().pending(200)
+        preRead.map { it.eventId } shouldBe listOf("evt-policy-discard")
+
+        // 2. User disables source: row becomes DISCARDED with SOURCE_DISABLED
         holder.db().journalDao().discardPending(pkg) shouldBe 1
         holder.db().journalDao().state("evt-policy-discard") shouldBe "DISCARDED"
 
-        // Stale terminal call attempts to file FAILED with gap
+        // 3. Stale terminal call attempts to file FAILED with gap
         var gapRecorded = false
         val retry = ingest.markJournalTerminal("evt-policy-discard", "DECODE") {
             gapRecorded = true
@@ -1139,6 +1144,143 @@ class JournalLossTransactionTest {
         }
 
         recovered shouldBe listOf("evt-good-201")
+        Unit
+    }
+
+    @Test
+    fun cancellationDuringTerminalTransitionRollsBackAndKeepsPendingNotDeferred() = runBlocking {
+        ready()
+        ingest.journal(snapshot("evt-cancel-term"), "gen", 60_000) shouldBe true
+
+        var exceptionThrown = false
+        try {
+            ingest.markJournalTerminal("evt-cancel-term", "PARSE_FAIL") {
+                health.recordGap(1_000, 2_000, GapReason.PARSE_FAILED, GapPrecision.BOUNDED, 2_000, pkg)
+                throw CancellationException("simulated coroutine cancellation")
+            }
+        } catch (e: CancellationException) {
+            exceptionThrown = true
+        }
+
+        exceptionThrown shouldBe true
+        // Transaction must be completely rolled back
+        allGaps().none { it.reason == GapReason.PARSE_FAILED.name } shouldBe true
+        holder.db().journalDao().state("evt-cancel-term") shouldBe "PENDING"
+        lossState("evt-cancel-term") shouldBe LOSS_UNSETTLED
+        // Must NOT be parked or deferred
+        ingest.isReplayCandidate("evt-cancel-term") shouldBe true
+        Unit
+    }
+
+    @Test
+    fun oneHundredNinetyNineBadRowsPlusNormalTailRowCommitsTailRowInOneBatch() = runBlocking {
+        ready()
+        for (i in 1..199) {
+            val id = "evt-bad-199-$i"
+            holder.db().journalDao().insert(
+                EventJournalEntity(
+                    eventId = id,
+                    generation = "gen",
+                    receivedAtEpochMs = 1_000L + i,
+                    expiresAtEpochMs = 60_000L + i,
+                    state = "PENDING",
+                    attempts = 0,
+                    failureCode = null,
+                    payload = "{ bad json",
+                    packageName = pkg,
+                    lossRecorded = LOSS_UNSETTLED,
+                ),
+            )
+        }
+        val goodSnapshot = snapshot("evt-good-200")
+        ingest.journal(goodSnapshot, "gen", 60_000) shouldBe true
+
+        val batch = ingest.pendingJournal(limit = 200)
+        // 199 bad rows were terminalized, and the single good row was returned in the batch snapshots
+        batch.snapshots.map { it.second.eventId } shouldBe listOf("evt-good-200")
+        batch.rawCount shouldBe 200
+        batch.rawAdvanced shouldBe true
+        Unit
+    }
+
+    @Test
+    fun badRowsWithFailingGapAndSuccessfulDeferralAdvancesToTailRow() = runBlocking {
+        ready()
+        // Install trigger that fails gap insertion only
+        val db = holder.db().openHelper.writableDatabase
+        db.execSQL("CREATE TRIGGER fail_gap_insert BEFORE INSERT ON gap_interval BEGIN SELECT RAISE(ABORT, 'forced gap failure'); END;")
+        try {
+            // Insert 200 bad rows
+            for (i in 1..200) {
+                val id = "evt-defer-bad-$i"
+                holder.db().journalDao().insert(
+                    EventJournalEntity(
+                        eventId = id,
+                        generation = "gen",
+                        receivedAtEpochMs = 1_000L + i,
+                        expiresAtEpochMs = 60_000L + i,
+                        state = "PENDING",
+                        attempts = 0,
+                        failureCode = null,
+                        payload = "{ bad json",
+                        packageName = pkg,
+                        lossRecorded = LOSS_UNSETTLED,
+                    ),
+                )
+            }
+            val goodSnapshot = snapshot("evt-good-defer-201")
+            ingest.journal(goodSnapshot, "gen", 60_000) shouldBe true
+
+            // In first page read: 200 bad rows fail gap write and are deferred, returning 0 snapshots but rawAdvanced = true
+            val firstBatch = ingest.pendingJournal(limit = 200)
+            firstBatch.snapshots.isEmpty() shouldBe true
+            firstBatch.rawAdvanced shouldBe true
+            firstBatch.deferredCount shouldBe 200
+
+            // In second page read: the 200 deferred rows are out of the candidate set, so tail row is read!
+            val secondBatch = ingest.pendingJournal(limit = 200)
+            secondBatch.snapshots.map { it.second.eventId } shouldBe listOf("evt-good-defer-201")
+        } finally {
+            db.execSQL("DROP TRIGGER IF EXISTS fail_gap_insert")
+        }
+        Unit
+    }
+
+    @Test
+    fun badRowsWithFailingDeferralPreservesPayloadAndAttemptsWithBoundedExit() = runBlocking {
+        ready()
+        val db = holder.db().openHelper.writableDatabase
+        db.execSQL("CREATE TRIGGER fail_gap_insert BEFORE INSERT ON gap_interval BEGIN SELECT RAISE(ABORT, 'forced gap failure'); END;")
+        db.execSQL("CREATE TRIGGER fail_journal_update BEFORE UPDATE ON event_journal BEGIN SELECT RAISE(ABORT, 'forced update failure'); END;")
+        try {
+            holder.db().journalDao().insert(
+                EventJournalEntity(
+                    eventId = "evt-bad-nodefer",
+                    generation = "gen",
+                    receivedAtEpochMs = 1_000L,
+                    expiresAtEpochMs = 60_000L,
+                    state = "PENDING",
+                    attempts = 0,
+                    failureCode = null,
+                    payload = "{ bad json preserved",
+                    packageName = pkg,
+                    lossRecorded = LOSS_UNSETTLED,
+                ),
+            )
+
+            val batch = ingest.pendingJournal(limit = 200)
+            batch.snapshots.isEmpty() shouldBe true
+            batch.rawAdvanced shouldBe false
+            batch.deferredCount shouldBe 0
+
+            // Row preserved intact
+            holder.db().journalDao().state("evt-bad-nodefer") shouldBe "PENDING"
+            holder.db().journalDao().payload("evt-bad-nodefer") shouldBe "{ bad json preserved"
+            lossState("evt-bad-nodefer") shouldBe LOSS_UNSETTLED
+        } finally {
+            db.execSQL("DROP TRIGGER IF EXISTS fail_gap_insert")
+            db.execSQL("DROP TRIGGER IF EXISTS fail_journal_update")
+        }
         Unit
     }
 }

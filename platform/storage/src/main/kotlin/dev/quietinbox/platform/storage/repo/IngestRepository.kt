@@ -249,38 +249,45 @@ class IngestRepository @Inject constructor(
         var rawAdvanced = false
         var newlyDeferred = 0
         val snapshots = rows.mapNotNull { row ->
-            runCatching { row.generation to json.decodeFromString(NotificationSnapshot.serializer(), row.payload) }
-                .getOrElse {
-                    val terminalRetry = markJournalTerminal(
-                        eventId = row.eventId,
-                        failure = "DECODE",
-                        lossOnTerminal = {
-                            db.healthDao().insertGap(
-                                GapIntervalEntity(
-                                    startEpochMs = row.receivedAtEpochMs,
-                                    endEpochMs = row.receivedAtEpochMs,
-                                    reason = GapReason.PAYLOAD_UNREADABLE.name,
-                                    precision = GapPrecision.BOUNDED.name,
-                                    createdAtEpochMs = row.receivedAtEpochMs,
-                                    packageName = row.packageName,
-                                ),
-                            )
-                        },
-                    )
-                    when (terminalRetry) {
-                        JournalRetry.FAILED_RECORDED, JournalRetry.NOT_PENDING -> {
-                            rawAdvanced = true
-                        }
-                        JournalRetry.FAILED_DEFERRED -> {
-                            rawAdvanced = true
-                            newlyDeferred++
-                        }
-                        JournalRetry.RETRYABLE -> {
-                            // Deferral also failed: row retains payload and attempts, holds place on page.
-                        }
+            val decoded = try {
+                row.generation to json.decodeFromString(NotificationSnapshot.serializer(), row.payload)
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                null
+            }
+            if (decoded != null) {
+                decoded
+            } else {
+                val terminalRetry = markJournalTerminal(
+                    eventId = row.eventId,
+                    failure = "DECODE",
+                    lossOnTerminal = {
+                        db.healthDao().insertGap(
+                            GapIntervalEntity(
+                                startEpochMs = row.receivedAtEpochMs,
+                                endEpochMs = row.receivedAtEpochMs,
+                                reason = GapReason.PAYLOAD_UNREADABLE.name,
+                                precision = GapPrecision.BOUNDED.name,
+                                createdAtEpochMs = row.receivedAtEpochMs,
+                                packageName = row.packageName,
+                            ),
+                        )
+                    },
+                )
+                when (terminalRetry) {
+                    JournalRetry.FAILED_RECORDED, JournalRetry.NOT_PENDING -> {
+                        rawAdvanced = true
                     }
-                    null
+                    JournalRetry.FAILED_DEFERRED -> {
+                        rawAdvanced = true
+                        newlyDeferred++
+                    }
+                    JournalRetry.RETRYABLE -> {
+                        // Deferral also failed: row retains payload and attempts, holds place on page.
+                    }
                 }
+                null
+            }
         }
         return PendingJournalBatch(
             snapshots = snapshots,

@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="dev.quietinbox.platform.capture.CaptureCoordinatorTest" tests="85" skipped="0" failures="0" errors="0" timestamp="2026-09-12T17:27:22.864Z" hostname="MacBook-Pro-5.local" time="22.298">
+  <properties/>
+  <testcase name="an event queued before a pause is never committed after it" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="1.261"/>
+  <testcase name="pausing rotates the generation so nothing offered afterwards is queued at all" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.324"/>
+  <testcase name="resuming while bound starts a fresh generation and a fresh capture session" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.044"/>
+  <testcase name="resuming while unbound does not start a generation or a session" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.32"/>
+  <testcase name="cold start: the source list is loaded in the pipeline and drops what is not a source" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.032"/>
+  <testcase name="cold start: a disabled source in the loaded list is dropped too" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.025"/>
+  <testcase name="once the source list is known an unlisted package is dropped before it is queued" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.326"/>
+  <testcase name="an own-package event is only accepted when it is marked synthetic" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.338"/>
+  <testcase name="an ordinary pipeline failure after acceptance is marked retryable and the consumer keeps going" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.031"/>
+  <testcase name="a CancellationException is propagated, never recorded as a retryable failure" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.329"/>
+  <testcase name="disconnecting clears the generation, ends the session and opens a gap" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.324"/>
+  <testcase name="a source disabled while an event waits for the pipeline lock is never journaled" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.639"/>
+  <testcase name="a pause between acceptance and commit leaves the event pending instead of committing it" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.394"/>
+  <testcase name="replay is held while paused and runs on resume" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.364"/>
+  <testcase name="replay discards a pending row whose source was disabled since and commits the others" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.019"/>
+  <testcase name="a maintenance run drops what was queued, records an exact gap and starts a fresh generation" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.339"/>
+  <testcase name="every maintenance run records its own gap, even two in a row and an instant one" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.021"/>
+  <testcase name="before the source list is known a notification is held unread; once known, only sources are snapshotted" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.73"/>
+  <testcase name="a held buffer that overflowed before the policy was known records the drop as a gap and keeps only sources" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.439"/>
+  <testcase name="a journal insert that throws is recorded as a gap, not marked retryable on a row that does not exist" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.023"/>
+  <testcase name="when the vault does not open, held notifications are dropped unread and a bounded gap is recorded" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.629"/>
+  <testcase name="a cold-start loss while the vault is locked is written as a bounded gap once the vault opens" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.321"/>
+  <testcase name="a lock-out gap the pipeline could not open is written as a bounded gap once the vault opens" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.02"/>
+  <testcase name="a Ready that arrives while the lock-out gap write is still in flight does not drop it" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="1.017"/>
+  <testcase name="a cold-start loss whose settle failed is kept and written on the next policy load" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.319"/>
+  <testcase name="a cold-start gap row that lands after the policy loaded is closed at once, not left open" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.222"/>
+  <testcase name="a cold-start gap row that lands between the policy's settle and the flag flip is closed by the policy load" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.517"/>
+  <testcase name="an overflow gap whose write failed is kept and written on the next policy load" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.391"/>
+  <testcase name="a notification held across a disconnect gets no gap when it is paused or captured again by the resync" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.331"/>
+  <testcase name="a stale copy with the same key but an older post time is a loss of its own" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.019"/>
+  <testcase name="a disconnect landing while held notifications are released gives the later ones a gap instead of letting them suppress themselves" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.325"/>
+  <testcase name="a notification held across a disconnect is recorded as a gap, not dropped silently" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.317"/>
+  <testcase name="bitmaps in flight at the copier still count against the queue bound" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.042"/>
+  <testcase name="switching a source off opens a gap that names it, and switching it back on closes it" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.007"/>
+  <testcase name="setting a source flag to the value it already has is not a second gap" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.31"/>
+  <testcase name="a settlement that refuses the write is a settlement refusal" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.006"/>
+  <testcase name="a committed policy whose reload fails is not a rollback" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.006"/>
+  <testcase name="a locked vault is not wrapped as a refused change" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.005"/>
+  <testcase name="removing a source closes the gap it left open, and forgets its name when the data goes too" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.006"/>
+  <testcase name="removing a source without deleting its data keeps the source's name on the gap" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.31"/>
+  <testcase name="a source paused, then switched off and on again, still has a gap saying it is paused" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.321"/>
+  <testcase name="pausing a source that is switched off keeps the gap that says so" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.316"/>
+  <testcase name="a gap an earlier version left open against its own policy is closed when the policy loads" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.006"/>
+  <testcase name="pausing one source never closes another source's gap" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.005"/>
+  <testcase name="messages dropped before parsing are a gap, even though the ingest that followed succeeded" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.007"/>
+  <testcase name="an event the journal already holds does not record its loss a second time" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.324"/>
+  <testcase name="replaying a pending row does not record its loss again" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.015"/>
+  <testcase name="lines an InboxStyle notification could not hold are a gap, not a shortened body" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.008"/>
+  <testcase name="a message whose text was merely shortened is not a gap" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.315"/>
+  <testcase name="a row left pending by 0.1.3 has its dropped lines settled once, however often it is replayed" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.027"/>
+  <testcase name="a 0.1.3 flag that can only mean whole messages were dropped is settled" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.02"/>
+  <testcase name="a 0.1.3 flag that could equally be one shortened message is left alone" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.313"/>
+  <testcase name="pending rows discarded with their source are settled while their payload can still be read" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.005"/>
+  <testcase name="a loss neither the journal nor its fallback could record is written on the next policy load" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.628"/>
+  <testcase name="a remembered loss is written by the next event the vault accepts, with no policy change" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.342"/>
+  <testcase name="a carried-over row whose loss cannot be written is not committed and spends no attempt" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.312"/>
+  <testcase name="rows whose loss cannot be written stop holding the page against the rows behind them" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.336"/>
+  <testcase name="a deferred settlement is retried when a gap write is next seen to succeed" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.337"/>
+  <testcase name="an event accepted without a loss does not retry a deferred settlement" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.312"/>
+  <testcase name="a deferred row is still settled before its source is disabled" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.006"/>
+  <testcase name="pending rows removed with their source are settled while their payload can still be read" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.005"/>
+  <testcase name="rows that cannot settle do not starve a second source's rows either" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.322"/>
+  <testcase name="a row another pass deferred is not committed by a batch that predates the deferral" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.311"/>
+  <testcase name="a replay that cannot even defer a row does not claim it made progress" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.308"/>
+  <testcase name="a failing prefix longer than a whole pass does not keep the rows behind it from ever being read" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.339"/>
+  <testcase name="the pending rows of a source with more than one page are all settled before it is disabled" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.021"/>
+  <testcase name="two triggers arriving together run one replay pass, not two" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.614"/>
+  <testcase name="a whole row the parser proved was cut away is recorded as a gap handed to the commit" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.323"/>
+  <testcase name="a cut inside the last row is that row's own flag, not a gap" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.329"/>
+  <testcase name="a row whose commit attempts run out is given up on with the loss of the whole event recorded, once" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.682"/>
+  <testcase name="a record that cannot be written parks the row, and the rows behind it are still reached" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.339"/>
+  <testcase name="a row that can neither be recorded nor parked is not counted as progress" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.323"/>
+  <testcase name="the live entrance hands in the same record as the replay" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.006"/>
+  <testcase name="a request that arrives while the running pass is cancelled is still served" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.318"/>
+  <testcase name="a request that finds maintenance active is kept for the run's end, not cleared" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.313"/>
+  <testcase name="switching one source off resumes only that source's deferred rows" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.312"/>
+  <testcase name="one deferral episode arms at most one retry, however many gap writes then succeed" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.323"/>
+  <testcase name="parser unexpected exception records bounded PARSE_FAILED gap and marks journal FAILED without committing" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.328"/>
+  <testcase name="parser cancellation exception propagates and does not mark journal FAILED or record gap" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.313"/>
+  <testcase name="parser exception with failing gap write defers the journal row without filing FAILED" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.324"/>
+  <testcase name="parser AssertionError is not caught as terminal failure and does not mark journal FAILED or insert gap" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.312"/>
+  <testcase name="200 bad rows followed by 201st normal row commits tail row in same replay pass" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.008"/>
+  <testcase name="199 bad rows plus normal tail row commits tail row in one replay pass as positive control" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.007"/>
+  <testcase name="200 and 400 bad rows with failing gap but successful deferral advances and commits tail row in same pass" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.006"/>
+  <testcase name="bad rows with failing deferral preserves payload and attempts with bounded exit" classname="dev.quietinbox.platform.capture.CaptureCoordinatorTest" time="0.309"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

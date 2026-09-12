@@ -1,0 +1,3 @@
+09-13 01:27:02.725  3783  3799 I TestRunner: started: missingReadySignalTimesOutAndCleansUpWorkersPromptly(dev.quietinbox.platform.storage.JournalLossTransactionTest)
+09-13 01:27:02.730  3783  3803 I SQLiteConnection: Database keying operation returned:0
+09-13 01:27:04.029  3783  3799 I TestRunner: finished: missingReadySignalTimesOutAndCleansUpWorkersPromptly(dev.quietinbox.platform.storage.JournalLossTransactionTest)

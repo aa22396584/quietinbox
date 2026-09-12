@@ -1,0 +1,15 @@
+=== CaptureCoordinator Stopping Condition Mutation Negative Control Failure Record ===
+Platform: Android emulator-5554 (Pixel_9(AVD), API 36)
+Source Commit: f279c895e774f41257e900cee0cdd5b336175d4e
+Mutation Applied: capture-stopping-condition-negative-control.patch (force `progressed = true` at CaptureCoordinator.kt:1295 instead of `batch.rawAdvanced`)
+Command: ANDROID_SERIAL=emulator-5554 ./gradlew :platform:storage:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=dev.quietinbox.platform.storage.JournalLossTransactionTest#realCoordinatorAndRoomReplayFailingDeferralExitsBoundedAndPreservesPayloadAndAttempts
+
+Result: BUILD FAILED (exit code 1)
+Failure:
+dev.quietinbox.platform.storage.JournalLossTransactionTest > realCoordinatorAndRoomReplayFailingDeferralExitsBoundedAndPreservesPayloadAndAttempts[Pixel_9(AVD) - 16] FAILED
+    org.opentest4j.AssertionFailedError: expected:<1> but was:<199>
+        at dev.quietinbox.platform.storage.JournalLossTransactionTest$realCoordinatorAndRoomReplayFailingDeferralExitsBoundedAndPreservesPayloadAndAttempts$1.invokeSuspend(JournalLossTransactionTest.kt:1629)
+        at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+
+Explanation:
+When deferral fails, `batch.rawAdvanced` is false. If `progressed = true` is incorrectly assumed, the coordinator loops through the maximum replay rounds (up to 199 query iterations) instead of exiting cleanly on the 1st page attempt. The test oracle assertion `pageCallCount.get() shouldBe 1` catches this runaway loop and fails immediately.

@@ -1,0 +1,3 @@
+09-13 01:26:56.909  3783  3799 I TestRunner: started: concurrentCoroutinesCallingTerminalDoNotDuplicateGapsOrDeadlock(dev.quietinbox.platform.storage.JournalLossTransactionTest)
+09-13 01:26:56.913  3783  3816 I SQLiteConnection: Database keying operation returned:0
+09-13 01:26:57.218  3783  3799 I TestRunner: finished: concurrentCoroutinesCallingTerminalDoNotDuplicateGapsOrDeadlock(dev.quietinbox.platform.storage.JournalLossTransactionTest)

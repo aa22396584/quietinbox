@@ -1,0 +1,28 @@
+=== UI Mutation Negative Control Failure Record ===
+Platform: Android emulator-5554 (Pixel_9(AVD), API 36)
+Source Commit: 15591ceb86140e0d0fbd12861f65d0a85ff998a3
+Mutation Applied: ui-mutation-negative-control.patch (force REAL_DEVICE_PASSED in SourcesStep and AddSourceSheet)
+Command: ANDROID_SERIAL=emulator-5554 ./gradlew :feature:onboarding:connectedDebugAndroidTest :feature:health:connectedDebugAndroidTest
+
+Result: BUILD FAILED (exit code 1)
+Failures:
+
+1) Onboarding failure:
+Class: dev.quietinbox.feature.onboarding.SourcesStepSemanticsTest
+Method: sourcesStepRendersHonestTierPerChoice
+Error:
+java.lang.AssertionError: Failed to assert count of nodes.
+Reason: Expected exactly '1' node but could not find any node that satisfies: (Text + InputText + EditableText contains 'Synthetic tests only' (ignoreCase: false))
+
+	at androidx.compose.ui.test.AssertionsKt.assertCountEquals(Assertions.kt:311)
+	at dev.quietinbox.feature.onboarding.SourcesStepSemanticsTest.sourcesStepRendersHonestTierPerChoice(SourcesStepSemanticsTest.kt:64)
+
+2) Health failure:
+Class: dev.quietinbox.feature.health.SourceVerificationTagSemanticsTest
+Method: addSourceSheetRendersHonestTierForSyntheticAndVerifiedSources
+Error:
+java.lang.AssertionError: Failed to assert count of nodes.
+Reason: Expected exactly '1' node but could not find any node that satisfies: (Text + InputText + EditableText contains 'Synthetic tests only' (ignoreCase: false))
+
+	at androidx.compose.ui.test.AssertionsKt.assertCountEquals(Assertions.kt:311)
+	at dev.quietinbox.feature.health.SourceVerificationTagSemanticsTest.addSourceSheetRendersHonestTierForSyntheticAndVerifiedSources(SourceVerificationTagSemanticsTest.kt:98)

@@ -1,0 +1,58 @@
+<?xml version='1.0' encoding='UTF-8' ?>
+<testsuites tests="50" failures="0" errors="0" skipped="0" time="0.000" timestamp="2026-09-12T17:27:05" hostname="localhost">
+  <testsuite name="dev.quietinbox.platform.storage.JournalLossTransactionTest" tests="50" failures="0" errors="0" skipped="0" time="76.290" timestamp="2026-09-12T17:27:05" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554" />
+    </properties>
+    <testcase name="theCandidateReadsAgreeOnAllFourValues" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="2.587" />
+    <testcase name="anEventWhoseLossCannotBeWrittenIsNotAcceptedEither" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="1.933" />
+    <testcase name="anExhaustedRowRecordsTheWholeEventWithItsFilingAndOnlyOnce" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="1.760" />
+    <testcase name="aRecordWhoseFilingFailsIsRolledBackWithIt" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="2.572" />
+    <testcase name="realCoordinatorAndRoomReplayFailingDeferralExitsBoundedAndPreservesPayloadAndAttempts" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="4.137" />
+    <testcase name="aLossTheParserProvedIsWrittenInTheCommitThatStoresTheBatch" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="1.819" />
+    <testcase name="terminalFailureRollsBackOnGapFailureAndParksTheRow" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="1.806" />
+    <testcase name="aRowThatAlreadyLeftPendingIsNeitherChargedNorRecorded" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="1.640" />
+    <testcase name="aSettlementThatKeepsFailingNeverCostsTheEventItsAttempts" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="1.917" />
+    <testcase name="acceptingAnEventWritesItsLossWithIt" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="1.601" />
+    <testcase name="aRecordThatCannotBeWrittenLeavesTheRowPendingAndParksItUntilAPassResumesIt" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="1.766" />
+    <testcase name="theSettleWalkSkipsRowsWhoseLossIsAlreadyRecorded" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="2.077" />
+    <testcase name="theSettleWalkSeeksToItsCursorInsideTheIndex" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="1.578" />
+    <testcase name="repeatedOrConcurrentTerminalCallDoesNotDuplicateGaps" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="1.611" />
+    <testcase name="triggerFailureDuringTerminalUpdateRollsBackBothGapAndJournalRow" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="3.291" />
+    <testcase name="deferLossPreservesSourceIsolation" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="1.571" />
+    <testcase name="aSettlementThatCannotBeWrittenLeavesTheRowDeferredAndItsEvidenceIntact" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="3.214" />
+    <testcase name="aParkThatFailsTooLeavesTheRowWhereItWas" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="1.582" />
+    <testcase name="aPageThatWillNotDecodeStillMovesTheWalkOn" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="1.532" />
+    <testcase name="rowsThatCannotSettleStopBlockingTheRowsBehindThem" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="1.886" />
+    <testcase name="aClaimWhoseGapCannotBeWrittenIsNotSpent" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="1.715" />
+    <testcase name="realCoordinatorAndRoomReplay200And400BadRowsWithFailingGapAndSuccessfulDeferralCommitsTailRow" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="10.834" />
+    <testcase name="aLossTheParserProvedIsWrittenOnTheCommitExitThatStoresNothingToo" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="1.585" />
+    <testcase name="aCarriedOverClaimSpentBeforeAParkIsStillSpentAfterIt" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="1.729" />
+    <testcase name="anEventThisReleaseAcceptedIsAlreadySettled" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="1.632" />
+    <testcase name="aCommitWhoseLossCannotBeWrittenStoresNothingAndStaysPending" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="1.339" />
+    <testcase name="aPageOfUndecodableRowsIsEmptyAndStillPointsOn" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="1.761" />
+    <testcase name="resumingOneSourcesDeferredRowsLeavesAnothersAlone" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="1.998" />
+    <testcase name="concurrentPolicyDiscardDoesNotGetOverwrittenByTerminalFailure" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="1.840" />
+    <testcase name="lossBitsDeferAndResumePreservesSettledState" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="1.309" />
+    <testcase name="aLossCarriedInFromAnOlderReleaseIsRecordedByExactlyOneClaim" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="0.313" />
+    <testcase name="aClaimSaysWhetherTheGapIsOnDiskOrOnlyThatItTookNothing" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="0.314" />
+    <testcase name="concurrentCoroutinesCallingTerminalDoNotDuplicateGapsOrDeadlock" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="0.310" />
+    <testcase name="realCoordinatorAndRoomReplay200And400BadRowsWithSuccessfulGapsCommitsTailRow" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="1.200" />
+    <testcase name="aDeferredRowIsStillSettledBeforeItsSourceIsDiscarded" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="0.302" />
+    <testcase name="theSettleWalkVisitsEveryPendingRowOfTheSourceOnceInOrder" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="0.314" />
+    <testcase name="cancellationDuringTerminalTransitionRollsBackAndKeepsPendingNotDeferred" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="0.313" />
+    <testcase name="aRowWhoseArrivalLossIsSettledIsParkedAndResumedWithItStillSettled" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="0.306" />
+    <testcase name="twoHundredDeferredBadRowsDoNotStarveReplayOfTailRows" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="0.499" />
+    <testcase name="aSettledRowParkedIsNeverWalkedBackToUnsettled" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="0.318" />
+    <testcase name="oneHundredNinetyNineBadRowsPlusNormalTailRowCommitsTailRowInOneBatch" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="0.495" />
+    <testcase name="badRowsWithFailingDeferralPreservesPayloadAndAttemptsWithBoundedExit" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="0.307" />
+    <testcase name="aRowParkedBeforeItsClaimAnswersDeferredAndTakesNoGap" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="0.307" />
+    <testcase name="badRowsWithFailingGapAndSuccessfulDeferralAdvancesToTailRow" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="0.519" />
+    <testcase name="redeliveringTheSameEventDoesNotRecordItsLossTwice" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="0.305" />
+    <testcase name="parseFailureFailsTerminalWithBoundedParseFailedGap" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="0.305" />
+    <testcase name="missingReadySignalTimesOutAndCleansUpWorkersPromptly" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="1.305" />
+    <testcase name="unreadablePayloadFailsTerminalWithBoundedPayloadUnreadableGap" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="0.306" />
+    <testcase name="aParkedRowResumedAndCommittedLosesNothing" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="0.313" />
+    <testcase name="aRowThatHasAlreadyLeftPendingCannotBeClaimed" classname="dev.quietinbox.platform.storage.JournalLossTransactionTest" time="0.317" />
+  </testsuite>
+</testsuites>

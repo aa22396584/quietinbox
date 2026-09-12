@@ -1,0 +1,14 @@
+--- a/feature/onboarding/src/main/kotlin/dev/quietinbox/feature/onboarding/OnboardingScreen.kt
++++ b/feature/onboarding/src/main/kotlin/dev/quietinbox/feature/onboarding/OnboardingScreen.kt
+@@ -201,3 +201,3 @@ internal fun SourcesStep(state: OnboardingUiState, onToggle: (String) -> Unit) {
+                     if (!c.installed) Text(stringResource(R.string.ob_sources_not_installed), color = MaterialTheme.colorScheme.onSurfaceVariant)
+-                    else SourceVerificationTag(c.tier)
++                    else SourceVerificationTag(dev.quietinbox.core.model.SourceVerificationTier.REAL_DEVICE_PASSED)
+                 },
+--- a/feature/health/src/main/kotlin/dev/quietinbox/feature/health/HealthScreen.kt
++++ b/feature/health/src/main/kotlin/dev/quietinbox/feature/health/HealthScreen.kt
+@@ -467,3 +467,3 @@ fun AddSourceSheet(
+                                 app.manual -> Text(stringResource(R.string.health_add_by_package), style = MaterialTheme.typography.bodySmall)
+-                                app.hasAdapter || app.tier != SourceVerificationTier.UNTESTED -> SourceVerificationTag(app.tier)
++                                app.hasAdapter || app.tier != SourceVerificationTier.UNTESTED -> SourceVerificationTag(SourceVerificationTier.REAL_DEVICE_PASSED)
+                                 else -> Text(app.packageName, style = MaterialTheme.typography.bodySmall)

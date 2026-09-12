@@ -1,0 +1,23 @@
+<?xml version='1.0' encoding='UTF-8' ?>
+<testsuites tests="10" failures="0" errors="0" skipped="0" time="0.000" timestamp="2026-09-12T17:17:11" hostname="localhost">
+  <testsuite name="dev.quietinbox.feature.health.PolicyFailureDialogTest" tests="6" failures="0" errors="0" skipped="0" time="7.937" timestamp="2026-09-12T17:17:11" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554" />
+    </properties>
+    <testcase name="aCommittedChangeThatCouldNotBeReadBackDoesNotClaimTheWriteRolledBack" classname="dev.quietinbox.feature.health.PolicyFailureDialogTest" time="2.564" />
+    <testcase name="anUnclassifiedFailureDoesNotUseTheRollbackCopy" classname="dev.quietinbox.feature.health.PolicyFailureDialogTest" time="1.243" />
+    <testcase name="okDismissesIt" classname="dev.quietinbox.feature.health.PolicyFailureDialogTest" time="1.277" />
+    <testcase name="aLockedVaultUsesTheLockCopy" classname="dev.quietinbox.feature.health.PolicyFailureDialogTest" time="1.083" />
+    <testcase name="aRollbackThatSettledNothingDoesNotBlameASettlement" classname="dev.quietinbox.feature.health.PolicyFailureDialogTest" time="0.676" />
+    <testcase name="aSettlementRollbackNamesTheAppAndUsesOnlyTheSettlementCopy" classname="dev.quietinbox.feature.health.PolicyFailureDialogTest" time="1.094" />
+  </testsuite>
+  <testsuite name="dev.quietinbox.feature.health.SourceVerificationTagSemanticsTest" tests="4" failures="0" errors="0" skipped="0" time="5.923" timestamp="2026-09-12T17:17:11" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554" />
+    </properties>
+    <testcase name="untestedTierRendersUntestedText" classname="dev.quietinbox.feature.health.SourceVerificationTagSemanticsTest" time="0.659" />
+    <testcase name="syntheticOnlyTierRendersSyntheticOnlyTextAndNotVerifiedOrSupportedSource" classname="dev.quietinbox.feature.health.SourceVerificationTagSemanticsTest" time="1.505" />
+    <testcase name="realDevicePassedTierRendersVerifiedText" classname="dev.quietinbox.feature.health.SourceVerificationTagSemanticsTest" time="1.455" />
+    <testcase name="addSourceSheetRendersHonestTierForSyntheticAndVerifiedSources" classname="dev.quietinbox.feature.health.SourceVerificationTagSemanticsTest" time="2.304" />
+  </testsuite>
+</testsuites>

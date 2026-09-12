@@ -1,0 +1,181 @@
+09-13 01:16:38.777  2087  2105 I TestRunner: started: sourcesStepRendersHonestTierPerChoice(dev.quietinbox.feature.onboarding.SourcesStepSemanticsTest)
+09-13 01:16:38.786  2087  2110 D ProfileInstaller: Installing profile for dev.quietinbox.feature.onboarding.test
+09-13 01:16:38.842  2087  2105 W FileTestStorage: Output properties is not supported.
+09-13 01:16:38.842  2087  2105 I Tracing : Tracer added: class androidx.test.platform.tracing.AndroidXTracer
+09-13 01:16:38.852  2087  2087 D EventInjectionStrategy: Creating injection strategy with input manager.
+09-13 01:16:38.853  2087  2087 I onboarding.test: hiddenapi: Accessing hidden method Landroid/hardware/input/InputManager;->getInstance()Landroid/hardware/input/InputManager; (runtime_flags=0, domain=platform, api=unsupported) from Landroidx/test/espresso/base/InputManagerEventInjectionStrategy; (domain=app) using reflection: allowed
+09-13 01:16:38.856  2087  2087 I onboarding.test: hiddenapi: Accessing hidden method Landroid/hardware/input/InputManager;->injectInputEvent(Landroid/view/InputEvent;I)Z (runtime_flags=0, domain=platform, api=unsupported) from Landroidx/test/espresso/base/InputManagerEventInjectionStrategy; (domain=app) using reflection: allowed
+09-13 01:16:38.856  2087  2087 I onboarding.test: hiddenapi: Accessing hidden field Landroid/hardware/input/InputManager;->INJECT_INPUT_EVENT_MODE_WAIT_FOR_FINISH:I (runtime_flags=0, domain=platform, api=unsupported) from Landroidx/test/espresso/base/InputManagerEventInjectionStrategy; (domain=app) using reflection: allowed
+09-13 01:16:38.861  2087  2087 I onboarding.test: hiddenapi: Accessing hidden method Landroid/os/MessageQueue;->next()Landroid/os/Message; (runtime_flags=0, domain=platform, api=unsupported) from Landroidx/test/espresso/base/Interrogator; (domain=app) using reflection: allowed
+09-13 01:16:38.862  2087  2087 I onboarding.test: hiddenapi: Accessing hidden field Landroid/os/MessageQueue;->mMessages:Landroid/os/Message; (runtime_flags=0, domain=platform, api=unsupported) from Landroidx/test/espresso/base/Interrogator; (domain=app) using reflection: allowed
+09-13 01:16:38.862  2087  2087 I onboarding.test: hiddenapi: Accessing hidden method Landroid/os/Message;->recycleUnchecked()V (runtime_flags=0, domain=platform, api=unsupported) from Landroidx/test/espresso/base/Interrogator; (domain=app) using reflection: allowed
+09-13 01:16:38.864  2087  2105 D IdlingRegistry: Registering idling resources: [androidx.compose.ui.test.EspressoLink@678cf4c]
+09-13 01:16:38.886  2087  2105 W Settings: Setting always_finish_activities has moved from android.provider.Settings.System to android.provider.Settings.Global, returning read-only value.
+09-13 01:16:38.900   705  1485 I system_server: AssetManager2(0xb40000790866c9b8) locale list changing from [] to [en-US]
+09-13 01:16:38.902   705  1485 V GrammaticalInflectionUtils: AttributionSource: android.content.AttributionSource@54e87a20 does not have READ_SYSTEM_GRAMMATICAL_GENDER permission.
+09-13 01:16:38.908   496   612 I BpBinder: onLastStrongRef automatically unlinking death recipients: 
+09-13 01:16:38.910   969  1116 I ndroid.systemui: AssetManager2(0xb4000079085f63f8) locale list changing from [] to [en-US]
+09-13 01:16:38.916  1115  1115 W SplitSelectStateCtor: Missing session instanceIds
+09-13 01:16:38.916  1115  1115 D StatsLog: LAUNCHER_SPLIT_SELECTION_EXIT_INTERRUPTED
+09-13 01:16:38.944   595 28537 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:38.944   595 28537 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:38.960   496   496 I BpBinder: onLastStrongRef automatically unlinking death recipients: 
+09-13 01:16:38.992  2087  2087 I onboarding.test: AssetManager2(0xb4000079085ab0d8) locale list changing from [] to [en-US]
+09-13 01:16:39.048  2087  2087 D LifecycleMonitor: Lifecycle status change: androidx.activity.ComponentActivity@a619405 in: PRE_ON_CREATE
+09-13 01:16:39.048  2087  2087 V ActivityScenario: Activity lifecycle changed event received but ignored because the reported transition was not ON_CREATE while the last known transition was PRE_ON_CREATE
+09-13 01:16:39.139  2087  2087 D DesktopModeFlags: Toggle override initialized to: OVERRIDE_UNSET
+09-13 01:16:39.173  2087  2087 D LifecycleMonitor: Lifecycle status change: androidx.activity.ComponentActivity@a619405 in: CREATED
+09-13 01:16:39.173  2087  2087 V ActivityScenario: Update currentActivityStage to CREATED, currentActivity=androidx.activity.ComponentActivity@a619405
+09-13 01:16:39.175  2087  2087 D LifecycleMonitor: Lifecycle status change: androidx.activity.ComponentActivity@a619405 in: STARTED
+09-13 01:16:39.175  2087  2087 V ActivityScenario: Update currentActivityStage to STARTED, currentActivity=androidx.activity.ComponentActivity@a619405
+09-13 01:16:39.276  2087  2087 D LifecycleMonitor: Lifecycle status change: androidx.activity.ComponentActivity@a619405 in: RESUMED
+09-13 01:16:39.276  2087  2087 V ActivityScenario: Update currentActivityStage to RESUMED, currentActivity=androidx.activity.ComponentActivity@a619405
+09-13 01:16:39.325  2087  2087 W HWUI    : Unknown dataspace 0
+09-13 01:16:39.359  2087  2111 I EGL_emulation: Opening libGLESv1_CM_emulation.so
+09-13 01:16:39.359  2087  2111 I EGL_emulation: Opening libGLESv2_emulation.so
+09-13 01:16:39.376  2087  2111 W HWUI    : Failed to choose config with EGL_SWAP_BEHAVIOR_PRESERVED, retrying without...
+09-13 01:16:39.376  2087  2111 W HWUI    : Failed to initialize 101010-2 format, error = EGL_SUCCESS
+09-13 01:16:39.403  1115  1115 D VRI[NexusLauncherActivity]: visibilityChanged oldVisibility=true newVisibility=false
+09-13 01:16:39.413  1115  1115 D NexusLauncherModelDelegate: notifySmartspaceEvent: SmartspaceTargetEvent{mSmartspaceTarget=null, mSmartspaceActionId='null', mEventType=7}
+09-13 01:16:39.452   496   613 W ServiceManagerCppClient: Permission failure: android.permission.ACCESS_SURFACE_FLINGER from uid=10253 pid=0
+09-13 01:16:39.452   496   613 D PermissionCache: checking android.permission.ACCESS_SURFACE_FLINGER for uid=10253 => denied (6855 us)
+09-13 01:16:39.453   496   613 W ServiceManagerCppClient: Permission failure: android.permission.ROTATE_SURFACE_FLINGER from uid=10253 pid=0
+09-13 01:16:39.453   496   613 D PermissionCache: checking android.permission.ROTATE_SURFACE_FLINGER for uid=10253 => denied (725 us)
+09-13 01:16:39.454   496   613 W ServiceManagerCppClient: Permission failure: android.permission.INTERNAL_SYSTEM_WINDOW from uid=10253 pid=0
+09-13 01:16:39.454   496   613 D PermissionCache: checking android.permission.INTERNAL_SYSTEM_WINDOW for uid=10253 => denied (1203 us)
+09-13 01:16:39.455   496   612 W ServiceManagerCppClient: Permission failure: android.permission.ACCESS_SURFACE_FLINGER from uid=10253 pid=2087
+09-13 01:16:39.455   496   612 D PermissionCache: checking android.permission.ACCESS_SURFACE_FLINGER for uid=10253 => denied (7547 us)
+09-13 01:16:39.506   705   722 W ServiceManagerCppClient: Permission failure: android.permission.ACCESS_SURFACE_FLINGER from uid=10253 pid=0
+09-13 01:16:39.507   705   722 D PermissionCache: checking android.permission.ACCESS_SURFACE_FLINGER for uid=10253 => denied (404 us)
+09-13 01:16:39.507   705   722 W ServiceManagerCppClient: Permission failure: android.permission.ROTATE_SURFACE_FLINGER from uid=10253 pid=0
+09-13 01:16:39.507   705   722 D PermissionCache: checking android.permission.ROTATE_SURFACE_FLINGER for uid=10253 => denied (496 us)
+09-13 01:16:39.507   705   722 W ServiceManagerCppClient: Permission failure: android.permission.INTERNAL_SYSTEM_WINDOW from uid=10253 pid=0
+09-13 01:16:39.507   705   722 D PermissionCache: checking android.permission.INTERNAL_SYSTEM_WINDOW for uid=10253 => denied (46 us)
+09-13 01:16:39.527   705   729 I ActivityTaskManager: Displayed dev.quietinbox.feature.onboarding.test/androidx.activity.ComponentActivity for user 0: +614ms
+09-13 01:16:39.540  1115  1115 D BaseDepthController: setSurface:
+09-13 01:16:39.540  1115  1115 D BaseDepthController: 	mWaitingOnSurfaceValidity: false
+09-13 01:16:39.540  1115  1115 D BaseDepthController: 	mBaseSurface: null
+09-13 01:16:39.541  1115  1115 D BaseDepthController: mSurface is null and mCurrentBlur is: 0
+09-13 01:16:39.543  1115  1115 D StateManager: goToState - fromState: Normal, toState: Normal, partial trace:
+09-13 01:16:39.543  1115  1115 D StateManager: 	at com.android.launcher3.statemanager.StateManager.moveToRestState(go/retraceme 72a59688580715d19f0e415c69e80376c2f062d1648c80db6730905005a27c20:4)
+09-13 01:16:39.543  1115  1115 D StateManager: 	at com.android.launcher3.statemanager.StateManager.moveToRestState(go/retraceme 72a59688580715d19f0e415c69e80376c2f062d1648c80db6730905005a27c20:1)
+09-13 01:16:39.543  1115  1115 D StateManager: 	at com.android.launcher3.statemanager.StatefulActivity.onStop(go/retraceme 72a59688580715d19f0e415c69e80376c2f062d1648c80db6730905005a27c20:34)
+09-13 01:16:39.553  1115  1115 D StatsLog: LAUNCHER_ONSTOP
+09-13 01:16:39.554  1115  1115 D StatsLog: LAUNCHER_GOOGLE_SEARCH_RESTORE_LIST_SIZE_AFTER_ACTIVITY_RESTART
+09-13 01:16:39.572   705   832 I ImeTracker: dev.quietinbox.feature.onboarding.test:b9968e21: onRequestHide at ORIGIN_SERVER reason HIDE_UNSPECIFIED_WINDOW fromUser false
+09-13 01:16:39.575  1333  1333 I SubtypeOperator: SubtypeOperator$1.onUnbindInput():43 
+09-13 01:16:39.592  1333  1333 I SubtypeOperator: SubtypeOperator$1.onBindInput():33 
+09-13 01:16:39.592  1333  1333 I GoogleInputMethodService: GoogleInputMethodService.onFinishInput():2361 
+09-13 01:16:39.593  1333  1333 I GoogleInputMethodService: GoogleInputMethodService.onStartInput():1532 onStartInput(EditorInfo{EditorInfo{packageName=dev.quietinbox.feature.onboarding.test, inputType=0, inputTypeString=NULL, enableLearning=false, autoCorrection=false, autoComplete=false, imeOptions=0, privateImeOptions=null, actionName=UNSPECIFIED, actionLabel=null, initialSelStart=-1, initialSelEnd=-1, initialCapsMode=0, label=null, fieldId=0, fieldName=null, extras=null, hintText=null, hintLocales=[]}}, false)
+09-13 01:16:39.595  1333  1333 W LatinIMEBase: LatinIMEBase.updateInputViewCoverNavigation():321 Null input view, cannot update padding!
+09-13 01:16:39.608  2087  2087 D InsetsController: hide(ime(), fromIme=false)
+09-13 01:16:39.608  2087  2087 I ImeTracker: dev.quietinbox.feature.onboarding.test:b9968e21: onCancelled at PHASE_CLIENT_ALREADY_HIDDEN
+09-13 01:16:39.608  1333 32649 I Module  : DeviceLockedStatusModuleProvider$Module.updateDeviceLockedStatusInternal():119 repeatCheckTimes = 0, locked = false
+09-13 01:16:39.609  1333 32649 I Module  : DeviceLockedStatusModuleProvider$Module.updateDeviceLockedStatusInternal():119 repeatCheckTimes = 1, locked = false
+09-13 01:16:39.610   705  1485 I ImeTracker: system_server:d6259fee: onRequestHide at ORIGIN_SERVER reason IME_REQUESTED_CHANGED_LISTENER fromUser false
+09-13 01:16:39.610   705   732 I ImeTracker: system_server:d6259fee: onCancelled at PHASE_SERVER_SHOULD_HIDE
+09-13 01:16:39.647  1115  1128 W System  : A resource failed to call release. 
+09-13 01:16:39.647  1115  1128 W System  : A resource failed to call release. 
+09-13 01:16:39.647  1115  1128 W System  : A resource failed to call release. 
+09-13 01:16:39.647  1115  1128 W System  : A resource failed to call release. 
+09-13 01:16:39.647  1115  1128 W System  : A resource failed to call release. 
+09-13 01:16:39.647  1115  1128 W System  : A resource failed to call release. 
+09-13 01:16:39.647  1115  1128 W System  : A resource failed to call release. 
+09-13 01:16:39.647  1115  1128 W System  : A resource failed to call release. 
+09-13 01:16:39.647  1115  1128 W System  : A resource failed to call release. 
+09-13 01:16:39.774  2087  2094 I onboarding.test: Compiler allocated 5111KB to compile void android.view.ViewRootImpl.performTraversals()
+09-13 01:16:39.786   595 28537 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:39.786   595 28537 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:39.817 25709 25718 I FontLog : (REDACTED) Received query %s, URI %s
+09-13 01:16:39.817 25709 25718 I FontLog : (REDACTED) Query [%s] resolved to %s
+09-13 01:16:39.818 25709 25718 I FontLog : (REDACTED) Fetch %s end status %s
+09-13 01:16:39.824 25709 25718 I FontLog : (REDACTED) Pulling font file for id = %d, cache size = %d
+09-13 01:16:39.859 25709 25718 I FontLog : (REDACTED) Pulling font file for id = %d, cache size = %d
+09-13 01:16:40.643   705   871 D InetDiagMessage: Destroyed 0 sockets, proto=IPPROTO_TCP, family=AF_INET, states=14
+09-13 01:16:40.643   705   871 D InetDiagMessage: Destroyed 0 sockets, proto=IPPROTO_TCP, family=AF_INET6, states=14
+09-13 01:16:40.643   705   871 D InetDiagMessage: Destroyed live tcp sockets for uids={10106} in 0ms
+09-13 01:16:41.426   969  1116 I Choreographer: Skipped 44 frames!  The application may be doing too much work on its main thread.
+09-13 01:16:41.805   705   871 D InetDiagMessage: Destroyed 0 sockets, proto=IPPROTO_TCP, family=AF_INET, states=14
+09-13 01:16:41.806   705   871 D InetDiagMessage: Destroyed 1 sockets, proto=IPPROTO_TCP, family=AF_INET6, states=14
+09-13 01:16:41.806   705   871 D InetDiagMessage: Destroyed live tcp sockets for uids={10146} in 1ms
+09-13 01:16:41.807  2087  2087 I onboarding.test: hiddenapi: Accessing hidden method Landroid/os/SystemProperties;->addChangeCallback(Ljava/lang/Runnable;)V (runtime_flags=0, domain=platform, api=unsupported) from Landroidx/compose/ui/platform/AndroidComposeView$Companion; (domain=app) using reflection: allowed
+09-13 01:16:41.807  2087  2087 I Choreographer: Skipped 104 frames!  The application may be doing too much work on its main thread.
+09-13 01:16:42.269  2087  2120 I HWUI    : Davey! duration=2190ms; Flags=0, FrameTimelineVsyncId=15616987, IntendedVsync=217578346356471, Vsync=217580079689735, InputEventId=0, HandleInputStart=217580095019499, AnimationStart=217580095021124, PerformTraversalsStart=217580095708124, DrawStart=217580230239290, FrameDeadline=217578363023137, FrameStartTime=217580091494165, FrameInterval=16666666, WorkloadTarget=16666666, SyncQueued=217580315693041, SyncStart=217580316064791, IssueDrawCommandsStart=217580316169374, SwapBuffers=217580503909957, FrameCompleted=217580536872666, DequeueBufferDuration=3584, QueueBufferDuration=297041, GpuCompleted=217580536872666, SwapBuffersCompleted=217580531613291, DisplayPresentTime=0, CommandSubmissionCompleted=217580503909957, 
+09-13 01:16:42.356   705  1058 V GrammaticalInflectionUtils: AttributionSource: android.content.AttributionSource@54e87a20 does not have READ_SYSTEM_GRAMMATICAL_GENDER permission.
+09-13 01:16:42.362   496   553 I BpBinder: onLastStrongRef automatically unlinking death recipients: 
+09-13 01:16:42.370  2087  2087 D LifecycleMonitor: Lifecycle status change: androidx.activity.ComponentActivity@a619405 in: PAUSED
+09-13 01:16:42.370  2087  2087 V ActivityScenario: Update currentActivityStage to PAUSED, currentActivity=androidx.activity.ComponentActivity@a619405
+09-13 01:16:42.383   496   496 I BpBinder: onLastStrongRef automatically unlinking death recipients: 
+09-13 01:16:42.420   705   732 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:42.420   705   732 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:42.420   705   732 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:42.422   705   732 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:42.422   705   732 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:42.422   705   732 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:42.422   705   732 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:42.422   705   732 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:42.422   705   732 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:42.422   705   732 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:42.422   705   732 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:42.422   705   732 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:42.422   705   732 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:42.422   705   732 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:42.422   705   732 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:42.422   705   732 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:42.422   705   732 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:42.422   705   732 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:42.422   705   732 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:42.422   705   732 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:42.422   705   732 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:42.422   705   732 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:42.422   705   732 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:42.422   705   732 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:42.422   705   732 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:42.422   705   732 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:42.422   705   732 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:42.423   705   732 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:42.423   705   732 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:42.423   705   732 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:42.423   705   732 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:42.423   705   732 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:42.423   705   732 W IPCThreadState: Sending oneway calls to frozen process.
+09-13 01:16:42.446  2087  2087 D LifecycleMonitor: Lifecycle status change: androidx.test.core.app.InstrumentationActivityInvoker$EmptyActivity@b96ecca in: PRE_ON_CREATE
+09-13 01:16:42.449  2087  2087 V ActivityScenario: Activity lifecycle changed event received but ignored because the intent does not match. startActivityIntent=Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10008000 cmp=dev.quietinbox.feature.onboarding.test/androidx.activity.ComponentActivity }, activity.getIntent()=Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10000000 xflg=0x4 cmp=dev.quietinbox.feature.onboarding.test/androidx.test.core.app.InstrumentationActivityInvoker$EmptyActivity }, activity=androidx.test.core.app.InstrumentationActivityInvoker$EmptyActivity@b96ecca
+09-13 01:16:42.465  2087  2087 D LifecycleMonitor: Lifecycle status change: androidx.test.core.app.InstrumentationActivityInvoker$EmptyActivity@b96ecca in: CREATED
+09-13 01:16:42.465  2087  2087 V ActivityScenario: Activity lifecycle changed event received but ignored because the intent does not match. startActivityIntent=Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10008000 cmp=dev.quietinbox.feature.onboarding.test/androidx.activity.ComponentActivity }, activity.getIntent()=Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10000000 xflg=0x4 cmp=dev.quietinbox.feature.onboarding.test/androidx.test.core.app.InstrumentationActivityInvoker$EmptyActivity }, activity=androidx.test.core.app.InstrumentationActivityInvoker$EmptyActivity@b96ecca
+09-13 01:16:42.465  2087  2087 D LifecycleMonitor: Lifecycle status change: androidx.test.core.app.InstrumentationActivityInvoker$EmptyActivity@b96ecca in: STARTED
+09-13 01:16:42.466  2087  2087 V ActivityScenario: Activity lifecycle changed event received but ignored because the intent does not match. startActivityIntent=Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10008000 cmp=dev.quietinbox.feature.onboarding.test/androidx.activity.ComponentActivity }, activity.getIntent()=Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10000000 xflg=0x4 cmp=dev.quietinbox.feature.onboarding.test/androidx.test.core.app.InstrumentationActivityInvoker$EmptyActivity }, activity=androidx.test.core.app.InstrumentationActivityInvoker$EmptyActivity@b96ecca
+09-13 01:16:42.469  2087  2087 D LifecycleMonitor: Lifecycle status change: androidx.test.core.app.InstrumentationActivityInvoker$EmptyActivity@b96ecca in: RESUMED
+09-13 01:16:42.470  2087  2087 V ActivityScenario: Activity lifecycle changed event received but ignored because the intent does not match. startActivityIntent=Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10008000 cmp=dev.quietinbox.feature.onboarding.test/androidx.activity.ComponentActivity }, activity.getIntent()=Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10000000 xflg=0x4 cmp=dev.quietinbox.feature.onboarding.test/androidx.test.core.app.InstrumentationActivityInvoker$EmptyActivity }, activity=androidx.test.core.app.InstrumentationActivityInvoker$EmptyActivity@b96ecca
+09-13 01:16:42.549   705   729 I ActivityTaskManager: Displayed dev.quietinbox.feature.onboarding.test/androidx.test.core.app.InstrumentationActivityInvoker$EmptyActivity for user 0: +192ms
+09-13 01:16:42.589   705   832 I ImeTracker: dev.quietinbox.feature.onboarding.test:73e5c5d4: onRequestHide at ORIGIN_SERVER reason HIDE_UNSPECIFIED_WINDOW fromUser false
+09-13 01:16:42.593  1333  1333 I GoogleInputMethodService: GoogleInputMethodService.onFinishInput():2361 
+09-13 01:16:42.594  1333  1333 I GoogleInputMethodService: GoogleInputMethodService.onStartInput():1532 onStartInput(EditorInfo{EditorInfo{packageName=dev.quietinbox.feature.onboarding.test, inputType=0, inputTypeString=NULL, enableLearning=false, autoCorrection=false, autoComplete=false, imeOptions=0, privateImeOptions=null, actionName=UNSPECIFIED, actionLabel=null, initialSelStart=-1, initialSelEnd=-1, initialCapsMode=0, label=null, fieldId=0, fieldName=null, extras=null, hintText=null, hintLocales=[]}}, false)
+09-13 01:16:42.594  1333  1333 W LatinIMEBase: LatinIMEBase.updateInputViewCoverNavigation():321 Null input view, cannot update padding!
+09-13 01:16:42.596  2087  2087 D VRI[ComponentActivity]: visibilityChanged oldVisibility=true newVisibility=false
+09-13 01:16:42.599  1333 32652 I Module  : DeviceLockedStatusModuleProvider$Module.updateDeviceLockedStatusInternal():119 repeatCheckTimes = 0, locked = false
+09-13 01:16:42.601  1333 32652 I Module  : DeviceLockedStatusModuleProvider$Module.updateDeviceLockedStatusInternal():119 repeatCheckTimes = 1, locked = false
+09-13 01:16:42.625   496   553 I BpBinder: onLastStrongRef automatically unlinking death recipients: 
+09-13 01:16:42.628   705  1058 I ImeTracker: system_server:c4904102: onRequestHide at ORIGIN_SERVER reason IME_REQUESTED_CHANGED_LISTENER fromUser false
+09-13 01:16:42.633   705   732 I ImeTracker: system_server:c4904102: onCancelled at PHASE_SERVER_SHOULD_HIDE
+09-13 01:16:42.641  2087  2087 D LifecycleMonitor: Lifecycle status change: androidx.activity.ComponentActivity@a619405 in: STOPPED
+09-13 01:16:42.641  2087  2087 V ActivityScenario: Update currentActivityStage to STOPPED, currentActivity=androidx.activity.ComponentActivity@a619405
+09-13 01:16:42.646   496   496 I BpBinder: onLastStrongRef automatically unlinking death recipients: 
+09-13 01:16:42.791   705   871 D InetDiagMessage: Destroyed 0 sockets, proto=IPPROTO_TCP, family=AF_INET, states=14
+09-13 01:16:42.792   705   871 D InetDiagMessage: Destroyed 0 sockets, proto=IPPROTO_TCP, family=AF_INET6, states=14
+09-13 01:16:42.792   705   871 D InetDiagMessage: Destroyed live tcp sockets for uids={10148} in 1ms
+09-13 01:16:42.794   705   871 D InetDiagMessage: Destroyed 0 sockets, proto=IPPROTO_TCP, family=AF_INET, states=14
+09-13 01:16:42.794   705   871 D InetDiagMessage: Destroyed 0 sockets, proto=IPPROTO_TCP, family=AF_INET6, states=14
+09-13 01:16:42.794   705   871 D InetDiagMessage: Destroyed live tcp sockets for uids={20148} in 2ms
+09-13 01:16:42.819  2087  2087 W WindowOnBackDispatcher: sendCancelIfRunning: isInProgress=false callback=android.app.Activity$$ExternalSyntheticLambda0@6acf73f
+09-13 01:16:42.820  2087  2087 D LifecycleMonitor: Lifecycle status change: androidx.activity.ComponentActivity@a619405 in: DESTROYED
+09-13 01:16:42.820  2087  2087 V ActivityScenario: Update currentActivityStage to DESTROYED, currentActivity=null
+09-13 01:16:42.841  2087  2087 D ViewRootImpl: Skipping stats log for color mode
+09-13 01:16:42.857  2087  2087 D InsetsController: hide(ime(), fromIme=false)
+09-13 01:16:42.857  2087  2087 I ImeTracker: dev.quietinbox.feature.onboarding.test:73e5c5d4: onCancelled at PHASE_CLIENT_ALREADY_HIDDEN
+09-13 01:16:42.935  2087  2087 D LifecycleMonitor: Lifecycle status change: androidx.test.core.app.InstrumentationActivityInvoker$EmptyActivity@b96ecca in: PAUSED
+09-13 01:16:42.935  2087  2087 V ActivityScenario: Activity lifecycle changed event received but ignored because the intent does not match. startActivityIntent=Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10008000 cmp=dev.quietinbox.feature.onboarding.test/androidx.activity.ComponentActivity }, activity.getIntent()=Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10000000 xflg=0x4 cmp=dev.quietinbox.feature.onboarding.test/androidx.test.core.app.InstrumentationActivityInvoker$EmptyActivity }, activity=androidx.test.core.app.InstrumentationActivityInvoker$EmptyActivity@b96ecca
+09-13 01:16:42.946  1115  1115 D ViewRootImpl: Skipping stats log for color mode
+09-13 01:16:42.949  1115  1115 D StatsLog: LAUNCHER_ONRESUME
+09-13 01:16:42.950  2087  2105 D IdlingRegistry: Unregistering idling resources: [androidx.compose.ui.test.EspressoLink@678cf4c]
+09-13 01:16:42.953  2087  2105 I TestRunner: finished: sourcesStepRendersHonestTierPerChoice(dev.quietinbox.feature.onboarding.SourcesStepSemanticsTest)

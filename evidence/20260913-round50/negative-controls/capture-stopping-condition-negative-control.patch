@@ -1,0 +1,5 @@
+--- a/platform/capture/src/main/kotlin/dev/quietinbox/platform/capture/CaptureCoordinator.kt
++++ b/platform/capture/src/main/kotlin/dev/quietinbox/platform/capture/CaptureCoordinator.kt
+@@ -1295,1 +1295,1 @@ class CaptureCoordinator @Inject constructor(
+-                        progressed = batch.rawAdvanced
++                        progressed = true

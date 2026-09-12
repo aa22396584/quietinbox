@@ -1,0 +1,12 @@
+09-13 01:25:57.407  3783  3799 I TestRunner: started: realCoordinatorAndRoomReplayFailingDeferralExitsBoundedAndPreservesPayloadAndAttempts(dev.quietinbox.platform.storage.JournalLossTransactionTest)
+09-13 01:25:57.446  3783  3803 I SQLiteConnection: Database keying operation returned:0
+09-13 01:25:58.045   705   865 D WifiConfigStore: Writing to stores completed in 32 ms.
+09-13 01:25:58.297   705   871 D InetDiagMessage: Destroyed 0 sockets, proto=IPPROTO_TCP, family=AF_INET, states=14
+09-13 01:25:58.297   705   871 D InetDiagMessage: Destroyed 0 sockets, proto=IPPROTO_TCP, family=AF_INET6, states=14
+09-13 01:25:58.297   705   871 D InetDiagMessage: Destroyed live tcp sockets for uids={10148} in 0ms
+09-13 01:25:58.297   705   871 D InetDiagMessage: Destroyed 0 sockets, proto=IPPROTO_TCP, family=AF_INET, states=14
+09-13 01:25:58.297   705   871 D InetDiagMessage: Destroyed 0 sockets, proto=IPPROTO_TCP, family=AF_INET6, states=14
+09-13 01:25:58.297   705   871 D InetDiagMessage: Destroyed live tcp sockets for uids={20148} in 0ms
+09-13 01:25:58.675 25709 25759 I ActivityScheduler: nextTriggerTime: 218375059, in 238100ms, detectorType: 39, FULL_TYPE alarmWindowMillis: 80000
+09-13 01:25:59.776  3783  3808 I SQLiteConnection: Database keying operation returned:0
+09-13 01:26:01.542  3783  3799 I TestRunner: finished: realCoordinatorAndRoomReplayFailingDeferralExitsBoundedAndPreservesPayloadAndAttempts(dev.quietinbox.platform.storage.JournalLossTransactionTest)

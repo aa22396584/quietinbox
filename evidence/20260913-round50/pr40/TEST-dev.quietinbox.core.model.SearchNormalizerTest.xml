@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="dev.quietinbox.core.model.SearchNormalizerTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-09-12T17:17:24.823Z" hostname="MacBook-Pro-5.local" time="0.059">
+  <properties/>
+  <testcase name="normalises width, case and whitespace but keeps emoji" classname="dev.quietinbox.core.model.SearchNormalizerTest" time="0.012"/>
+  <testcase name="CJK bigrams and Latin trigrams are produced" classname="dev.quietinbox.core.model.SearchNormalizerTest" time="0.002"/>
+  <testcase name="an emoji-only query yields no tokens, which is the limit the empty-search hint states" classname="dev.quietinbox.core.model.SearchNormalizerTest" time="0.002"/>
+  <testcase name="single CJK character is indexed on its own" classname="dev.quietinbox.core.model.SearchNormalizerTest" time="0.006"/>
+  <testcase name="query tokens are always a subset of the index tokens of a matching body" classname="dev.quietinbox.core.model.SearchNormalizerTest" time="0.003"/>
+  <testcase name="BoundedText truncates and flags" classname="dev.quietinbox.core.model.SearchNormalizerTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

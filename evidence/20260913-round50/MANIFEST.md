@@ -23,10 +23,12 @@ All test runs were freshly executed on exact target commit SHAs using the isolat
 ## 2. Commit Identity & Historical Correction
 
 - **PR #40 (`feat/rs04-source-evidence-ui-20260912`)**:
-  - **Current Verified HEAD**: `15591ceb86140e0d0fbd12861f65d0a85ff998a3`
+  - **Current Verified HEAD**: `6607cc90dfdf02a76f2baae346452243d7890989`
+  - **Previous Round HEAD**: `15591ceb86140e0d0fbd12861f65d0a85ff998a3`
   - **Historical Correction Record**:
     The author's report in round 49 cited SHA `57595a38a7c64cf288cb43ee41a4575c3db6f28f`, which did not exist in git history. The actual commit at that point was `57595a3b7363b22f2e46928e50bfa0f6e62b440c` (a transcription error in the 8th hex digit: `8` vs `b`).
-    All artifacts in `pr40/` are freshly produced on `15591ceb86140e0d0fbd12861f65d0a85ff998a3`.
+    Commit `6607cc90dfdf02a76f2baae346452243d7890989` further closes the loophole where `currentCohort == null` bypassed non-blank adapterVersion validation for synthetic evidence, and strengthens contract assertions to `shouldBe UNTESTED`.
+    `core:model` test artifacts are freshly produced on `6607cc90dfdf02a76f2baae346452243d7890989`. UI test artifacts are on `15591ceb86140e0d0fbd12861f65d0a85ff998a3` (core:model changes did not touch UI code).
 - **PR #41 (`feat/issue33-atomic-terminal-gap-20260912`)**:
   - **Current Verified HEAD**: `f279c895e774f41257e900cee0cdd5b336175d4e`
   - **Previous Review Base**: `adca504642d17201bde34718ba470acad8bb8a77`
@@ -40,8 +42,8 @@ All test runs were freshly executed on exact target commit SHAs using the isolat
 
 | File | Source Commit SHA | Test Class / Scope | Command & Return Code | Platform / Target | Tests (Exec/Skip/Fail) | SHA-256 Digest |
 |---|---|---|---|---|---|---|
-| `pr40/TEST-dev.quietinbox.core.model.SourceEvidenceTest.xml` | `15591ceb86140e0d0fbd12861f65d0a85ff998a3` | `dev.quietinbox.core.model.SourceEvidenceTest` | `./gradlew :core:model:test --rerun-tasks` (rc=0) | JVM (macOS / JDK 21) | 22 / 0 / 0 | `6a4b15321335aae407eb532092f197dd6bfa15a492a4423aaa694503cef8caf6` |
-| `pr40/TEST-dev.quietinbox.core.model.SearchNormalizerTest.xml` | `15591ceb86140e0d0fbd12861f65d0a85ff998a3` | `dev.quietinbox.core.model.SearchNormalizerTest` | `./gradlew :core:model:test --rerun-tasks` (rc=0) | JVM (macOS / JDK 21) | 2 / 0 / 0 | `0ba767f1f7674e39933db7c40f3c9b186589f08020d63c67cb7715f460f7876d` |
+| `pr40/TEST-dev.quietinbox.core.model.SourceEvidenceTest.xml` | `6607cc90dfdf02a76f2baae346452243d7890989` | `dev.quietinbox.core.model.SourceEvidenceTest` | `./gradlew :core:model:test --rerun-tasks` (rc=0) | JVM (macOS / JDK 21) | 22 / 0 / 0 | `7bcdb4445cfb63e9fd7d13a499afa7673455370dde2dd232e2a69a80c1a416ae` |
+| `pr40/TEST-dev.quietinbox.core.model.SearchNormalizerTest.xml` | `6607cc90dfdf02a76f2baae346452243d7890989` | `dev.quietinbox.core.model.SearchNormalizerTest` | `./gradlew :core:model:test --rerun-tasks` (rc=0) | JVM (macOS / JDK 21) | 2 / 0 / 0 | `230d6422e5beeea85d5261cdb1dd59595e54a767c33b557eefba3a7e26a06d16` |
 | `pr40/TEST-feature-onboarding-SourcesStepSemanticsTest.xml` | `15591ceb86140e0d0fbd12861f65d0a85ff998a3` | `dev.quietinbox.feature.onboarding.SourcesStepSemanticsTest` | `ANDROID_SERIAL=emulator-5554 ./gradlew :feature:onboarding:connectedDebugAndroidTest` (rc=0) | Android API 36 (`dev.quietinbox.feature.onboarding.test`) | 1 / 0 / 0 | `141e2203edbb8bc2b6495b42149cffb2184cabd623a0b2bc434df7ce8d1f3f4f` |
 | `pr40/logcat-SourcesStepSemanticsTest.txt` | `15591ceb86140e0d0fbd12861f65d0a85ff998a3` | `SourcesStepSemanticsTest.sourcesStepRendersHonestTierPerChoice` | Captured by Android Test Runner (rc=0) | Android API 36 (`emulator-5554`) | N/A (Logcat) | `f08e73a3a03bfce9d0b5f0f82f7ddca91a852805a2347133810dba0c594915c8` |
 | `pr40/TEST-feature-health-SourceVerificationTagSemanticsTest.xml` | `15591ceb86140e0d0fbd12861f65d0a85ff998a3` | `dev.quietinbox.feature.health.SourceVerificationTagSemanticsTest` + `PolicyFailureDialogTest` | `ANDROID_SERIAL=emulator-5554 ./gradlew :feature:health:connectedDebugAndroidTest` (rc=0) | Android API 36 (`dev.quietinbox.feature.health.test`) | 10 / 0 / 0 | `16f5c4d2f8163927e47c4d690bdbd8f7205ccb08fe6181e0d737e888ee0b7d52` |

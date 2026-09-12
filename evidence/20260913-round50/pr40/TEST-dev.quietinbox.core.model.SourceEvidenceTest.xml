@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="dev.quietinbox.core.model.SourceEvidenceTest" tests="22" skipped="0" failures="0" errors="0" timestamp="2026-09-12T17:17:24.883Z" hostname="MacBook-Pro-5.local" time="0.022">
+<testsuite name="dev.quietinbox.core.model.SourceEvidenceTest" tests="22" skipped="0" failures="0" errors="0" timestamp="2026-09-12T17:35:20.007Z" hostname="MacBook-Pro-5.local" time="0.022">
   <properties/>
   <testcase name="five known adapters default to SYNTHETIC_ONLY without real device cohort" classname="dev.quietinbox.core.model.SourceEvidenceTest" time="0.005"/>
-  <testcase name="empty catalog resolves to UNTESTED even if hasAdapter is true" classname="dev.quietinbox.core.model.SourceEvidenceTest" time="0.0"/>
-  <testcase name="hasAdapter true without any catalog evidence resolves to UNTESTED" classname="dev.quietinbox.core.model.SourceEvidenceTest" time="0.001"/>
+  <testcase name="empty catalog resolves to UNTESTED even if hasAdapter is true" classname="dev.quietinbox.core.model.SourceEvidenceTest" time="0.001"/>
+  <testcase name="hasAdapter true without any catalog evidence resolves to UNTESTED" classname="dev.quietinbox.core.model.SourceEvidenceTest" time="0.0"/>
   <testcase name="unknown package without adapter resolves to UNTESTED" classname="dev.quietinbox.core.model.SourceEvidenceTest" time="0.0"/>
-  <testcase name="matching cohort fixture in test resolves to REAL_DEVICE_PASSED" classname="dev.quietinbox.core.model.SourceEvidenceTest" time="0.0"/>
+  <testcase name="matching cohort fixture in test resolves to REAL_DEVICE_PASSED" classname="dev.quietinbox.core.model.SourceEvidenceTest" time="0.001"/>
   <testcase name="switching adapterId does not inherit REAL_DEVICE_PASSED" classname="dev.quietinbox.core.model.SourceEvidenceTest" time="0.0"/>
   <testcase name="evidence cohort missing version or device cannot act as universal wildcard" classname="dev.quietinbox.core.model.SourceEvidenceTest" time="0.0"/>
   <testcase name="evidence cohort missing language cannot act as universal wildcard" classname="dev.quietinbox.core.model.SourceEvidenceTest" time="0.0"/>
@@ -14,13 +14,13 @@
   <testcase name="device model mismatch does not inherit REAL_DEVICE_PASSED" classname="dev.quietinbox.core.model.SourceEvidenceTest" time="0.0"/>
   <testcase name="language mismatch does not inherit REAL_DEVICE_PASSED" classname="dev.quietinbox.core.model.SourceEvidenceTest" time="0.0"/>
   <testcase name="positive control: complete matching cohort resolves to REAL_DEVICE_PASSED" classname="dev.quietinbox.core.model.SourceEvidenceTest" time="0.0"/>
-  <testcase name="evidence missing deviceModel with API retained cannot resolve to REAL_DEVICE_PASSED" classname="dev.quietinbox.core.model.SourceEvidenceTest" time="0.0"/>
+  <testcase name="evidence missing deviceModel with API retained cannot resolve to REAL_DEVICE_PASSED" classname="dev.quietinbox.core.model.SourceEvidenceTest" time="0.001"/>
   <testcase name="evidence missing osApiLevel with model retained cannot resolve to REAL_DEVICE_PASSED" classname="dev.quietinbox.core.model.SourceEvidenceTest" time="0.0"/>
-  <testcase name="evidence missing adapterVersion cannot resolve to REAL_DEVICE_PASSED" classname="dev.quietinbox.core.model.SourceEvidenceTest" time="0.0"/>
+  <testcase name="evidence missing adapterVersion cannot resolve to REAL_DEVICE_PASSED" classname="dev.quietinbox.core.model.SourceEvidenceTest" time="0.001"/>
   <testcase name="evidence missing OEM cannot resolve to REAL_DEVICE_PASSED" classname="dev.quietinbox.core.model.SourceEvidenceTest" time="0.0"/>
-  <testcase name="evidence and current adapterId both blank cannot resolve to REAL_DEVICE_PASSED" classname="dev.quietinbox.core.model.SourceEvidenceTest" time="0.0"/>
-  <testcase name="catalog with only parser v1 synthetic evidence cannot be inherited by current parser v2" classname="dev.quietinbox.core.model.SourceEvidenceTest" time="0.001"/>
-  <testcase name="catalog with unversioned synthetic evidence cannot be inherited by current versioned parser v2" classname="dev.quietinbox.core.model.SourceEvidenceTest" time="0.0"/>
+  <testcase name="evidence and current adapterId both blank cannot resolve to REAL_DEVICE_PASSED" classname="dev.quietinbox.core.model.SourceEvidenceTest" time="0.001"/>
+  <testcase name="catalog with only parser v1 synthetic evidence cannot be inherited by current parser v2" classname="dev.quietinbox.core.model.SourceEvidenceTest" time="0.0"/>
+  <testcase name="catalog with unversioned synthetic evidence cannot be inherited by current versioned parser v2" classname="dev.quietinbox.core.model.SourceEvidenceTest" time="0.001"/>
   <testcase name="synthetic evidence with missing or blank adapterVersion in both evidence and current resolves to UNTESTED" classname="dev.quietinbox.core.model.SourceEvidenceTest" time="0.0"/>
   <testcase name="synthetic positive control: identical explicit parser and version resolves to SYNTHETIC_ONLY across devices" classname="dev.quietinbox.core.model.SourceEvidenceTest" time="0.0"/>
   <system-out><![CDATA[]]></system-out>

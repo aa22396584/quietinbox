@@ -89,7 +89,23 @@ class CompatibilityDocumentationContractTest(unittest.TestCase):
         )
         self.assertNotIn("from two test members", markdown_row(english, "T016").lower())
         self.assertIn(
+            "two distinct synthetic conversations",
+            markdown_row(english, "T016").lower(),
+        )
+        self.assertIn(
+            "active simultaneously",
+            markdown_row(english, "T016").lower(),
+        )
+        self.assertIn(
             "其他知情同意的合成測試帳號",
+            markdown_row(read("docs/zh-Hant/TEST_MATRIX.md"), "T016"),
+        )
+        self.assertIn(
+            "兩個不同的合成對話",
+            markdown_row(read("docs/zh-Hant/TEST_MATRIX.md"), "T016"),
+        )
+        self.assertIn(
+            "同時保持作用中",
             markdown_row(read("docs/zh-Hant/TEST_MATRIX.md"), "T016"),
         )
 

@@ -351,6 +351,135 @@ class TestCheckInstrumentedCLI(unittest.TestCase):
             self.assertEqual(p.returncode, 0, f"UTF-8 BOM XML must pass. Got {p.returncode}. Stderr: {p.stderr}")
             self.assertIn("OK: ", p.stdout)
 
+    # --- Regression Probes from PR #39 Review: result-bearing structures & skip aliases ---
+
+    def test_29_aggregate_testsuites_direct_error_fails(self):
+        """Direct <error> child on <testsuites> must fail."""
+        xml = (
+            '<testsuites tests="1" errors="0" failures="0">\n'
+            '  <testsuite tests="1" failures="0" errors="0" skipped="0"><testcase name="ok" classname="synthetic"/></testsuite>\n'
+            '  <error message="synthetic setup failed"/>\n'
+            '</testsuites>\n'
+        )
+        with tempfile.TemporaryDirectory(prefix="qi-test-") as tmp:
+            mod = self._create_module_with_xml(pathlib.Path(tmp), "mod0", xml)
+            p = self._run_cli(str(mod))
+            self.assertNotEqual(p.returncode, 0, "Direct <error> under <testsuites> must exit non-zero")
+            self.assertIn("FAIL: ", p.stderr)
+
+    def test_30_aggregate_testsuite_direct_error_fails(self):
+        """Direct <error> child on aggregate <testsuite> must fail."""
+        xml = (
+            '<testsuite tests="1" errors="0" failures="0">\n'
+            '  <testsuite tests="1" failures="0" errors="0" skipped="0"><testcase name="ok" classname="synthetic"/></testsuite>\n'
+            '  <error message="synthetic teardown failed"/>\n'
+            '</testsuite>\n'
+        )
+        with tempfile.TemporaryDirectory(prefix="qi-test-") as tmp:
+            mod = self._create_module_with_xml(pathlib.Path(tmp), "mod0", xml)
+            p = self._run_cli(str(mod))
+            self.assertNotEqual(p.returncode, 0, "Direct <error> under aggregate <testsuite> must exit non-zero")
+            self.assertIn("FAIL: ", p.stderr)
+
+    def test_31_hidden_failed_suite_in_unrecognized_wrapper_fails(self):
+        """Failed testsuite inside unrecognized wrapper under aggregate root must fail."""
+        xml = (
+            '<testsuites>\n'
+            '  <testsuite tests="1" failures="0" errors="0" skipped="0"><testcase name="ok" classname="synthetic"/></testsuite>\n'
+            '  <unrecognized>\n'
+            '    <testsuite tests="1" failures="1" errors="0"><testcase name="bad"><failure message="synthetic"/></testcase></testsuite>\n'
+            '  </unrecognized>\n'
+            '</testsuites>\n'
+        )
+        with tempfile.TemporaryDirectory(prefix="qi-test-") as tmp:
+            mod = self._create_module_with_xml(pathlib.Path(tmp), "mod0", xml)
+            p = self._run_cli(str(mod))
+            self.assertNotEqual(p.returncode, 0, "Unrecognized wrapper with failing suite must exit non-zero")
+            self.assertIn("FAIL: ", p.stderr)
+
+    def test_32_wrapped_testcase_failure_fails(self):
+        """Failure inside unrecognized wrapper under testcase must fail."""
+        xml = (
+            '<testsuite tests="1" failures="0" errors="0">\n'
+            '  <testcase name="bad">\n'
+            '    <unrecognized><failure message="synthetic"/></unrecognized>\n'
+            '  </testcase>\n'
+            '</testsuite>\n'
+        )
+        with tempfile.TemporaryDirectory(prefix="qi-test-") as tmp:
+            mod = self._create_module_with_xml(pathlib.Path(tmp), "mod0", xml)
+            p = self._run_cli(str(mod))
+            self.assertNotEqual(p.returncode, 0, "Wrapped failure inside testcase must exit non-zero")
+            self.assertIn("FAIL: ", p.stderr)
+
+    def test_33_leaf_suite_direct_skipped_fails(self):
+        """Direct <skipped/> child on leaf testsuite must fail."""
+        xml = (
+            '<testsuite tests="1" failures="0" errors="0" skipped="0">\n'
+            '  <testcase name="ok" classname="synthetic"/>\n'
+            '  <skipped/>\n'
+            '</testsuite>\n'
+        )
+        with tempfile.TemporaryDirectory(prefix="qi-test-") as tmp:
+            mod = self._create_module_with_xml(pathlib.Path(tmp), "mod0", xml)
+            p = self._run_cli(str(mod))
+            self.assertNotEqual(p.returncode, 0, "Direct <skipped> in leaf suite must exit non-zero")
+            self.assertIn("FAIL: ", p.stderr)
+
+    def test_34_conflicting_skip_aliases_in_leaf_fails(self):
+        """Conflicting skipped='0' and skips='1' on leaf testsuite must fail."""
+        xml = (
+            '<testsuite tests="1" failures="0" errors="0" skipped="0" skips="1">\n'
+            '  <testcase name="ok" classname="synthetic"/>\n'
+            '</testsuite>\n'
+        )
+        with tempfile.TemporaryDirectory(prefix="qi-test-") as tmp:
+            mod = self._create_module_with_xml(pathlib.Path(tmp), "mod0", xml)
+            p = self._run_cli(str(mod))
+            self.assertNotEqual(p.returncode, 0, "Conflicting skipped/skips attributes must exit non-zero")
+            self.assertIn("FAIL: ", p.stderr)
+
+    def test_35_conflicting_skip_aliases_in_aggregate_testsuites_fails(self):
+        """Conflicting skipped='0' and skips='1' on aggregate root must fail."""
+        xml = (
+            '<testsuites tests="1" failures="0" errors="0" skipped="0" skips="1">\n'
+            '  <testsuite tests="1" failures="0" errors="0" skipped="0"><testcase name="ok" classname="synthetic"/></testsuite>\n'
+            '</testsuites>\n'
+        )
+        with tempfile.TemporaryDirectory(prefix="qi-test-") as tmp:
+            mod = self._create_module_with_xml(pathlib.Path(tmp), "mod0", xml)
+            p = self._run_cli(str(mod))
+            self.assertNotEqual(p.returncode, 0, "Conflicting skipped/skips on <testsuites> must exit non-zero")
+            self.assertIn("FAIL: ", p.stderr)
+
+    def test_36_matching_skip_aliases_passes_if_zero(self):
+        """Matching skipped='0' and skips='0' must pass when tests pass."""
+        xml = (
+            '<testsuite tests="1" failures="0" errors="0" skipped="0" skips="0">\n'
+            '  <testcase name="ok" classname="synthetic"/>\n'
+            '</testsuite>\n'
+        )
+        with tempfile.TemporaryDirectory(prefix="qi-test-") as tmp:
+            mod = self._create_module_with_xml(pathlib.Path(tmp), "mod0", xml)
+            p = self._run_cli(str(mod))
+            self.assertEqual(p.returncode, 0, f"Matching skip aliases must pass. Got {p.returncode}. Stderr: {p.stderr}")
+            self.assertIn("OK: ", p.stdout)
+
+    def test_37_failure_word_in_log_or_cdata_passes(self):
+        """<system-out> containing '<failure/>' in CDATA or text must NOT be treated as failure."""
+        xml = (
+            '<testsuite tests="1" failures="0" errors="0" skipped="0">\n'
+            '  <testcase name="ok" classname="synthetic"/>\n'
+            '  <system-out><![CDATA[synthetic text <failure/> is not a result node]]></system-out>\n'
+            '</testsuite>\n'
+        )
+        with tempfile.TemporaryDirectory(prefix="qi-test-") as tmp:
+            mod = self._create_module_with_xml(pathlib.Path(tmp), "mod0", xml)
+            p = self._run_cli(str(mod))
+            self.assertEqual(p.returncode, 0, f"Word failure in log CDATA must pass. Got {p.returncode}. Stderr: {p.stderr}")
+            self.assertIn("OK: ", p.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -58,11 +58,35 @@ def _parse_int_attr(elem: ET.Element, attr_name: str, file_path: pathlib.Path, d
         raise ValueError(f"Invalid integer attribute '{attr_name}=\"{val_str}\"' in {file_path}: {exc}") from exc
 
 
+def _parse_skipped_attr(elem: ET.Element, file_path: pathlib.Path) -> int | None:
+    skipped = _parse_int_attr(elem, "skipped", file_path, default=None)
+    skips = _parse_int_attr(elem, "skips", file_path, default=None)
+    if skipped is not None and skips is not None:
+        if skipped != skips:
+            raise ValueError(
+                f"Contradictory skip attributes: skipped={skipped} and skips={skips} in {file_path}"
+            )
+        return skipped
+    if skipped is not None:
+        return skipped
+    return skips
+
+
+_ALLOWED_METADATA_TAGS = {"properties", "system-out", "system-err"}
+_ALLOWED_RESULT_TAGS = {"failure", "error", "skipped", "ignored"}
+_ALLOWED_TESTCASE_TAGS = _ALLOWED_METADATA_TAGS | _ALLOWED_RESULT_TAGS
+
+
 def _validate_leaf_suite(suite_elem: ET.Element, file_path: pathlib.Path) -> SuiteCounts:
     """Validate a leaf testsuite element and its testcase children."""
     child_suites = [c for c in suite_elem if _is_tag(c, "testsuite")]
     if child_suites:
         raise ValueError(f"Unexpected nested <testsuite> inside leaf suite in {file_path}")
+
+    for c in suite_elem:
+        tag = _local_name(c.tag).lower()
+        if tag not in ("testcase", *_ALLOWED_METADATA_TAGS, *_ALLOWED_RESULT_TAGS):
+            raise ValueError(f"Unsupported element <{_local_name(c.tag)}> in <testsuite> in {file_path}")
 
     direct_testcases = [c for c in suite_elem if _is_tag(c, "testcase")]
     all_testcases = [e for e in suite_elem.iter() if _is_tag(e, "testcase")]
@@ -76,16 +100,22 @@ def _validate_leaf_suite(suite_elem: ET.Element, file_path: pathlib.Path) -> Sui
     # Check for suite-level failure or error tags (e.g. class setup failures)
     suite_level_failures = sum(1 for c in suite_elem if _is_tag(c, "failure"))
     suite_level_errors = sum(1 for c in suite_elem if _is_tag(c, "error"))
+    suite_level_skipped = sum(1 for c in suite_elem if _local_name(c.tag).lower() in ("skipped", "ignored"))
 
     actual_failures = suite_level_failures
     actual_errors = suite_level_errors
-    actual_skipped = 0
+    actual_skipped = suite_level_skipped
     actual_passed = 0
 
     for tc in direct_testcases:
-        has_failure = any(_is_tag(c, "failure") for c in tc)
-        has_error = any(_is_tag(c, "error") for c in tc)
-        has_skipped = any(_local_name(c.tag).lower() in ("skipped", "ignored") for c in tc)
+        for c in tc:
+            tag = _local_name(c.tag).lower()
+            if tag not in _ALLOWED_TESTCASE_TAGS:
+                raise ValueError(f"Unsupported element <{_local_name(c.tag)}> inside <testcase> in {file_path}")
+
+        has_failure = any(_is_tag(e, "failure") for e in tc.iter())
+        has_error = any(_is_tag(e, "error") for e in tc.iter())
+        has_skipped = any(_local_name(e.tag).lower() in ("skipped", "ignored") for e in tc.iter())
 
         # Also inspect testcase status / result attributes if present
         tc_status = (tc.get("status") or "").lower()
@@ -134,10 +164,7 @@ def _validate_leaf_suite(suite_elem: ET.Element, file_path: pathlib.Path) -> Sui
         if actual_errors > 0:
             raise ValueError(f"<testsuite> has {actual_errors} error children without 'errors' attribute in {file_path}")
 
-    declared_skipped = _parse_int_attr(suite_elem, "skipped", file_path, default=None)
-    if declared_skipped is None:
-        declared_skipped = _parse_int_attr(suite_elem, "skips", file_path, default=None)
-
+    declared_skipped = _parse_skipped_attr(suite_elem, file_path)
     if declared_skipped is not None:
         if declared_skipped != actual_skipped:
             raise ValueError(
@@ -174,10 +201,19 @@ def _validate_xml_report(file_path: pathlib.Path) -> SuiteCounts:
     leaf_counts: list[SuiteCounts] = []
 
     if _is_tag(root, "testsuites"):
+        for c in root:
+            tag = _local_name(c.tag).lower()
+            if tag not in ("testsuite", *_ALLOWED_METADATA_TAGS, *_ALLOWED_RESULT_TAGS):
+                raise ValueError(f"Unsupported element <{_local_name(c.tag)}> under <testsuites> in {file_path}")
+
         child_suites = [c for c in root if _is_tag(c, "testsuite")]
         direct_testcases = [c for c in root if _is_tag(c, "testcase")]
         if direct_testcases:
             raise ValueError(f"Unexpected direct <testcase> children under <testsuites> in {file_path}")
+
+        all_suites = [e for e in root.iter() if _is_tag(e, "testsuite")]
+        if len(child_suites) != len(all_suites):
+            raise ValueError(f"Unsupported nested or wrapped <testsuite> hierarchy in {file_path}")
 
         if not child_suites:
             raise ValueError(f"<testsuites> contains zero <testsuite> children in {file_path}")
@@ -188,10 +224,19 @@ def _validate_xml_report(file_path: pathlib.Path) -> SuiteCounts:
                 raise ValueError(f"Deeply nested <testsuite> inside <testsuite> in {file_path}")
             leaf_counts.append(_validate_leaf_suite(child, file_path))
 
+        all_testcases = [e for e in root.iter() if _is_tag(e, "testcase")]
+        sum_leaf_testcases = sum(c.tests for c in leaf_counts)
+        if len(all_testcases) != sum_leaf_testcases:
+            raise ValueError(f"Unsupported wrapped <testcase> hierarchy under <testsuites> in {file_path}")
+
+        root_failures = sum(1 for c in root if _is_tag(c, "failure"))
+        root_errors = sum(1 for c in root if _is_tag(c, "error"))
+        root_skipped = sum(1 for c in root if _local_name(c.tag).lower() in ("skipped", "ignored"))
+
         sum_tests = sum(c.tests for c in leaf_counts)
-        sum_failures = sum(c.failures for c in leaf_counts)
-        sum_errors = sum(c.errors for c in leaf_counts)
-        sum_skipped = sum(c.skipped for c in leaf_counts)
+        sum_failures = sum(c.failures for c in leaf_counts) + root_failures
+        sum_errors = sum(c.errors for c in leaf_counts) + root_errors
+        sum_skipped = sum(c.skipped for c in leaf_counts) + root_skipped
 
         if sum_tests == 0:
             raise ValueError(f"<testsuites> ran zero tests in {file_path}")
@@ -208,25 +253,42 @@ def _validate_xml_report(file_path: pathlib.Path) -> SuiteCounts:
         if decl_errors is not None and decl_errors != sum_errors:
             raise ValueError(f"<testsuites> declared errors={decl_errors} but child suites sum to {sum_errors} in {file_path}")
 
-        decl_skipped = _parse_int_attr(root, "skipped", file_path, default=None)
-        if decl_skipped is None:
-            decl_skipped = _parse_int_attr(root, "skips", file_path, default=None)
+        decl_skipped = _parse_skipped_attr(root, file_path)
         if decl_skipped is not None and decl_skipped != sum_skipped:
             raise ValueError(f"<testsuites> declared skipped={decl_skipped} but child suites sum to {sum_skipped} in {file_path}")
 
     elif _is_tag(root, "testsuite"):
         child_suites = [c for c in root if _is_tag(c, "testsuite")]
         if child_suites:
+            for c in root:
+                tag = _local_name(c.tag).lower()
+                if tag not in ("testsuite", *_ALLOWED_METADATA_TAGS, *_ALLOWED_RESULT_TAGS):
+                    raise ValueError(f"Unsupported element <{_local_name(c.tag)}> under aggregate <testsuite> in {file_path}")
+
             direct_testcases = [c for c in root if _is_tag(c, "testcase")]
             if direct_testcases:
                 raise ValueError(f"Mixed <testsuite> and <testcase> children under root in {file_path}")
+
+            all_suites = [e for e in root.iter() if _is_tag(e, "testsuite") and e is not root]
+            if len(child_suites) != len(all_suites):
+                raise ValueError(f"Unsupported nested or wrapped <testsuite> hierarchy in {file_path}")
+
             for child in child_suites:
                 leaf_counts.append(_validate_leaf_suite(child, file_path))
 
+            all_testcases = [e for e in root.iter() if _is_tag(e, "testcase")]
+            sum_leaf_testcases = sum(c.tests for c in leaf_counts)
+            if len(all_testcases) != sum_leaf_testcases:
+                raise ValueError(f"Unsupported wrapped <testcase> hierarchy under aggregate <testsuite> in {file_path}")
+
+            root_failures = sum(1 for c in root if _is_tag(c, "failure"))
+            root_errors = sum(1 for c in root if _is_tag(c, "error"))
+            root_skipped = sum(1 for c in root if _local_name(c.tag).lower() in ("skipped", "ignored"))
+
             sum_tests = sum(c.tests for c in leaf_counts)
-            sum_failures = sum(c.failures for c in leaf_counts)
-            sum_errors = sum(c.errors for c in leaf_counts)
-            sum_skipped = sum(c.skipped for c in leaf_counts)
+            sum_failures = sum(c.failures for c in leaf_counts) + root_failures
+            sum_errors = sum(c.errors for c in leaf_counts) + root_errors
+            sum_skipped = sum(c.skipped for c in leaf_counts) + root_skipped
 
             if sum_tests == 0:
                 raise ValueError(f"Root <testsuite> ran zero tests in {file_path}")
@@ -243,9 +305,7 @@ def _validate_xml_report(file_path: pathlib.Path) -> SuiteCounts:
             if decl_errors is not None and decl_errors != sum_errors:
                 raise ValueError(f"Root <testsuite> declared errors={decl_errors} but child suites sum to {sum_errors} in {file_path}")
 
-            decl_skipped = _parse_int_attr(root, "skipped", file_path, default=None)
-            if decl_skipped is None:
-                decl_skipped = _parse_int_attr(root, "skips", file_path, default=None)
+            decl_skipped = _parse_skipped_attr(root, file_path)
             if decl_skipped is not None and decl_skipped != sum_skipped:
                 raise ValueError(f"Root <testsuite> declared skipped={decl_skipped} but child suites sum to {sum_skipped} in {file_path}")
         else:
@@ -257,12 +317,28 @@ def _validate_xml_report(file_path: pathlib.Path) -> SuiteCounts:
     if total_tests == 0:
         raise ValueError(f"Report contains zero executed tests in {file_path}")
 
+    final_failures = sum(c.failures for c in leaf_counts) + (root_failures if "root_failures" in locals() else 0)
+    final_errors = sum(c.errors for c in leaf_counts) + (root_errors if "root_errors" in locals() else 0)
+    final_skipped = sum(c.skipped for c in leaf_counts) + (root_skipped if "root_skipped" in locals() else 0)
+    final_passed = sum(c.passed for c in leaf_counts)
+
+    doc_failures = sum(1 for e in root.iter() if _is_tag(e, "failure"))
+    doc_errors = sum(1 for e in root.iter() if _is_tag(e, "error"))
+    doc_skipped = sum(1 for e in root.iter() if _local_name(e.tag).lower() in ("skipped", "ignored"))
+
+    if doc_failures > final_failures:
+        raise ValueError(f"Unaccounted <failure> nodes ({doc_failures} > {final_failures}) in {file_path}")
+    if doc_errors > final_errors:
+        raise ValueError(f"Unaccounted <error> nodes ({doc_errors} > {final_errors}) in {file_path}")
+    if doc_skipped > final_skipped:
+        raise ValueError(f"Unaccounted <skipped> nodes ({doc_skipped} > {final_skipped}) in {file_path}")
+
     return SuiteCounts(
         tests=total_tests,
-        failures=sum(c.failures for c in leaf_counts),
-        errors=sum(c.errors for c in leaf_counts),
-        skipped=sum(c.skipped for c in leaf_counts),
-        passed=sum(c.passed for c in leaf_counts),
+        failures=final_failures,
+        errors=final_errors,
+        skipped=final_skipped,
+        passed=final_passed,
     )
 
 

@@ -177,7 +177,9 @@ class SourceEvidenceTest : FunSpec({
                 packageName = "com.test.messaging",
                 sourceVersionCode = 100L,
                 adapterId = "test",
+                adapterVersion = "1.0.0",
                 osApiLevel = 36,
+                oem = "Samsung",
                 deviceModel = "SM-S9280",
                 language = "en",
             ),
@@ -186,7 +188,7 @@ class SourceEvidenceTest : FunSpec({
         val syntheticRecord = SourceEvidenceRecord(
             packageName = "com.test.messaging",
             tier = SourceVerificationTier.SYNTHETIC_ONLY,
-            cohort = SourceCohort(packageName = "com.test.messaging", adapterId = "test"),
+            cohort = SourceCohort(packageName = "com.test.messaging", adapterId = "test", adapterVersion = "1.0.0"),
             evidenceSummary = "Synthetic tests passed",
         )
         val customCatalog = listOf(verifiedRecord, syntheticRecord)
@@ -195,7 +197,9 @@ class SourceEvidenceTest : FunSpec({
             packageName = "com.test.messaging",
             sourceVersionCode = 101L,
             adapterId = "test",
+            adapterVersion = "1.0.0",
             osApiLevel = 36,
+            oem = "Samsung",
             deviceModel = "SM-S9280",
             language = "en",
         )
@@ -217,7 +221,9 @@ class SourceEvidenceTest : FunSpec({
                 packageName = "com.test.messaging",
                 sourceVersionCode = 100L,
                 adapterId = "test",
+                adapterVersion = "1.0.0",
                 osApiLevel = 34,
+                oem = "Samsung",
                 deviceModel = "SM-S9280",
                 language = "en",
             ),
@@ -226,7 +232,7 @@ class SourceEvidenceTest : FunSpec({
         val syntheticRecord = SourceEvidenceRecord(
             packageName = "com.test.messaging",
             tier = SourceVerificationTier.SYNTHETIC_ONLY,
-            cohort = SourceCohort(packageName = "com.test.messaging", adapterId = "test"),
+            cohort = SourceCohort(packageName = "com.test.messaging", adapterId = "test", adapterVersion = "1.0.0"),
             evidenceSummary = "Synthetic tests passed",
         )
         val customCatalog = listOf(verifiedRecord, syntheticRecord)
@@ -235,7 +241,9 @@ class SourceEvidenceTest : FunSpec({
             packageName = "com.test.messaging",
             sourceVersionCode = 100L,
             adapterId = "test",
+            adapterVersion = "1.0.0",
             osApiLevel = 36,
+            oem = "Samsung",
             deviceModel = "SM-S9280",
             language = "en",
         )
@@ -257,7 +265,9 @@ class SourceEvidenceTest : FunSpec({
                 packageName = "com.test.messaging",
                 sourceVersionCode = 100L,
                 adapterId = "test",
+                adapterVersion = "1.0.0",
                 osApiLevel = 36,
+                oem = "Samsung",
                 deviceModel = "Pixel 8",
                 language = "en",
             ),
@@ -266,7 +276,7 @@ class SourceEvidenceTest : FunSpec({
         val syntheticRecord = SourceEvidenceRecord(
             packageName = "com.test.messaging",
             tier = SourceVerificationTier.SYNTHETIC_ONLY,
-            cohort = SourceCohort(packageName = "com.test.messaging", adapterId = "test"),
+            cohort = SourceCohort(packageName = "com.test.messaging", adapterId = "test", adapterVersion = "1.0.0"),
             evidenceSummary = "Synthetic tests passed",
         )
         val customCatalog = listOf(verifiedRecord, syntheticRecord)
@@ -275,7 +285,9 @@ class SourceEvidenceTest : FunSpec({
             packageName = "com.test.messaging",
             sourceVersionCode = 100L,
             adapterId = "test",
+            adapterVersion = "1.0.0",
             osApiLevel = 36,
+            oem = "Samsung",
             deviceModel = "SM-S9280",
             language = "en",
         )
@@ -297,7 +309,9 @@ class SourceEvidenceTest : FunSpec({
                 packageName = "com.test.messaging",
                 sourceVersionCode = 100L,
                 adapterId = "test",
+                adapterVersion = "1.0.0",
                 osApiLevel = 36,
+                oem = "Samsung",
                 deviceModel = "SM-S9280",
                 language = "en",
             ),
@@ -306,7 +320,7 @@ class SourceEvidenceTest : FunSpec({
         val syntheticRecord = SourceEvidenceRecord(
             packageName = "com.test.messaging",
             tier = SourceVerificationTier.SYNTHETIC_ONLY,
-            cohort = SourceCohort(packageName = "com.test.messaging", adapterId = "test"),
+            cohort = SourceCohort(packageName = "com.test.messaging", adapterId = "test", adapterVersion = "1.0.0"),
             evidenceSummary = "Synthetic tests passed",
         )
         val customCatalog = listOf(verifiedRecord, syntheticRecord)
@@ -315,7 +329,9 @@ class SourceEvidenceTest : FunSpec({
             packageName = "com.test.messaging",
             sourceVersionCode = 100L,
             adapterId = "test",
+            adapterVersion = "1.0.0",
             osApiLevel = 36,
+            oem = "Samsung",
             deviceModel = "SM-S9280",
             language = "ja",
         )
@@ -400,5 +416,46 @@ class SourceEvidenceTest : FunSpec({
             current = reviewFull.copy(adapterVersion = "2.0"),
             tier = SourceVerificationTier.SYNTHETIC_ONLY,
         ) shouldBe SourceVerificationTier.UNTESTED
+    }
+
+    test("synthetic evidence with missing or blank adapterVersion in both evidence and current resolves to UNTESTED") {
+        val pkg = "synthetic.review.messaging"
+        for (version in listOf<String?>(null, "", " ")) {
+            val cohort = SourceCohort(pkg, adapterId = "synthetic-parser", adapterVersion = version)
+            val record = SourceEvidenceRecord(
+                packageName = pkg,
+                tier = SourceVerificationTier.SYNTHETIC_ONLY,
+                cohort = cohort,
+                evidenceSummary = "synthetic-only test fixture",
+            )
+            SourceEvidenceResolver.resolveTier(pkg, true, cohort, listOf(record)) shouldBe
+                SourceVerificationTier.UNTESTED
+        }
+    }
+
+    test("synthetic positive control: identical explicit parser and version resolves to SYNTHETIC_ONLY across devices") {
+        val pkg = "synthetic.review.messaging"
+        val evidenceCohort = SourceCohort(
+            packageName = pkg,
+            adapterId = "synthetic-parser",
+            adapterVersion = "1.0.0",
+            osApiLevel = 34,
+            deviceModel = "Pixel 8",
+        )
+        val currentCohort = SourceCohort(
+            packageName = pkg,
+            adapterId = "synthetic-parser",
+            adapterVersion = "1.0.0",
+            osApiLevel = 36,
+            deviceModel = "SM-S9280",
+        )
+        val record = SourceEvidenceRecord(
+            packageName = pkg,
+            tier = SourceVerificationTier.SYNTHETIC_ONLY,
+            cohort = evidenceCohort,
+            evidenceSummary = "synthetic unit test",
+        )
+        SourceEvidenceResolver.resolveTier(pkg, true, currentCohort, listOf(record)) shouldBe
+            SourceVerificationTier.SYNTHETIC_ONLY
     }
 })

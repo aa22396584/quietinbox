@@ -454,8 +454,16 @@ interface ConversationDao {
     suspend fun count(): Int
 }
 
+/** Shared with the query-plan regression: explain the statement Room actually executes. */
+internal const val NEXT_EXPIRY_AFTER =
+    "SELECT MIN(expiresAtEpochMs) FROM message WHERE expiresAtEpochMs > :after"
+
 @Dao
 interface MessageDao {
+    /** Uses the existing expiry index; invalidation also reschedules newly inserted/retimed rows. */
+    @Query(NEXT_EXPIRY_AFTER)
+    fun observeNextExpiryAfter(after: Long): Flow<Long?>
+
     /**
      * Expired rows are hidden here, not only deleted by retention later (QI-DATA-007). [now] is
      * fixed when the flow is collected; a screen that stays open across an expiry boundary shows

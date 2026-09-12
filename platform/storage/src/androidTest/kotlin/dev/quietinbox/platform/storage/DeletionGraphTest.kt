@@ -16,6 +16,7 @@ import dev.quietinbox.platform.crypto.KeyMaterial
 import dev.quietinbox.platform.crypto.KeyResult
 import dev.quietinbox.platform.storage.db.DatabaseHolder
 import dev.quietinbox.platform.storage.db.MediaBlobEntity
+import dev.quietinbox.platform.storage.db.NEXT_EXPIRY_AFTER
 import dev.quietinbox.platform.storage.db.VaultMaintenance
 import dev.quietinbox.platform.storage.db.VaultState
 import dev.quietinbox.platform.storage.repo.AnalyticsRepository
@@ -44,6 +45,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * What "delete" and "expire" must mean on a real SQLCipher vault (QI-DATA-004, QI-DATA-007,
@@ -379,6 +381,50 @@ class DeletionGraphTest {
         again.first shouldBe listOf("keep me")
         again.second shouldBe "keep me"
         inbox.observeConversation(conversationId).first()!!.lastMessagePreview shouldBe "keep me"
+        Unit
+    }
+
+    @Test
+    fun automaticClockChecksHideExpiredCopiesAndHandleBackwardTime() = runBlocking {
+        ready()
+        val t0 = System.currentTimeMillis()
+        val clock = AtomicLong(t0)
+        inbox.nowMs = { clock.get() }
+        inbox.visibilityTickMs = 10L
+        val keep = commit(bigText("Alice", "keep me", "auto1", "t1", observedAt = t0))
+        val conversationId = keep.conversationId!!
+        commit(bigText("Bob", "EXPIRED_PRIVATE_TEXT", "auto2", "t1", observedAt = t0 + 1), retentionMs = 5_000)
+        var seen: Pair<List<String>, String?>? = null
+        val job = launch { combineInbox(conversationId).collect { seen = it } }
+        try {
+            withTimeout(5_000) {
+                while (seen?.second != "EXPIRED_PRIVATE_TEXT") delay(10)
+            }
+            clock.set(t0 + 10_000) // No write and no explicit tick.
+            withTimeout(5_000) {
+                while (seen?.first != listOf("keep me") || seen?.second != "keep me") delay(10)
+            }
+            clock.set(t0)
+            withTimeout(5_000) {
+                while (seen?.first?.contains("EXPIRED_PRIVATE_TEXT") != true || seen?.second != "EXPIRED_PRIVATE_TEXT") delay(10)
+            }
+        } finally {
+            job.cancel()
+        }
+        Unit
+    }
+
+    @Test
+    fun nextExpirySeeksTheExistingExpiryIndex() = runBlocking {
+        ready()
+        val sql = "EXPLAIN QUERY PLAN " + NEXT_EXPIRY_AFTER.replace(":after", "?")
+        val plan = holder.db().openHelper.writableDatabase.query(sql, arrayOf<Any>(1_000L)).use { c ->
+            buildString { while (c.moveToNext()) appendLine(c.getString(c.columnCount - 1)) }
+        }
+        plan.contains("index_message_expiresAtEpochMs") shouldBe true
+        plan.contains("expiresAtEpochMs>?") shouldBe true
+        plan.contains("SCAN message") shouldBe false
+        plan.contains("TEMP B-TREE") shouldBe false
         Unit
     }
 

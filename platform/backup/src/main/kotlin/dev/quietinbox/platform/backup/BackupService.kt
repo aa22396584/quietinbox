@@ -332,15 +332,23 @@ class BackupService @Inject constructor(
                 }
             } catch (e: BackupAborted) {
                 if (!result.isCompleted) result.complete(BackupResult.Failed(BackupResult.Reason.EXPORT_ABORTED))
-            } catch (e: Throwable) {
+            } catch (e: CancellationException) {
                 if (!result.isCompleted) {
                     val aborted = !exportOpActive(op)
-                    when {
-                        e is CancellationException && aborted -> result.complete(BackupResult.Failed(BackupResult.Reason.EXPORT_ABORTED))
-                        e is CancellationException -> result.completeExceptionally(e)
-                        aborted -> result.complete(BackupResult.Failed(BackupResult.Reason.EXPORT_ABORTED))
-                        else -> result.complete(BackupResult.Failed(BackupResult.Reason.IO, e::class.java.simpleName))
-                    }
+                    if (aborted) result.complete(BackupResult.Failed(BackupResult.Reason.EXPORT_ABORTED))
+                    else result.completeExceptionally(e)
+                }
+            } catch (e: Exception) {
+                if (!result.isCompleted) {
+                    val aborted = !exportOpActive(op)
+                    if (aborted) result.complete(BackupResult.Failed(BackupResult.Reason.EXPORT_ABORTED))
+                    else result.complete(BackupResult.Failed(BackupResult.Reason.IO, e::class.java.simpleName))
+                }
+            } catch (e: Throwable) {
+                if (!result.isCompleted) {
+                    val published = op.settled.get()
+                    if (published != null) result.complete(published)
+                    else result.completeExceptionally(e)
                 }
             } finally {
                 if (!closed) {
@@ -559,13 +567,18 @@ class BackupService @Inject constructor(
                     }
                     if (r is BackupResult.Ok) op.settled.compareAndSet(null, r)
                     done.complete(r)
+                } catch (e: CancellationException) {
+                    val published = op.settled.get()
+                    if (published != null) done.complete(published)
+                    else done.complete(BackupResult.Failed(BackupResult.Reason.ABORTED))
+                } catch (e: Exception) {
+                    val published = op.settled.get()
+                    if (published != null) done.complete(published)
+                    else done.complete(BackupResult.Failed(BackupResult.Reason.IO, e::class.java.simpleName))
                 } catch (e: Throwable) {
                     val published = op.settled.get()
                     if (published != null) done.complete(published)
-                    else done.complete(
-                        if (e is CancellationException) BackupResult.Failed(BackupResult.Reason.ABORTED)
-                        else BackupResult.Failed(BackupResult.Reason.IO, e::class.java.simpleName),
-                    )
+                    else done.completeExceptionally(e)
                 }
             }
             return try {
@@ -885,7 +898,7 @@ class BackupService @Inject constructor(
             // Blobs prepared for messages that were skipped (duplicates, orphans) have no row: remove them.
             for (f in writtenFiles) mediaDir.delete(f)
             committed
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             // Before the commit every blob is an orphan; after it only the unreferenced ones are
             // still on the list. Runs before the rethrow. A stop after the rows are durable is
             // still a completed restore, not "cancelled, nothing changed".
@@ -893,7 +906,8 @@ class BackupService @Inject constructor(
             committed?.let { return it }
             if (e is BackupAborted) return BackupResult.Failed(BackupResult.Reason.ABORTED)
             if (e is CancellationException) throw e
-            BackupResult.Failed(BackupResult.Reason.IO, "apply:${e::class.java.simpleName}")
+            if (e is Exception) BackupResult.Failed(BackupResult.Reason.IO, "apply:${e::class.java.simpleName}")
+            else throw e
         }
     }
 

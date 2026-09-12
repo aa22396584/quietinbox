@@ -392,6 +392,7 @@ class BackupHangTest {
     @Test
     fun aLateValidExportStreamAfterStopIsNotWritten() = runBlocking {
         val opened = CountDownLatch(1)
+        val closed = CountDownLatch(1)
         val written = AtomicInteger(0)
         val result = AtomicReference<BackupResult?>(null)
         service.openOutput = {
@@ -400,7 +401,7 @@ class BackupHangTest {
             object : OutputStream() {
                 override fun write(b: Int) { written.incrementAndGet() }
                 override fun write(b: ByteArray, off: Int, len: Int) { written.addAndGet(len) }
-                override fun close() {}
+                override fun close() { closed.countDown() }
             }
         }
         val job = launch(Dispatchers.IO) { result.set(service.export(Uri.parse("content://quietinbox.test/late-open"), "test")) }
@@ -411,7 +412,7 @@ class BackupHangTest {
         result.get().shouldBeInstanceOf<BackupResult.Failed>().reason shouldBe BackupResult.Reason.EXPORT_ABORTED
         written.get() shouldBe 0
         releaseHung.countDown()
-        delay(400)
+        withTimeout(5_000) { while (closed.count > 0) delay(10) }
         written.get() shouldBe 0
         Unit
     }
@@ -419,6 +420,7 @@ class BackupHangTest {
     @Test
     fun aLateValidExportStreamAfterWaiterCancelIsNotWritten() = runBlocking {
         val opened = CountDownLatch(1)
+        val closed = CountDownLatch(1)
         val written = AtomicInteger(0)
         val result = AtomicReference<BackupResult?>(null)
         service.openOutput = {
@@ -427,7 +429,7 @@ class BackupHangTest {
             object : OutputStream() {
                 override fun write(b: Int) { written.incrementAndGet() }
                 override fun write(b: ByteArray, off: Int, len: Int) { written.addAndGet(len) }
-                override fun close() {}
+                override fun close() { closed.countDown() }
             }
         }
         val job = launch(Dispatchers.IO) { result.set(service.export(Uri.parse("content://quietinbox.test/late-open-cancel"), "test")) }
@@ -437,7 +439,7 @@ class BackupHangTest {
         result.get().shouldBeInstanceOf<BackupResult.Failed>().reason shouldBe BackupResult.Reason.EXPORT_ABORTED
         written.get() shouldBe 0
         releaseHung.countDown()
-        delay(400)
+        withTimeout(5_000) { while (closed.count > 0) delay(10) }
         written.get() shouldBe 0
         Unit
     }
@@ -449,6 +451,7 @@ class BackupHangTest {
         holder.retry()
         ready()
         val opened = CountDownLatch(1)
+        val closed = CountDownLatch(1)
         val reads = AtomicInteger(0)
         service.openInput = {
             opened.countDown()
@@ -463,7 +466,13 @@ class BackupHangTest {
                     reads.incrementAndGet()
                     return inner.read(b, off, len)
                 }
-                override fun close() { inner.close() }
+                override fun close() {
+                    try {
+                        inner.close()
+                    } finally {
+                        closed.countDown()
+                    }
+                }
             }
         }
         val result = AtomicReference<BackupResult?>(null)
@@ -474,7 +483,7 @@ class BackupHangTest {
         withTimeout(5_000) { job.join() }
         result.get().shouldBeInstanceOf<BackupResult.Failed>().reason shouldBe BackupResult.Reason.ABORTED
         releaseHung.countDown()
-        delay(200)
+        withTimeout(5_000) { while (closed.count > 0) delay(10) }
         reads.get() shouldBe 0
         holder.db().messageDao().exportPage(0L, 10, System.currentTimeMillis()) shouldBe emptyList()
         backup.delete()
@@ -488,6 +497,7 @@ class BackupHangTest {
         holder.retry()
         ready()
         val opened = CountDownLatch(1)
+        val closed = CountDownLatch(1)
         val reads = AtomicInteger(0)
         service.openInput = {
             opened.countDown()
@@ -502,7 +512,13 @@ class BackupHangTest {
                     reads.incrementAndGet()
                     return inner.read(b, off, len)
                 }
-                override fun close() { inner.close() }
+                override fun close() {
+                    try {
+                        inner.close()
+                    } finally {
+                        closed.countDown()
+                    }
+                }
             }
         }
         val result = AtomicReference<BackupResult?>(null)
@@ -512,7 +528,7 @@ class BackupHangTest {
         withTimeout(5_000) { job.join() }
         result.get().shouldBeInstanceOf<BackupResult.Failed>().reason shouldBe BackupResult.Reason.ABORTED
         releaseHung.countDown()
-        delay(200)
+        withTimeout(5_000) { while (closed.count > 0) delay(10) }
         reads.get() shouldBe 0
         holder.db().messageDao().exportPage(0L, 10, System.currentTimeMillis()) shouldBe emptyList()
         backup.delete()
@@ -568,6 +584,7 @@ class BackupHangTest {
         val aRelease = CountDownLatch(1)
         val bEntered = CountDownLatch(1)
         val bRelease = CountDownLatch(1)
+        val bClosed = CountDownLatch(1)
         val n = AtomicInteger(0)
         val bWritten = AtomicInteger(0)
         service.openOutput = {
@@ -585,7 +602,7 @@ class BackupHangTest {
                 object : OutputStream() {
                     override fun write(b: Int) { bWritten.incrementAndGet() }
                     override fun write(b: ByteArray, off: Int, len: Int) { bWritten.addAndGet(len) }
-                    override fun close() {}
+                    override fun close() { bClosed.countDown() }
                 }
             }
         }
@@ -602,7 +619,7 @@ class BackupHangTest {
         withTimeout(5_000) { b.join() }
         bResult.get().shouldBeInstanceOf<BackupResult.Failed>().reason shouldBe BackupResult.Reason.EXPORT_ABORTED
         bRelease.countDown()
-        delay(400)
+        withTimeout(5_000) { while (bClosed.count > 0) delay(10) }
         bWritten.get() shouldBe 0
         aResult.get().shouldBeInstanceOf<BackupResult.Ok>()
         Unit
@@ -744,7 +761,9 @@ class BackupHangTest {
         withTimeout(5_000) { job.join() }
         result.get().shouldBeInstanceOf<BackupResult.Failed>().reason shouldBe BackupResult.Reason.EXPORT_ABORTED
         written.get() shouldBe 0
-        delay(200)
+        withTimeout(5_000) {
+            while ((stagingBackupFiles().toSet() - before).isNotEmpty()) delay(10)
+        }
         (stagingBackupFiles().toSet() - before) shouldBe emptySet()
         Unit
     }

@@ -8,6 +8,7 @@ import dev.quietinbox.core.model.SourceScope
 import dev.quietinbox.platform.storage.db.ConversationEntity
 import dev.quietinbox.platform.storage.db.DatabaseHolder
 import dev.quietinbox.platform.storage.db.DeletionSuppressionEntity
+import dev.quietinbox.platform.storage.db.QuietInboxDatabase
 import dev.quietinbox.platform.storage.db.MediaBlobEntity
 import dev.quietinbox.platform.storage.db.VaultState
 import dev.quietinbox.platform.storage.retention.MediaDirectory
@@ -20,7 +21,8 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.onStart
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -45,26 +47,41 @@ class InboxRepository @Inject constructor(
 
     fun tickVisibility(at: Long = nowMs()) { extraTicks.tryEmit(at) }
 
-    private fun visibilityNow(): Flow<Long> = merge(
-        extraTicks,
-        flow {
-            while (true) {
-                emit(nowMs())
-                delay(visibilityTickMs)
+    /** Clock checks are cheap; only a crossed visibility boundary rebinds the read queries. */
+    private fun visibilityNow(db: QuietInboxDatabase): Flow<Long> =
+        extraTicks.onStart { emit(nowMs()) }.flatMapLatest { start ->
+            flow {
+                var bound = start
+                emit(bound)
+                while (true) {
+                    bound = combine(
+                        db.messageDao().observeNextExpiryAfter(bound),
+                        flow {
+                            while (true) {
+                                emit(nowMs())
+                                delay(visibilityTickMs.coerceAtLeast(1L))
+                            }
+                        },
+                    ) { expiry, current -> expiry to current }
+                        .first { (expiry, current) -> current < bound || (expiry != null && current >= expiry) }
+                        .second
+                    // Use current time, not the expired row's timestamp: a forward clock jump
+                    // skips all past boundaries at once. A backward jump reopens the filter.
+                    emit(bound)
+                }
             }
-        },
-    )
+        }
 
     fun observeConversations(archived: Boolean, packages: Set<String>): Flow<List<Conversation>> =
         holder.flowWithDb { db ->
-            visibilityNow().flatMapLatest { t ->
+            visibilityNow(db).flatMapLatest { t ->
                 db.conversationDao().observeInboxAt(archived, packages.isEmpty(), packages.toList(), t)
             }.map { rows -> rows.map { it.toDomain() } }
         }
 
     fun observeConversation(id: Long): Flow<Conversation?> =
         holder.flowWithDb { db ->
-            visibilityNow().flatMapLatest { t -> db.conversationDao().observeAt(id, t) }
+            visibilityNow(db).flatMapLatest { t -> db.conversationDao().observeAt(id, t) }
         }.map { it?.toDomain() }
 
     /**
@@ -75,7 +92,7 @@ class InboxRepository @Inject constructor(
     fun observeMessages(conversationId: Long, now: Long? = null): Flow<List<Message>> =
         holder.flowWithDb { db ->
             if (now != null) db.messageDao().observeForConversation(conversationId, now)
-            else visibilityNow().flatMapLatest { t -> db.messageDao().observeForConversation(conversationId, t) }
+            else visibilityNow(db).flatMapLatest { t -> db.messageDao().observeForConversation(conversationId, t) }
         }.map { rows -> rows.map { it.toDomain() } }
 
     fun observeRevisions(messageId: Long): Flow<List<MessageRevision>> =
@@ -84,7 +101,7 @@ class InboxRepository @Inject constructor(
     fun observePackagesWithData(): Flow<List<String>> = holder.flowWithDb { db -> db.conversationDao().observePackages() }
 
     fun observeCounts(now: Long? = null): Flow<InboxCounts> = holder.flowWithDb { db ->
-        val times: Flow<Long> = if (now != null) flowOf(now) else visibilityNow()
+        val times: Flow<Long> = if (now != null) flowOf(now) else visibilityNow(db)
         times.flatMapLatest { t ->
             combine(
                 db.conversationDao().observeCount(),

@@ -2,15 +2,17 @@
 """Validates connected instrumented test XML reports for specified modules.
 
 Fails closed when:
-- No module arguments are provided.
+- No module arguments are provided, or empty/whitespace module argument is passed.
 - Any module has zero test report files.
 - Any module XML is missing, unreadable, or malformed.
 - Any XML has unsupported root element or structure.
 - Declared summary counters (tests, failures, errors, skipped) contradict actual testcase children.
 - Any failure or error child is present (even if summary counters say 0 or are missing).
-- Any test is skipped (all tests are required; no skipped tests permitted).
+- Any test is skipped or ignored (all tests are required; no skipped tests permitted).
 - A module has zero executed tests (total tests = 0 or only skipped tests).
 - One valid module cannot mask another invalid or failing module.
+- One valid report cannot mask an unexecuted (tests=0) report within the same module.
+- XML namespaces (e.g. xmlns="...") and encodings are handled cleanly.
 
 Usage:
   tools/check-instrumented.sh <module-dir>...
@@ -31,29 +33,49 @@ class SuiteCounts(NamedTuple):
     passed: int
 
 
+def _local_name(tag: str) -> str:
+    """Extract the local name from an XML tag, stripping namespace URI if present."""
+    if tag.startswith("{"):
+        return tag.split("}", 1)[1]
+    return tag
+
+
+def _is_tag(elem: ET.Element, expected: str) -> bool:
+    """Case-insensitive check for element tag matching expected name (ignoring namespace)."""
+    return _local_name(elem.tag).lower() == expected.lower()
+
+
 def _parse_int_attr(elem: ET.Element, attr_name: str, file_path: pathlib.Path, default: int | None = None) -> int | None:
     val_str = elem.get(attr_name)
     if val_str is None:
         return default
     try:
-        return int(val_str)
-    except ValueError:
-        raise ValueError(f"Non-integer attribute '{attr_name}=\"{val_str}\"' in {file_path}")
+        val = int(val_str)
+        if val < 0:
+            raise ValueError(f"Negative count attribute '{attr_name}=\"{val_str}\"' in {file_path}")
+        return val
+    except ValueError as exc:
+        raise ValueError(f"Invalid integer attribute '{attr_name}=\"{val_str}\"' in {file_path}: {exc}") from exc
 
 
 def _validate_leaf_suite(suite_elem: ET.Element, file_path: pathlib.Path) -> SuiteCounts:
     """Validate a leaf testsuite element and its testcase children."""
-    if suite_elem.findall("./testsuite"):
+    child_suites = [c for c in suite_elem if _is_tag(c, "testsuite")]
+    if child_suites:
         raise ValueError(f"Unexpected nested <testsuite> inside leaf suite in {file_path}")
 
-    direct_testcases = suite_elem.findall("./testcase")
-    all_testcases = suite_elem.findall(".//testcase")
+    direct_testcases = [c for c in suite_elem if _is_tag(c, "testcase")]
+    all_testcases = [e for e in suite_elem.iter() if _is_tag(e, "testcase")]
     if len(direct_testcases) != len(all_testcases):
         raise ValueError(f"Malformed or nested <testcase> hierarchy in {file_path}")
 
+    actual_total = len(direct_testcases)
+    if actual_total == 0:
+        raise ValueError(f"<testsuite> contains zero testcases in {file_path}")
+
     # Check for suite-level failure or error tags (e.g. class setup failures)
-    suite_level_failures = len(suite_elem.findall("./failure"))
-    suite_level_errors = len(suite_elem.findall("./error"))
+    suite_level_failures = sum(1 for c in suite_elem if _is_tag(c, "failure"))
+    suite_level_errors = sum(1 for c in suite_elem if _is_tag(c, "error"))
 
     actual_failures = suite_level_failures
     actual_errors = suite_level_errors
@@ -61,9 +83,19 @@ def _validate_leaf_suite(suite_elem: ET.Element, file_path: pathlib.Path) -> Sui
     actual_passed = 0
 
     for tc in direct_testcases:
-        has_failure = tc.find("./failure") is not None
-        has_error = tc.find("./error") is not None
-        has_skipped = tc.find("./skipped") is not None
+        has_failure = any(_is_tag(c, "failure") for c in tc)
+        has_error = any(_is_tag(c, "error") for c in tc)
+        has_skipped = any(_local_name(c.tag).lower() in ("skipped", "ignored") for c in tc)
+
+        # Also inspect testcase status / result attributes if present
+        tc_status = (tc.get("status") or "").lower()
+        tc_result = (tc.get("result") or "").lower()
+        if tc_status in ("failed", "failure") or tc_result in ("failed", "failure"):
+            has_failure = True
+        if tc_status in ("error", "errored") or tc_result in ("error", "errored"):
+            has_error = True
+        if tc_status in ("skipped", "ignored", "notrun") or tc_result in ("skipped", "ignored", "notrun"):
+            has_skipped = True
 
         if has_failure:
             actual_failures += 1
@@ -73,8 +105,6 @@ def _validate_leaf_suite(suite_elem: ET.Element, file_path: pathlib.Path) -> Sui
             actual_skipped += 1
         if not (has_failure or has_error or has_skipped):
             actual_passed += 1
-
-    actual_total = len(direct_testcases)
 
     declared_tests = _parse_int_attr(suite_elem, "tests", file_path, default=None)
     if declared_tests is None:
@@ -129,28 +159,31 @@ def _validate_leaf_suite(suite_elem: ET.Element, file_path: pathlib.Path) -> Sui
 def _validate_xml_report(file_path: pathlib.Path) -> SuiteCounts:
     """Parse and validate a single TEST-*.xml file. Returns the aggregated SuiteCounts."""
     try:
-        content = file_path.read_text(encoding="utf-8")
+        raw_bytes = file_path.read_bytes()
     except Exception as exc:
         raise ValueError(f"Failed to read XML file {file_path}: {exc}") from exc
 
-    if not content.strip():
+    if not raw_bytes.strip():
         raise ValueError(f"Empty XML file {file_path}")
 
     try:
-        root = ET.fromstring(content)
+        root = ET.fromstring(raw_bytes)
     except ET.ParseError as exc:
         raise ValueError(f"Malformed XML in {file_path}: {exc}") from exc
 
     leaf_counts: list[SuiteCounts] = []
 
-    if root.tag == "testsuites":
-        child_suites = root.findall("./testsuite")
-        direct_testcases = root.findall("./testcase")
+    if _is_tag(root, "testsuites"):
+        child_suites = [c for c in root if _is_tag(c, "testsuite")]
+        direct_testcases = [c for c in root if _is_tag(c, "testcase")]
         if direct_testcases:
             raise ValueError(f"Unexpected direct <testcase> children under <testsuites> in {file_path}")
 
+        if not child_suites:
+            raise ValueError(f"<testsuites> contains zero <testsuite> children in {file_path}")
+
         for child in child_suites:
-            nested = child.findall("./testsuite")
+            nested = [c for c in child if _is_tag(c, "testsuite")]
             if nested:
                 raise ValueError(f"Deeply nested <testsuite> inside <testsuite> in {file_path}")
             leaf_counts.append(_validate_leaf_suite(child, file_path))
@@ -159,6 +192,9 @@ def _validate_xml_report(file_path: pathlib.Path) -> SuiteCounts:
         sum_failures = sum(c.failures for c in leaf_counts)
         sum_errors = sum(c.errors for c in leaf_counts)
         sum_skipped = sum(c.skipped for c in leaf_counts)
+
+        if sum_tests == 0:
+            raise ValueError(f"<testsuites> ran zero tests in {file_path}")
 
         decl_tests = _parse_int_attr(root, "tests", file_path, default=None)
         if decl_tests is not None and decl_tests != sum_tests:
@@ -178,10 +214,10 @@ def _validate_xml_report(file_path: pathlib.Path) -> SuiteCounts:
         if decl_skipped is not None and decl_skipped != sum_skipped:
             raise ValueError(f"<testsuites> declared skipped={decl_skipped} but child suites sum to {sum_skipped} in {file_path}")
 
-    elif root.tag == "testsuite":
-        child_suites = root.findall("./testsuite")
+    elif _is_tag(root, "testsuite"):
+        child_suites = [c for c in root if _is_tag(c, "testsuite")]
         if child_suites:
-            direct_testcases = root.findall("./testcase")
+            direct_testcases = [c for c in root if _is_tag(c, "testcase")]
             if direct_testcases:
                 raise ValueError(f"Mixed <testsuite> and <testcase> children under root in {file_path}")
             for child in child_suites:
@@ -191,6 +227,9 @@ def _validate_xml_report(file_path: pathlib.Path) -> SuiteCounts:
             sum_failures = sum(c.failures for c in leaf_counts)
             sum_errors = sum(c.errors for c in leaf_counts)
             sum_skipped = sum(c.skipped for c in leaf_counts)
+
+            if sum_tests == 0:
+                raise ValueError(f"Root <testsuite> ran zero tests in {file_path}")
 
             decl_tests = _parse_int_attr(root, "tests", file_path, default=None)
             if decl_tests is not None and decl_tests != sum_tests:
@@ -214,8 +253,12 @@ def _validate_xml_report(file_path: pathlib.Path) -> SuiteCounts:
     else:
         raise ValueError(f"Unsupported XML root element <{root.tag}> in {file_path}")
 
+    total_tests = sum(c.tests for c in leaf_counts)
+    if total_tests == 0:
+        raise ValueError(f"Report contains zero executed tests in {file_path}")
+
     return SuiteCounts(
-        tests=sum(c.tests for c in leaf_counts),
+        tests=total_tests,
         failures=sum(c.failures for c in leaf_counts),
         errors=sum(c.errors for c in leaf_counts),
         skipped=sum(c.skipped for c in leaf_counts),
@@ -225,6 +268,9 @@ def _validate_xml_report(file_path: pathlib.Path) -> SuiteCounts:
 
 def check_module(module_str: str) -> tuple[bool, str]:
     """Validate reports for a single module. Returns (success, message)."""
+    if not module_str or not module_str.strip():
+        return False, "FAIL: Empty module directory specified."
+
     module_path = pathlib.Path(module_str)
     search_dir = module_path / "build" / "outputs" / "androidTest-results" / "connected"
     if not search_dir.is_dir():
@@ -245,6 +291,9 @@ def check_module(module_str: str) -> tuple[bool, str]:
             counts = _validate_xml_report(xml_file)
         except ValueError as exc:
             return False, f"FAIL: {module_str} report invalid ({xml_file.name}): {exc}"
+
+        if counts.tests == 0:
+            return False, f"FAIL: {module_str} report ({xml_file.name}) ran zero tests"
 
         module_tests += counts.tests
         module_failures += counts.failures

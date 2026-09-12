@@ -2,13 +2,13 @@
 Platform: Android emulator-5554 (Pixel_9(AVD), API 36)
 Target: dev.quietinbox.platform.storage.DeletionGraphTest#emptyOlderThanDoesNotReturnConversationWithUnexpiredAmbiguousRepeat
 Mutation Applied: nc2-emptyolderthan-messagecount-zero.patch
-Command: ANDROID_SERIAL=emulator-5554 ./gradlew :platform:storage:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=dev.quietinbox.platform.storage.DeletionGraphTest#emptyOlderThanDoesNotReturnConversationWithUnexpiredAmbiguousRepeat
+Command: ANDROID_SERIAL=emulator-5554 ./gradlew :platform:storage:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=dev.quietinbox.platform.storage.DeletionGraphTest#emptyOlderThanDoesNotReturnConversationWithUnexpiredAmbiguousRepeat -Dcom.android.ddmlib.tools.timeout=60000
 
 Result: BUILD FAILED (exit code 1)
 Failure:
 dev.quietinbox.platform.storage.DeletionGraphTest > emptyOlderThanDoesNotReturnConversationWithUnexpiredAmbiguousRepeat[Pixel_9(AVD) - 16] FAILED
     org.opentest4j.AssertionFailedError: expected:<false> but was:<true>
-        at dev.quietinbox.platform.storage.DeletionGraphTest$emptyOlderThanDoesNotReturnConversationWithUnexpiredAmbiguousRepeat$1.invokeSuspend(DeletionGraphTest.kt:293)
+        at dev.quietinbox.platform.storage.DeletionGraphTest$emptyOlderThanDoesNotReturnConversationWithUnexpiredAmbiguousRepeat$1.invokeSuspend(DeletionGraphTest.kt:297)
         at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
 
 Explanation:

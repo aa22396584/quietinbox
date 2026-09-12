@@ -14,7 +14,10 @@ This package isolates and verifies the **#32 C0** security boundary for empty-co
    `DELETE FROM conversation WHERE createdAtEpochMs < :before AND NOT EXISTS (SELECT 1 FROM message m WHERE m.conversationId = conversation.id)`.
 2. **Preserves Unexpired Messages**: Conversations containing only `AMBIGUOUS_REPEAT` message rows are never deleted by the retention sweep, protecting them from cascade deletion.
 3. **Eliminates Race Footgun**: `deleteIfEmptyAndOlderThan(id, before)` verifies `NOT EXISTS` at delete time, ensuring a message committed after an empty-scan is not cascade-deleted.
-4. **Guards Query API**: `ConversationDao.emptyOlderThan` is guarded with `NOT EXISTS (SELECT 1 FROM message m WHERE m.conversationId = conversation.id)` instead of `messageCount = 0`.
+4. **Guards Query API**: `ConversationDao.emptyOlderThan` is guarded with `NOT EXISTS (SELECT 1 FROM message m WHERE m.conversationId = conversation.id)` instead of `messageCount = 0`, and documented with explicit KDocs warning against unguarded two-phase scan-then-delete patterns.
+5. **Concurrent Commit Resilience**: Verified that concurrent commit and retention sweep (`deleteEmptyOlderThan`) under multi-threaded IO execution never drop committed messages or trigger SQLite locking failures.
+6. **Full Ambiguous Repeat Lifecycle**: Verified that unexpired ambiguous repeats prevent conversation deletion, while expired ambiguous repeats are properly reaped and their empty conversations cleaned up.
+7. **Young Conversation Policy**: Verified that empty conversations younger than 7 days (`createdAtEpochMs >= now - 7L * DAY_MS`) are preserved.
 
 ---
 
@@ -22,24 +25,25 @@ This package isolates and verifies the **#32 C0** security boundary for empty-co
 
 | File | Scope / Target | Command & Return Code | Exec/Skip/Fail | SHA-256 Digest |
 |---|---|---|---|---|
-| `TEST-dev.quietinbox.platform.storage.DeletionGraphTest.xml` | `dev.quietinbox.platform.storage.DeletionGraphTest` (9 tests) | `ANDROID_SERIAL=emulator-5554 ./gradlew :platform:storage:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=dev.quietinbox.platform.storage.DeletionGraphTest` (rc=0) | 9 / 0 / 0 | `eb3261390ed865f6bad14db88055936a3d2f6208ae73c185c87270f56b71f2d8` |
-| `negative-controls/nc1-sweep-revert-to-emptyolderthan.patch` | `Daos.kt` (`deleteEmptyOlderThan` mutated to `messageCount = 0`) | N/A (Source patch) | N/A | `4a70dfb0c08dbd1214c8d0d2338984b4c89ff42e356aa967b9e3268923078107` |
-| `negative-controls/nc1-sweep-revert-to-emptyolderthan-failure.txt` | `DeletionGraphTest.emptyConversationSweepKeepsAnUnexpiredAmbiguousRepeat` | Connected test on emulator-5554 (rc=1) | 0 / 0 / 1 | `dca0c4ad017017e00c8bf4fb410cf41011863d331e165129ede1fd73c2fa33ad` |
-| `negative-controls/nc2-emptyolderthan-messagecount-zero.patch` | `Daos.kt` (`emptyOlderThan` mutated to `messageCount = 0`) | N/A (Source patch) | N/A | `066470452ff7adc4bc689628e68f60ef88f8d5abb5297397e1ece84aa57eeb13` |
-| `negative-controls/nc2-emptyolderthan-messagecount-zero-failure.txt` | `DeletionGraphTest.emptyOlderThanDoesNotReturnConversationWithUnexpiredAmbiguousRepeat` | Connected test on emulator-5554 (rc=1) | 0 / 0 / 1 | `16c19a10aa76e7f33c312c00336ba0610854e29c5e0dbba4ccc9f51580ec4198` |
+| `TEST-dev.quietinbox.platform.storage.DeletionGraphTest.xml` | `dev.quietinbox.platform.storage.DeletionGraphTest` (12 tests) | `ANDROID_SERIAL=emulator-5554 ./gradlew :platform:storage:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=dev.quietinbox.platform.storage.DeletionGraphTest -Dcom.android.ddmlib.tools.timeout=60000` (rc=0) | 12 / 0 / 0 | `5d6e7f7ffe3e7ab8cc2ebda9aa0f8ecfdb462eefe0747b5fd248ce4c7635e01f` |
+| `negative-controls/nc1-sweep-revert-to-emptyolderthan.patch` | `Daos.kt` (`deleteEmptyOlderThan` mutated to `messageCount = 0`) | N/A (Source patch) | N/A | `0692b3bbf17be42d761c26fa81d6c34064546592e93a8c96d8f445e246c6d620` |
+| `negative-controls/nc1-sweep-revert-to-emptyolderthan-failure.txt` | `DeletionGraphTest.emptyConversationSweepKeepsAnUnexpiredAmbiguousRepeat` | Connected test on emulator-5554 (rc=1) | 0 / 0 / 1 | `e37e88d2bdb0e66ccd7a255596c82ef3fa3ec09627afaedf576a8b6ee3cd5e20` |
+| `negative-controls/nc2-emptyolderthan-messagecount-zero.patch` | `Daos.kt` (`emptyOlderThan` mutated to `messageCount = 0`) | N/A (Source patch) | N/A | `5b14e10f2007c2b2e0b935c014782dbc07d5d5b16c365743ff262b5d8bbb5b66` |
+| `negative-controls/nc2-emptyolderthan-messagecount-zero-failure.txt` | `DeletionGraphTest.emptyOlderThanDoesNotReturnConversationWithUnexpiredAmbiguousRepeat` | Connected test on emulator-5554 (rc=1) | 0 / 0 / 1 | `55c26f490275f26451a96e51ef1a52928edb0802287883924c4300fef7eb3afb` |
 
 ---
 
-## 3. Tested APK Binary
+## 3. Tested APK Binaries
 
 | Target | Path | Package Name | Size (Bytes) | SHA-256 Digest |
 |---|---|---|---|---|
-| Instrumented Storage Test APK | `platform/storage/build/outputs/apk/androidTest/debug/storage-debug-androidTest.apk` | `dev.quietinbox.platform.storage.test` | 17,084,433 | `d1236bf0585913253fd81882048f80f1ccf671844ffa9375a7029b6b51a8f98c` |
+| Instrumented Storage Test APK | `platform/storage/build/outputs/apk/androidTest/debug/storage-debug-androidTest.apk` | `dev.quietinbox.platform.storage.test` | 17,005,142 | `0d8b1af8499940965c8e0a17807adf43280ef36179e4b882850960cd1d90c389` |
+| App Debug APK | `app/build/outputs/apk/debug/app-debug.apk` | `dev.quietinbox.app.debug` | 33,161,838 | `b7c5a5f2203a4ea2b2672efb8a226bc2bacaf506e7ee7cf228305212473905d5` |
 
 ---
 
 ## 4. Verification Gates Passed
-- **Connected Instrumented Tests**: 9/9 PASS on Android API 36 (`emulator-5554`).
+- **Connected Instrumented Tests**: 12/12 PASS on Android API 36 (`emulator-5554`).
 - **JVM Unit Tests**: `./gradlew test` BUILD SUCCESSFUL (all modules pass).
 - **Assemble & Permissions**: `./gradlew :app:assembleDebug` and `tools/check-permissions.sh` pass (no network permissions).
 - **Lint**: `./gradlew :platform:storage:lintDebug` BUILD SUCCESSFUL (0 errors).

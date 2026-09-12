@@ -105,6 +105,7 @@ object SourceEvidenceResolver {
                 adapterId = "standard",
                 adapterVersion = "1.0.0",
                 osApiLevel = 36,
+                oem = "Samsung",
                 deviceModel = "SM-S9280",
                 language = "zh-Hant",
             ),
@@ -138,9 +139,12 @@ object SourceEvidenceResolver {
                 return matchingRecord.tier
             }
             // Cohort mismatch: never inherits verified status of older/different cohort (plan §14).
-            // Falls back to SYNTHETIC_ONLY only if catalog contains synthetic evidence for this package.
-            val hasSynthetic = matches.any { it.tier == SourceVerificationTier.SYNTHETIC_ONLY }
-            return if (hasSynthetic) SourceVerificationTier.SYNTHETIC_ONLY else SourceVerificationTier.UNTESTED
+            // Falls back to SYNTHETIC_ONLY only if catalog contains synthetic evidence matching the current parser.
+            val matchingSynthetic = matches.firstOrNull { record ->
+                record.tier == SourceVerificationTier.SYNTHETIC_ONLY &&
+                    matchesCohort(record.cohort, currentCohort, record.tier)
+            }
+            return matchingSynthetic?.tier ?: SourceVerificationTier.UNTESTED
         }
 
         // Without device cohort, check if there is an explicit non-device tier (e.g. SYNTHETIC_ONLY)
@@ -151,8 +155,7 @@ object SourceEvidenceResolver {
         val firstRecord = matches.first()
         if (firstRecord.tier == SourceVerificationTier.REAL_DEVICE_PASSED) {
             // Unconfirmed device cohort cannot inherit REAL_DEVICE_PASSED
-            val hasSynthetic = matches.any { it.tier == SourceVerificationTier.SYNTHETIC_ONLY }
-            return if (hasSynthetic) SourceVerificationTier.SYNTHETIC_ONLY else SourceVerificationTier.UNTESTED
+            return SourceVerificationTier.UNTESTED
         }
         return firstRecord.tier
     }
@@ -161,27 +164,45 @@ object SourceEvidenceResolver {
         if (evidence.packageName != current.packageName) return false
 
         if (tier == SourceVerificationTier.REAL_DEVICE_PASSED) {
-            // Switching adapterId must not inherit REAL_DEVICE_PASSED; adapterId must strictly match
-            if (current.adapterId == null || evidence.adapterId == null || current.adapterId != evidence.adapterId) {
+            // Switching adapterId must not inherit REAL_DEVICE_PASSED; adapterId must strictly match and not be blank
+            if (evidence.adapterId.isNullOrBlank() || current.adapterId.isNullOrBlank() || evidence.adapterId != current.adapterId) {
                 return false
             }
-            // Evidence cohort cannot be a universal wildcard: must specify version, device/OS, and language
+            // adapterVersion must strictly match and not be blank
+            if (evidence.adapterVersion.isNullOrBlank() || current.adapterVersion.isNullOrBlank() || evidence.adapterVersion != current.adapterVersion) {
+                return false
+            }
+            // Evidence cohort cannot be a universal wildcard: must specify version, OS API, OEM, device model, and language
             val hasVersion = evidence.sourceVersionCode != null || !evidence.sourceVersionName.isNullOrBlank()
             if (!hasVersion) return false
-            val hasDevice = evidence.osApiLevel != null || !evidence.deviceModel.isNullOrBlank()
-            if (!hasDevice) return false
-            if (evidence.language.isNullOrBlank()) return false
+            if (evidence.osApiLevel == null || current.osApiLevel == null || evidence.osApiLevel != current.osApiLevel) return false
+            if (evidence.oem.isNullOrBlank() || current.oem.isNullOrBlank() || !evidence.oem.equals(current.oem, ignoreCase = true)) return false
+            if (evidence.deviceModel.isNullOrBlank() || current.deviceModel.isNullOrBlank() || !evidence.deviceModel.equals(current.deviceModel, ignoreCase = true)) return false
+            if (evidence.language.isNullOrBlank() || current.language.isNullOrBlank() || !evidence.language.equals(current.language, ignoreCase = true)) return false
+
+            if (evidence.sourceVersionCode != null && evidence.sourceVersionCode != current.sourceVersionCode) return false
+            if (evidence.sourceVersionName != null && evidence.sourceVersionName != current.sourceVersionName) return false
+            return true
+        } else if (tier == SourceVerificationTier.SYNTHETIC_ONLY) {
+            // Synthetic evidence tests only parser identity and parser version.
+            // Does not require real-source device/OS matrix.
+            if (evidence.adapterId.isNullOrBlank() || current.adapterId.isNullOrBlank() || evidence.adapterId != current.adapterId) {
+                return false
+            }
+            if (evidence.adapterVersion != null && evidence.adapterVersion != current.adapterVersion) {
+                return false
+            }
+            return true
         } else {
             if (evidence.adapterId != null && evidence.adapterId != current.adapterId) return false
+            if (evidence.sourceVersionCode != null && evidence.sourceVersionCode != current.sourceVersionCode) return false
+            if (evidence.sourceVersionName != null && evidence.sourceVersionName != current.sourceVersionName) return false
+            if (evidence.adapterVersion != null && evidence.adapterVersion != current.adapterVersion) return false
+            if (evidence.osApiLevel != null && evidence.osApiLevel != current.osApiLevel) return false
+            if (evidence.oem != null && !evidence.oem.equals(current.oem, ignoreCase = true)) return false
+            if (evidence.deviceModel != null && !evidence.deviceModel.equals(current.deviceModel, ignoreCase = true)) return false
+            if (evidence.language != null && !evidence.language.equals(current.language, ignoreCase = true)) return false
+            return true
         }
-
-        if (evidence.sourceVersionCode != null && evidence.sourceVersionCode != current.sourceVersionCode) return false
-        if (evidence.sourceVersionName != null && evidence.sourceVersionName != current.sourceVersionName) return false
-        if (evidence.adapterVersion != null && evidence.adapterVersion != current.adapterVersion) return false
-        if (evidence.osApiLevel != null && evidence.osApiLevel != current.osApiLevel) return false
-        if (evidence.oem != null && !evidence.oem.equals(current.oem, ignoreCase = true)) return false
-        if (evidence.deviceModel != null && !evidence.deviceModel.equals(current.deviceModel, ignoreCase = true)) return false
-        if (evidence.language != null && !evidence.language.equals(current.language, ignoreCase = true)) return false
-        return true
     }
 }

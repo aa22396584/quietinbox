@@ -40,6 +40,7 @@ class SourceEvidenceTest : FunSpec({
                 adapterId = "test",
                 adapterVersion = "1.0.0",
                 osApiLevel = 36,
+                oem = "Samsung",
                 deviceModel = "SM-S9280",
                 language = "zh-Hant",
             ),
@@ -53,6 +54,7 @@ class SourceEvidenceTest : FunSpec({
             adapterId = "test",
             adapterVersion = "1.0.0",
             osApiLevel = 36,
+            oem = "Samsung",
             deviceModel = "SM-S9280",
             language = "zh-Hant",
         )
@@ -325,5 +327,70 @@ class SourceEvidenceTest : FunSpec({
             catalog = customCatalog,
         )
         resolved shouldBe SourceVerificationTier.SYNTHETIC_ONLY
+    }
+
+    // S1: Contract counterexamples from review (PR #40 / Issue #38)
+    val reviewPkg = "synthetic.review.messaging"
+    val reviewFull = SourceCohort(
+        packageName = reviewPkg,
+        sourceVersionCode = 100L,
+        sourceVersionName = "1.0",
+        adapterId = "synthetic-parser",
+        adapterVersion = "1.0",
+        osApiLevel = 36,
+        oem = "ReviewOEM",
+        deviceModel = "ReviewDevice",
+        language = "en",
+    )
+
+    fun resolveReview(
+        evidence: SourceCohort,
+        current: SourceCohort = reviewFull,
+        tier: SourceVerificationTier = SourceVerificationTier.REAL_DEVICE_PASSED,
+    ): SourceVerificationTier = SourceEvidenceResolver.resolveTier(
+        packageName = reviewPkg,
+        hasAdapter = true,
+        currentCohort = current,
+        catalog = listOf(
+            SourceEvidenceRecord(
+                packageName = reviewPkg,
+                tier = tier,
+                cohort = evidence,
+                evidenceSummary = "synthetic test only",
+                commitSha = "a".repeat(40),
+            )
+        ),
+    )
+
+    test("positive control: complete matching cohort resolves to REAL_DEVICE_PASSED") {
+        resolveReview(reviewFull) shouldBe SourceVerificationTier.REAL_DEVICE_PASSED
+    }
+
+    test("evidence missing deviceModel with API retained cannot resolve to REAL_DEVICE_PASSED") {
+        resolveReview(reviewFull.copy(deviceModel = null)) shouldNotBe SourceVerificationTier.REAL_DEVICE_PASSED
+    }
+
+    test("evidence missing osApiLevel with model retained cannot resolve to REAL_DEVICE_PASSED") {
+        resolveReview(reviewFull.copy(osApiLevel = null)) shouldNotBe SourceVerificationTier.REAL_DEVICE_PASSED
+    }
+
+    test("evidence missing adapterVersion cannot resolve to REAL_DEVICE_PASSED") {
+        resolveReview(reviewFull.copy(adapterVersion = null)) shouldNotBe SourceVerificationTier.REAL_DEVICE_PASSED
+    }
+
+    test("evidence missing OEM cannot resolve to REAL_DEVICE_PASSED") {
+        resolveReview(reviewFull.copy(oem = null)) shouldNotBe SourceVerificationTier.REAL_DEVICE_PASSED
+    }
+
+    test("evidence and current adapterId both blank cannot resolve to REAL_DEVICE_PASSED") {
+        resolveReview(reviewFull.copy(adapterId = ""), reviewFull.copy(adapterId = "")) shouldNotBe SourceVerificationTier.REAL_DEVICE_PASSED
+    }
+
+    test("catalog with only parser v1 synthetic evidence cannot be inherited by current parser v2") {
+        resolveReview(
+            evidence = reviewFull,
+            current = reviewFull.copy(adapterVersion = "2.0"),
+            tier = SourceVerificationTier.SYNTHETIC_ONLY,
+        ) shouldBe SourceVerificationTier.UNTESTED
     }
 })

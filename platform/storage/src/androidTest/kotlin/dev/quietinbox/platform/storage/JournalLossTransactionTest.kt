@@ -38,6 +38,18 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicInteger
+import dev.quietinbox.platform.capture.CaptureCoordinator
+import dev.quietinbox.platform.capture.ListenerAccess
+import dev.quietinbox.platform.storage.db.VaultMaintenance
+import dev.quietinbox.platform.storage.retention.MediaDirectory
+import dev.quietinbox.platform.storage.settings.SettingsRepository
+import dev.quietinbox.platform.storage.repo.SourceRepository
+import dev.quietinbox.platform.storage.repo.VaultRepository
+import dev.quietinbox.platform.crypto.BlobCipher
+import dev.quietinbox.platform.media.MediaCopier
+import dev.quietinbox.platform.media.MediaStreams
 
 /**
  * A loss the event arrived with is committed with the event or not at all (round 33 cluster a).
@@ -93,10 +105,67 @@ class JournalLossTransactionTest {
     private fun snapshotAt(eventId: String, observedAt: Long, packageName: String = pkg) =
         Fixtures.snapshot(Fixtures.base(title = "t", text = "b"), packageName = packageName, eventId = eventId, observedAt = observedAt)
 
+    private fun messagingSnapshot(eventId: String) =
+        Fixtures.snapshot(
+            shape = Fixtures.messaging(conversationTitle = "Friends") {
+                message("Alice", "Hello from $eventId")
+            },
+            packageName = pkg,
+            eventId = eventId,
+        )
+
+    private fun createCoordinator(): CaptureCoordinator {
+        val mediaDir = MediaDirectory(context)
+        val sources = SourceRepository(holder, mediaDir)
+        val settings = SettingsRepository(context)
+        val maintenance = VaultMaintenance()
+        val vault = VaultRepository(holder, keys, mediaDir, settings, maintenance)
+        val mediaCopier = MediaCopier(
+            streams = MediaStreams(context),
+            holder = holder,
+            cipher = BlobCipher(keys),
+            dir = mediaDir,
+            settings = settings,
+            maintenance = maintenance,
+        )
+        val listenerAccess = ListenerAccess(context)
+        return CaptureCoordinator(
+            context = context,
+            ingest = ingest,
+            sources = sources,
+            health = health,
+            settings = settings,
+            vault = vault,
+            mediaCopier = mediaCopier,
+            listenerAccess = listenerAccess,
+            maintenance = maintenance,
+        )
+    }
+
+    private suspend fun journalEntity(eventId: String): EventJournalEntity =
+        holder.db().openHelper.writableDatabase.query(
+            "SELECT eventId, generation, receivedAtEpochMs, expiresAtEpochMs, state, attempts, failureCode, payload, packageName, lossRecorded FROM event_journal WHERE eventId = ?",
+            arrayOf<Any>(eventId),
+        ).use { cursor ->
+            if (!cursor.moveToFirst()) error("No journal row for $eventId")
+            EventJournalEntity(
+                eventId = cursor.getString(0),
+                generation = cursor.getString(1),
+                receivedAtEpochMs = cursor.getLong(2),
+                expiresAtEpochMs = cursor.getLong(3),
+                state = cursor.getString(4),
+                attempts = cursor.getInt(5),
+                failureCode = if (cursor.isNull(6)) null else cursor.getString(6),
+                payload = cursor.getString(7),
+                packageName = if (cursor.isNull(8)) null else cursor.getString(8),
+                lossRecorded = cursor.getInt(9),
+            )
+        }
+
     private suspend fun messageCount(): Int =
         holder.db().openHelper.writableDatabase.query("SELECT COUNT(*) FROM message").use { it.moveToFirst(); it.getInt(0) }
 
-    private suspend fun allGaps() = holder.db().healthDao().observeGaps(100).first()
+    private suspend fun allGaps(limit: Int = 1000) = holder.db().healthDao().observeGaps(limit).first()
 
     private suspend fun recordLoss() {
         health.recordGap(1_000, 2_000, GapReason.MESSAGES_DROPPED, GapPrecision.BOUNDED, 2_000, pkg)
@@ -1003,33 +1072,46 @@ class JournalLossTransactionTest {
         ready()
         ingest.journal(snapshot("evt-concurrent-term"), "gen", 60_000) shouldBe true
 
-        val gapWrites = java.util.concurrent.atomic.AtomicInteger(0)
+        val startGate = CountDownLatch(1)
+        val readyGate = CountDownLatch(2)
+        val gapWrites = AtomicInteger(0)
         val d1 = async(Dispatchers.IO) {
+            readyGate.countDown()
+            startGate.await()
             ingest.markJournalTerminal("evt-concurrent-term", "PARSE_Crash") {
                 gapWrites.incrementAndGet()
                 health.recordGap(1_000, 2_000, GapReason.PARSE_FAILED, GapPrecision.BOUNDED, 2_000, pkg)
             }
         }
         val d2 = async(Dispatchers.IO) {
+            readyGate.countDown()
+            startGate.await()
             ingest.markJournalTerminal("evt-concurrent-term", "PARSE_Crash") {
                 gapWrites.incrementAndGet()
                 health.recordGap(1_000, 2_000, GapReason.PARSE_FAILED, GapPrecision.BOUNDED, 2_000, pkg)
             }
         }
-        val r1 = d1.await()
-        val r2 = d2.await()
 
-        val results = setOf(r1, r2)
-        results shouldBe setOf(JournalRetry.FAILED_RECORDED, JournalRetry.NOT_PENDING)
-        gapWrites.get() shouldBe 1
-        allGaps().count { it.reason == GapReason.PARSE_FAILED.name } shouldBe 1
+        withTimeout(10_000) {
+            readyGate.await()
+            startGate.countDown()
+            val r1 = d1.await()
+            val r2 = d2.await()
+
+            val results = setOf(r1, r2)
+            results shouldBe setOf(JournalRetry.FAILED_RECORDED, JournalRetry.NOT_PENDING)
+            gapWrites.get() shouldBe 1
+            allGaps().count { it.reason == GapReason.PARSE_FAILED.name } shouldBe 1
+        }
         Unit
     }
 
     @Test
     fun triggerFailureDuringTerminalUpdateRollsBackBothGapAndJournalRow() = runBlocking {
         ready()
-        ingest.journal(snapshot("evt-trigger-fail"), "gen", 60_000) shouldBe true
+        val originalSnapshot = snapshot("evt-trigger-fail")
+        ingest.journal(originalSnapshot, "gen", 60_000) shouldBe true
+        val originalEntity = journalEntity("evt-trigger-fail")
 
         val db = holder.db().openHelper.writableDatabase
         db.execSQL("CREATE TRIGGER fail_journal_update BEFORE UPDATE ON event_journal BEGIN SELECT RAISE(ABORT, 'forced trigger failure'); END;")
@@ -1041,7 +1123,11 @@ class JournalLossTransactionTest {
 
             // Both gap and journal row must be rolled back
             allGaps().none { it.reason == GapReason.PAYLOAD_UNREADABLE.name } shouldBe true
-            holder.db().journalDao().state("evt-trigger-fail") shouldBe "PENDING"
+            val postEntity = journalEntity("evt-trigger-fail")
+            postEntity.state shouldBe "PENDING"
+            postEntity.attempts shouldBe originalEntity.attempts
+            postEntity.payload shouldBe originalEntity.payload
+            postEntity.failureCode shouldBe originalEntity.failureCode
             lossState("evt-trigger-fail") shouldBe LOSS_UNSETTLED
         } finally {
             db.execSQL("DROP TRIGGER IF EXISTS fail_journal_update")
@@ -1150,7 +1236,9 @@ class JournalLossTransactionTest {
     @Test
     fun cancellationDuringTerminalTransitionRollsBackAndKeepsPendingNotDeferred() = runBlocking {
         ready()
-        ingest.journal(snapshot("evt-cancel-term"), "gen", 60_000) shouldBe true
+        val originalSnapshot = snapshot("evt-cancel-term")
+        ingest.journal(originalSnapshot, "gen", 60_000) shouldBe true
+        val originalEntity = journalEntity("evt-cancel-term")
 
         var exceptionThrown = false
         try {
@@ -1165,7 +1253,11 @@ class JournalLossTransactionTest {
         exceptionThrown shouldBe true
         // Transaction must be completely rolled back
         allGaps().none { it.reason == GapReason.PARSE_FAILED.name } shouldBe true
-        holder.db().journalDao().state("evt-cancel-term") shouldBe "PENDING"
+        val postEntity = journalEntity("evt-cancel-term")
+        postEntity.state shouldBe "PENDING"
+        postEntity.attempts shouldBe originalEntity.attempts
+        postEntity.payload shouldBe originalEntity.payload
+        postEntity.failureCode shouldBe originalEntity.failureCode
         lossState("evt-cancel-term") shouldBe LOSS_UNSETTLED
         // Must NOT be parked or deferred
         ingest.isReplayCandidate("evt-cancel-term") shouldBe true
@@ -1274,9 +1366,204 @@ class JournalLossTransactionTest {
             batch.deferredCount shouldBe 0
 
             // Row preserved intact
-            holder.db().journalDao().state("evt-bad-nodefer") shouldBe "PENDING"
-            holder.db().journalDao().payload("evt-bad-nodefer") shouldBe "{ bad json preserved"
+            val entity = journalEntity("evt-bad-nodefer")
+            entity.state shouldBe "PENDING"
+            entity.attempts shouldBe 0
+            entity.payload shouldBe "{ bad json preserved"
+            entity.failureCode shouldBe null
             lossState("evt-bad-nodefer") shouldBe LOSS_UNSETTLED
+        } finally {
+            db.execSQL("DROP TRIGGER IF EXISTS fail_gap_insert")
+            db.execSQL("DROP TRIGGER IF EXISTS fail_journal_update")
+        }
+        Unit
+    }
+
+    // ---- Real CaptureCoordinator + Real IngestRepository / Room cross-layer verification (S3) ----
+
+    @Test
+    fun realCoordinatorAndRoomReplay200And400BadRowsWithSuccessfulGapsCommitsTailRow() = runBlocking {
+        ready()
+        val sources = SourceRepository(holder, MediaDirectory(context))
+        sources.enable(pkg, "Chat", "standard", 1_000L)
+        val coordinator = createCoordinator()
+
+        // 1. First scenario: 200 bad rows + 201st valid messaging row
+        for (i in 1..200) {
+            holder.db().journalDao().insert(
+                EventJournalEntity(
+                    eventId = "evt-bad-$i",
+                    generation = "gen",
+                    receivedAtEpochMs = 1_000L + i,
+                    expiresAtEpochMs = 60_000L + i,
+                    state = "PENDING",
+                    attempts = 0,
+                    failureCode = null,
+                    payload = "{ bad json $i",
+                    packageName = pkg,
+                    lossRecorded = LOSS_UNSETTLED,
+                ),
+            )
+        }
+        val goodSnapshot201 = messagingSnapshot("evt-good-201")
+        ingest.journal(goodSnapshot201, "gen", 60_000) shouldBe true
+
+        // Call production replayPass directly on CaptureCoordinator — NO custom drain loop or fake setState!
+        val ran1 = coordinator.replayPassForTesting()
+        ran1 shouldBe true
+
+        // Tail row 201 was truly parsed and committed by CaptureCoordinator into Room!
+        holder.db().journalDao().state("evt-good-201") shouldBe "COMMITTED"
+        messageCount() shouldBe 1
+
+        // All 200 bad rows were marked FAILED and PAYLOAD_UNREADABLE gaps recorded in Room DB
+        holder.db().journalDao().state("evt-bad-1") shouldBe "FAILED"
+        holder.db().journalDao().state("evt-bad-200") shouldBe "FAILED"
+        allGaps().count { it.reason == GapReason.PAYLOAD_UNREADABLE.name } shouldBe 200
+
+        // 2. Second scenario: 400 additional bad rows + 401st valid messaging row
+        for (i in 201..600) {
+            holder.db().journalDao().insert(
+                EventJournalEntity(
+                    eventId = "evt-bad400-$i",
+                    generation = "gen",
+                    receivedAtEpochMs = 10_000L + i,
+                    expiresAtEpochMs = 60_000L + i,
+                    state = "PENDING",
+                    attempts = 0,
+                    failureCode = null,
+                    payload = "{ bad json 400 $i",
+                    packageName = pkg,
+                    lossRecorded = LOSS_UNSETTLED,
+                ),
+            )
+        }
+        val goodSnapshot401 = messagingSnapshot("evt-good-401")
+        ingest.journal(goodSnapshot401, "gen", 60_000) shouldBe true
+
+        val ran2 = coordinator.replayPassForTesting()
+        ran2 shouldBe true
+
+        holder.db().journalDao().state("evt-good-401") shouldBe "COMMITTED"
+        messageCount() shouldBe 2
+        holder.db().journalDao().state("evt-bad400-201") shouldBe "FAILED"
+        holder.db().journalDao().state("evt-bad400-600") shouldBe "FAILED"
+        allGaps().count { it.reason == GapReason.PAYLOAD_UNREADABLE.name } shouldBe 600
+        Unit
+    }
+
+    @Test
+    fun realCoordinatorAndRoomReplay200And400BadRowsWithFailingGapAndSuccessfulDeferralCommitsTailRow() = runBlocking {
+        ready()
+        val sources = SourceRepository(holder, MediaDirectory(context))
+        sources.enable(pkg, "Chat", "standard", 1_000L)
+        val coordinator = createCoordinator()
+
+        val db = holder.db().openHelper.writableDatabase
+        db.execSQL("CREATE TRIGGER fail_gap_insert BEFORE INSERT ON gap_interval BEGIN SELECT RAISE(ABORT, 'forced gap failure'); END;")
+        try {
+            // 200 bad rows where decode fails; gap fails so rows are deferred (+2 -> LOSS_DEFERRED)
+            for (i in 1..200) {
+                holder.db().journalDao().insert(
+                    EventJournalEntity(
+                        eventId = "evt-defer-bad-$i",
+                        generation = "gen",
+                        receivedAtEpochMs = 1_000L + i,
+                        expiresAtEpochMs = 60_000L + i,
+                        state = "PENDING",
+                        attempts = 0,
+                        failureCode = null,
+                        payload = "{ bad json defer $i",
+                        packageName = pkg,
+                        lossRecorded = LOSS_UNSETTLED,
+                    ),
+                )
+            }
+            val goodSnapshot201 = messagingSnapshot("evt-good-defer-201")
+            ingest.journal(goodSnapshot201, "gen", 60_000) shouldBe true
+
+            // Coordinator replayPass advances through the deferred bad rows and commits the tail row
+            val ran1 = coordinator.replayPassForTesting()
+            ran1 shouldBe true
+
+            holder.db().journalDao().state("evt-good-defer-201") shouldBe "COMMITTED"
+            messageCount() shouldBe 1
+
+            // Bad rows were deferred (not committed, lossState == LOSS_DEFERRED)
+            lossState("evt-defer-bad-1") shouldBe LOSS_DEFERRED
+            lossState("evt-defer-bad-200") shouldBe LOSS_DEFERRED
+
+            // 400 additional bad rows
+            for (i in 201..600) {
+                holder.db().journalDao().insert(
+                    EventJournalEntity(
+                        eventId = "evt-defer400-bad-$i",
+                        generation = "gen",
+                        receivedAtEpochMs = 10_000L + i,
+                        expiresAtEpochMs = 60_000L + i,
+                        state = "PENDING",
+                        attempts = 0,
+                        failureCode = null,
+                        payload = "{ bad json defer 400 $i",
+                        packageName = pkg,
+                        lossRecorded = LOSS_UNSETTLED,
+                    ),
+                )
+            }
+            val goodSnapshot401 = messagingSnapshot("evt-good-defer-401")
+            ingest.journal(goodSnapshot401, "gen", 60_000) shouldBe true
+
+            val ran2 = coordinator.replayPassForTesting()
+            ran2 shouldBe true
+
+            holder.db().journalDao().state("evt-good-defer-401") shouldBe "COMMITTED"
+            messageCount() shouldBe 2
+            lossState("evt-defer400-bad-201") shouldBe LOSS_DEFERRED
+            lossState("evt-defer400-bad-600") shouldBe LOSS_DEFERRED
+        } finally {
+            db.execSQL("DROP TRIGGER IF EXISTS fail_gap_insert")
+        }
+        Unit
+    }
+
+    @Test
+    fun realCoordinatorAndRoomReplayFailingDeferralExitsBoundedAndPreservesPayloadAndAttempts() = runBlocking {
+        ready()
+        val sources = SourceRepository(holder, MediaDirectory(context))
+        sources.enable(pkg, "Chat", "standard", 1_000L)
+        val coordinator = createCoordinator()
+
+        val db = holder.db().openHelper.writableDatabase
+        db.execSQL("CREATE TRIGGER fail_gap_insert BEFORE INSERT ON gap_interval BEGIN SELECT RAISE(ABORT, 'forced gap failure'); END;")
+        db.execSQL("CREATE TRIGGER fail_journal_update BEFORE UPDATE ON event_journal BEGIN SELECT RAISE(ABORT, 'forced update failure'); END;")
+        try {
+            holder.db().journalDao().insert(
+                EventJournalEntity(
+                    eventId = "evt-bad-nodefer-coord",
+                    generation = "gen",
+                    receivedAtEpochMs = 1_000L,
+                    expiresAtEpochMs = 60_000L,
+                    state = "PENDING",
+                    attempts = 0,
+                    failureCode = null,
+                    payload = "{ bad json preserved intact",
+                    packageName = pkg,
+                    lossRecorded = LOSS_UNSETTLED,
+                ),
+            )
+
+            // Must exit cleanly without infinite loop or hanging
+            val ran = coordinator.replayPassForTesting()
+            ran shouldBe true
+
+            // Exactly original payload, attempts, and state preserved intact
+            val entity = journalEntity("evt-bad-nodefer-coord")
+            entity.state shouldBe "PENDING"
+            entity.payload shouldBe "{ bad json preserved intact"
+            entity.attempts shouldBe 0
+            entity.failureCode shouldBe null
+            lossState("evt-bad-nodefer-coord") shouldBe LOSS_UNSETTLED
+            messageCount() shouldBe 0
         } finally {
             db.execSQL("DROP TRIGGER IF EXISTS fail_gap_insert")
             db.execSQL("DROP TRIGGER IF EXISTS fail_journal_update")

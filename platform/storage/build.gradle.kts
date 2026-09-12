@@ -33,6 +33,8 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.collections.immutable)
     androidTestImplementation(project(":core:testing"))
+    androidTestImplementation(project(":platform:capture"))
+    androidTestImplementation(project(":platform:media"))
     androidTestImplementation(libs.androidx.room.testing)
     androidTestImplementation(libs.hilt.android.testing)
     kspAndroidTest(libs.hilt.compiler)

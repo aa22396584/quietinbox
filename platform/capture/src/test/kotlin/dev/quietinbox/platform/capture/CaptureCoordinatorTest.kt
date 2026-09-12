@@ -2728,8 +2728,12 @@ class CaptureCoordinatorTest : FunSpec({
 
     test("bad rows with failing deferral preserves payload and attempts with bounded exit") {
         val h = Harness()
+        var pageCallCount = 0
+        val pageCallSignal = CompletableDeferred<Unit>()
         // Gap fails AND deferral fails: pendingJournal returns 0 snapshots with rawAdvanced = false
         coEvery { h.ingest.pendingJournal(any(), any()) } answers {
+            pageCallCount++
+            pageCallSignal.complete(Unit)
             PendingJournalBatch(emptyList(), rawCount = 1, rawAdvanced = false)
         }
         coEvery { h.ingest.isJournalPending(any()) } returns true
@@ -2737,8 +2741,13 @@ class CaptureCoordinatorTest : FunSpec({
         coordinator.onConnected(h.service)
         h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
 
-        // Must exit replay cleanly within bounded time without spinning or crashing
-        stillHolds(forMs = 500) {
+        // Must receive completion signal that replay attempted page read
+        withTimeout(2_000) { pageCallSignal.await() }
+
+        // Must exit replay cleanly: bounded to exactly 1 page call, never spinning in busy-loop
+        pageCallCount shouldBe 1
+        stillHolds(forMs = 300) {
+            pageCallCount shouldBe 1
             coVerify(exactly = 0) {
                 h.ingest.commit(any(), any(), any(), any(), any(), any(), any(), any())
             }

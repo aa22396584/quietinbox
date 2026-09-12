@@ -88,6 +88,7 @@ data class SourceConfiguration(
     val mediaEnabled: Boolean,
     val addedAtEpochMs: Long,
     val adapterId: String?,
+    val verificationTier: SourceVerificationTier = SourceEvidenceResolver.resolveTier(packageName, adapterId != null),
 )
 
 /** Well-known sources with versioned adapters. Anything else goes through the standard parser. */

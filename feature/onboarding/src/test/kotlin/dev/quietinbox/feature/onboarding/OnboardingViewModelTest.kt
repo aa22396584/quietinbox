@@ -12,6 +12,7 @@ import dev.quietinbox.platform.storage.repo.SourceRepository
 import dev.quietinbox.platform.storage.settings.SettingsRepository
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
@@ -147,6 +148,18 @@ class OnboardingViewModelTest : FunSpec({
             captured.value = TEST_MESSAGES
             vm.state.first().testSucceeded shouldBe true
             job.cancel()
+        }
+    }
+
+    test("choices expose verification tier as SYNTHETIC_ONLY for known adapters, never REAL_DEVICE_PASSED") {
+        val vm = viewModel()
+        val choices = vm.state.value.choices
+        choices shouldNotBe emptyList<SourceChoice>()
+        for (c in choices) {
+            c.hasAdapter shouldBe true
+            // RS-04: Known adapter must resolve to SYNTHETIC_ONLY, never misrepresenting real-device verification
+            c.tier shouldBe dev.quietinbox.core.model.SourceVerificationTier.SYNTHETIC_ONLY
+            (c.tier == dev.quietinbox.core.model.SourceVerificationTier.REAL_DEVICE_PASSED) shouldBe false
         }
     }
 })

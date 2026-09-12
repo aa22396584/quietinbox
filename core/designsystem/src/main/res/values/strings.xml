@@ -245,6 +245,12 @@
     <string name="health_add_by_package">Add by exact package name (generic parser)</string>
     <string name="health_add_source_empty">No matching apps.</string>
     <string name="health_known_source">Versioned adapter available</string>
+    <string name="source_tier_verified">Real device verified</string>
+    <string name="source_tier_synthetic_only">Synthetic tests only</string>
+    <string name="source_tier_untested">Untested parser</string>
+    <string name="source_tier_partial">Partially verified</string>
+    <string name="source_tier_regressed">Verification regressed</string>
+    <string name="source_tier_blocked">Capture blocked</string>
     <string name="health_last_event">last accepted event %1$s</string>
     <string name="health_last_event_never">no event accepted yet</string>
     <string name="health_last_saved">last copy saved %1$s</string>

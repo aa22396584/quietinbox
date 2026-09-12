@@ -66,6 +66,7 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.quietinbox.core.designsystem.R
 import dev.quietinbox.core.designsystem.components.QualityTag
+import dev.quietinbox.core.designsystem.components.SourceVerificationTag
 import dev.quietinbox.core.designsystem.components.listenerStateLabel
 import dev.quietinbox.core.designsystem.components.SourceBadge
 import dev.quietinbox.core.designsystem.theme.QualityColors
@@ -197,7 +198,7 @@ private fun SourcesStep(state: OnboardingUiState, onToggle: (String) -> Unit) {
                 headlineContent = { Text(c.label) },
                 supportingContent = {
                     if (!c.installed) Text(stringResource(R.string.ob_sources_not_installed), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    else if (c.hasAdapter) QualityTag(stringResource(R.string.health_known_source), Icons.Outlined.CheckCircle, QualityColors.verified)
+                    else SourceVerificationTag(c.tier)
                 },
                 trailingContent = { Checkbox(checked = c.packageName in state.selected, onCheckedChange = { onToggle(c.packageName) }, enabled = c.installed) },
                 colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),

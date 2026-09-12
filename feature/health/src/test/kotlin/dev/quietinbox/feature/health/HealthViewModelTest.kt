@@ -194,4 +194,31 @@ class HealthViewModelTest : FunSpec({
         vm.state.value.policyFailure.shouldBeNull()
         job.cancel()
     }
+
+    test("SourceConfiguration defaults verification tier based on packageName and adapter presence") {
+        val knownSource = SourceConfiguration(
+            packageName = dev.quietinbox.core.model.KnownSources.LINE,
+            displayName = "LINE",
+            enabled = true,
+            paused = false,
+            retentionDays = null,
+            mediaEnabled = true,
+            addedAtEpochMs = 0L,
+            adapterId = "line",
+        )
+        knownSource.verificationTier shouldBe dev.quietinbox.core.model.SourceVerificationTier.SYNTHETIC_ONLY
+        (knownSource.verificationTier == dev.quietinbox.core.model.SourceVerificationTier.REAL_DEVICE_PASSED) shouldBe false
+
+        val unknownSource = SourceConfiguration(
+            packageName = "com.custom.app",
+            displayName = "Custom",
+            enabled = true,
+            paused = false,
+            retentionDays = null,
+            mediaEnabled = true,
+            addedAtEpochMs = 0L,
+            adapterId = null,
+        )
+        unknownSource.verificationTier shouldBe dev.quietinbox.core.model.SourceVerificationTier.UNTESTED
+    }
 })

@@ -33,11 +33,20 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+import dev.quietinbox.core.model.SourceVerificationTier
+import dev.quietinbox.core.model.SourceEvidenceResolver
+
 /** How many messages the synthetic test conversation carries, and how long the step waits for them. */
 const val TEST_MESSAGES = 3
 const val TEST_TIMEOUT_MS = 20_000L
 
-data class SourceChoice(val packageName: String, val label: String, val installed: Boolean, val hasAdapter: Boolean)
+data class SourceChoice(
+    val packageName: String,
+    val label: String,
+    val installed: Boolean,
+    val hasAdapter: Boolean,
+    val tier: SourceVerificationTier = SourceEvidenceResolver.resolveTier(packageName, hasAdapter),
+)
 
 data class OnboardingUiState(
     val step: Int = 0,
@@ -97,7 +106,14 @@ class OnboardingViewModel @Inject constructor(
         val pm = context.packageManager
         return KnownSources.ALL.map { pkg ->
             val label = runCatching { pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString() }.getOrNull()
-            SourceChoice(pkg, label ?: prettyName(pkg), installed = label != null, hasAdapter = registry.adapterFor(pkg) != null)
+            val hasAdapter = registry.adapterFor(pkg) != null
+            SourceChoice(
+                packageName = pkg,
+                label = label ?: prettyName(pkg),
+                installed = label != null,
+                hasAdapter = hasAdapter,
+                tier = SourceEvidenceResolver.resolveTier(pkg, hasAdapter),
+            )
         }
     }
 

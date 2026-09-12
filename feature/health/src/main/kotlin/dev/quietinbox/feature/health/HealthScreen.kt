@@ -80,6 +80,7 @@ import dev.quietinbox.core.designsystem.R
 import dev.quietinbox.core.designsystem.components.QualityTag
 import dev.quietinbox.core.designsystem.components.SectionHeader
 import dev.quietinbox.core.designsystem.components.SourceBadge
+import dev.quietinbox.core.designsystem.components.SourceVerificationTag
 import dev.quietinbox.core.designsystem.components.StatTile
 import dev.quietinbox.core.designsystem.components.StatusHero
 import dev.quietinbox.core.designsystem.components.TimeFormat
@@ -91,6 +92,7 @@ import dev.quietinbox.core.designsystem.components.relativeTime
 import dev.quietinbox.core.designsystem.theme.QualityColors
 import dev.quietinbox.core.model.ListenerState
 import dev.quietinbox.core.model.SourceConfiguration
+import dev.quietinbox.core.model.SourceVerificationTier
 import dev.quietinbox.platform.crypto.KeyFailure
 import kotlinx.coroutines.launch
 
@@ -406,7 +408,13 @@ private fun SourceRow(source: SourceConfiguration, onEnabled: (Boolean) -> Unit,
         headlineContent = { Text(source.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         supportingContent = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(stringResource(R.string.health_adapter, source.adapterId ?: stringResource(R.string.health_adapter_standard)), style = MaterialTheme.typography.bodySmall)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(stringResource(R.string.health_adapter, source.adapterId ?: stringResource(R.string.health_adapter_standard)), style = MaterialTheme.typography.bodySmall)
+                    SourceVerificationTag(source.verificationTier)
+                }
                 if (source.paused) QualityTag(stringResource(R.string.health_source_paused), Icons.Outlined.PauseCircle, QualityColors.uncertain)
             }
         },
@@ -456,7 +464,7 @@ private fun AddSourceSheet(onDismiss: () -> Unit, search: suspend (String) -> Li
                         supportingContent = {
                             when {
                                 app.manual -> Text(stringResource(R.string.health_add_by_package), style = MaterialTheme.typography.bodySmall)
-                                app.hasAdapter -> QualityTag(stringResource(R.string.health_known_source), Icons.Outlined.CheckCircle, QualityColors.verified)
+                                app.hasAdapter || app.tier != SourceVerificationTier.UNTESTED -> SourceVerificationTag(app.tier)
                                 else -> Text(app.packageName, style = MaterialTheme.typography.bodySmall)
                             }
                         },

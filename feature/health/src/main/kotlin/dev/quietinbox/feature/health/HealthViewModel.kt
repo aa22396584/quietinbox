@@ -10,6 +10,8 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dev.quietinbox.core.designsystem.R
 import dev.quietinbox.core.model.GapInterval
 import dev.quietinbox.core.model.KnownSources
+import dev.quietinbox.core.model.SourceVerificationTier
+import dev.quietinbox.core.model.SourceEvidenceResolver
 import dev.quietinbox.core.model.SourceConfiguration
 import dev.quietinbox.core.parser.ParserRegistry
 import dev.quietinbox.parsers.apps.AppParsers
@@ -40,7 +42,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
-data class InstalledApp(val packageName: String, val label: String, val hasAdapter: Boolean, val manual: Boolean = false)
+data class InstalledApp(
+    val packageName: String,
+    val label: String,
+    val hasAdapter: Boolean,
+    val manual: Boolean = false,
+    val tier: SourceVerificationTier = SourceEvidenceResolver.resolveTier(packageName, hasAdapter),
+)
 
 data class HealthUiState(
     val capture: CaptureStatus = CaptureStatus(),

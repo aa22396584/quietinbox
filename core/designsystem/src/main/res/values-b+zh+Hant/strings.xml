@@ -243,6 +243,12 @@
     <string name="health_add_by_package">以套件名稱直接新增（通用解析器）</string>
     <string name="health_add_source_empty">沒有符合的 App。</string>
     <string name="health_known_source">有版本化 adapter</string>
+    <string name="source_tier_verified">真機已驗證</string>
+    <string name="source_tier_synthetic_only">僅合成測試</string>
+    <string name="source_tier_untested">未經測試解析器</string>
+    <string name="source_tier_partial">部分驗證</string>
+    <string name="source_tier_regressed">驗證已退化</string>
+    <string name="source_tier_blocked">擷取已阻擋</string>
     <string name="health_last_event">最近接受的事件 %1$s</string>
     <string name="health_last_event_never">還沒有接受過任何事件</string>
     <string name="health_last_saved">最近存下副本 %1$s</string>

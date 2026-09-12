@@ -1,6 +1,7 @@
 package dev.quietinbox.core.designsystem.components
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.BrokenImage
 import androidx.compose.material.icons.outlined.ContentCut
 import androidx.compose.material.icons.outlined.HelpOutline
@@ -10,9 +11,11 @@ import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.PhotoSizeSelectLarge
+import androidx.compose.material.icons.outlined.Science
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material.icons.outlined.Verified
 import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -24,8 +27,19 @@ import dev.quietinbox.core.model.GapReason
 import dev.quietinbox.core.model.IdentityConfidence
 import dev.quietinbox.core.model.ListenerState
 import dev.quietinbox.core.model.MediaState
+import dev.quietinbox.core.model.SourceVerificationTier
 
 data class Labelled(val text: String, val icon: ImageVector, val tint: Color)
+
+@Composable
+fun sourceTierLabel(tier: SourceVerificationTier): Labelled = when (tier) {
+    SourceVerificationTier.REAL_DEVICE_PASSED -> Labelled(stringResource(R.string.source_tier_verified), Icons.Outlined.Verified, QualityColors.verified)
+    SourceVerificationTier.SYNTHETIC_ONLY -> Labelled(stringResource(R.string.source_tier_synthetic_only), Icons.Outlined.Science, QualityColors.inferred)
+    SourceVerificationTier.UNTESTED -> Labelled(stringResource(R.string.source_tier_untested), Icons.Outlined.HelpOutline, QualityColors.uncertain)
+    SourceVerificationTier.PARTIAL -> Labelled(stringResource(R.string.source_tier_partial), Icons.Outlined.HelpOutline, QualityColors.uncertain)
+    SourceVerificationTier.REGRESSED -> Labelled(stringResource(R.string.source_tier_regressed), Icons.Outlined.WarningAmber, QualityColors.uncertain)
+    SourceVerificationTier.BLOCKED -> Labelled(stringResource(R.string.source_tier_blocked), Icons.Outlined.Block, QualityColors.failed)
+}
 
 @Composable
 fun identityLabel(confidence: IdentityConfidence): Labelled = when (confidence) {

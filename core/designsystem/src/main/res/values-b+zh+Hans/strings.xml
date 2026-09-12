@@ -243,6 +243,12 @@
     <string name="health_add_by_package">按包名直接添加（通用解析器）</string>
     <string name="health_add_source_empty">没有匹配的应用。</string>
     <string name="health_known_source">有版本化适配器</string>
+    <string name="source_tier_verified">真机已验证</string>
+    <string name="source_tier_synthetic_only">仅合成测试</string>
+    <string name="source_tier_untested">未经测试解析器</string>
+    <string name="source_tier_partial">部分验证</string>
+    <string name="source_tier_regressed">验证已退化</string>
+    <string name="source_tier_blocked">捕获已阻断</string>
     <string name="health_last_event">最近接受的事件 %1$s</string>
     <string name="health_last_event_never">还没有接受过任何事件</string>
     <string name="health_last_saved">最近存下副本 %1$s</string>

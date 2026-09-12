@@ -46,6 +46,25 @@ fun QualityTag(
     }
 }
 
+/**
+ * Status label displaying the source's verification tier according to COMPATIBILITY.md (RS-04).
+ * Ensures adapters with only synthetic fixtures are honest about SYNTHETIC_ONLY rather than
+ * claiming real-device verified status.
+ */
+@Composable
+fun SourceVerificationTag(
+    tier: dev.quietinbox.core.model.SourceVerificationTier,
+    modifier: Modifier = Modifier,
+) {
+    val label = sourceTierLabel(tier)
+    QualityTag(
+        text = label.text,
+        icon = label.icon,
+        tint = label.tint,
+        modifier = modifier,
+    )
+}
+
 /** Section title used across screens. */
 @Composable
 fun SectionHeader(text: String, modifier: Modifier = Modifier, trailing: (@Composable () -> Unit)? = null) {

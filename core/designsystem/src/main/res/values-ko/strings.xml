@@ -243,6 +243,12 @@
     <string name="health_add_by_package">정확한 패키지 이름으로 추가(범용 파서)</string>
     <string name="health_add_source_empty">일치하는 앱이 없습니다.</string>
     <string name="health_known_source">버전 관리되는 어댑터 있음</string>
+    <string name="source_tier_verified">실기기 검증됨</string>
+    <string name="source_tier_synthetic_only">합성 테스트 전용</string>
+    <string name="source_tier_untested">미테스트 파서</string>
+    <string name="source_tier_partial">일부 검증됨</string>
+    <string name="source_tier_regressed">검증 퇴행됨</string>
+    <string name="source_tier_blocked">캡처 차단됨</string>
     <string name="health_last_event">마지막으로 받아들인 이벤트 %1$s</string>
     <string name="health_last_event_never">아직 받아들인 이벤트가 없습니다</string>
     <string name="health_last_saved">마지막으로 저장한 사본 %1$s</string>

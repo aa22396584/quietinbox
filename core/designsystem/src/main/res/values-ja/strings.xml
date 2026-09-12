@@ -243,6 +243,12 @@
     <string name="health_add_by_package">パッケージ名を直接指定して追加（汎用パーサー）</string>
     <string name="health_add_source_empty">一致するアプリはありません。</string>
     <string name="health_known_source">バージョン管理されたアダプターあり</string>
+    <string name="source_tier_verified">実機検証済み</string>
+    <string name="source_tier_synthetic_only">合成テストのみ</string>
+    <string name="source_tier_untested">未テストのパーサー</string>
+    <string name="source_tier_partial">一部検証済み</string>
+    <string name="source_tier_regressed">検証退行</string>
+    <string name="source_tier_blocked">キャプチャ遮断</string>
     <string name="health_last_event">最後に受け付けたイベント %1$s</string>
     <string name="health_last_event_never">まだイベントを受け付けていません</string>
     <string name="health_last_saved">最後に保存したコピー %1$s</string>

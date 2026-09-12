@@ -1108,7 +1108,7 @@ class CaptureCoordinator @Inject constructor(
         val parser = registry.parserFor(snapshot)
         val batch = try {
             parser.parse(snapshot)
-        } catch (e: Throwable) {
+        } catch (e: Exception) {
             if (e is CancellationException) throw e
             guarded {
                 ingest.markJournalTerminal(snapshot.eventId, "PARSE_${e::class.java.simpleName}") {
@@ -1267,14 +1267,14 @@ class CaptureCoordinator @Inject constructor(
                     // Paused sources are excluded at the query so they cannot occupy the whole page
                     // and starve everyone else; their rows are replayed when they are unpaused.
                     val batch = ingest.pendingJournal(limit = replayPageSize, excludingPackages = pausedPackages)
-                    if (batch.isEmpty()) {
-                        // Everything that is not deferred has been dealt with. Only now are the
+                    if (batch.isEof) {
+                        // Everything that is not deferred has been dealt with (true EOF). Only now are the
                         // deferred rows put back, and only once per pass. Doing it at the *head*
                         // of the pass put a failing prefix in front of everything on every
                         // trigger: 20,000 rows whose gap writes keep failing re-exhaust the
                         // hundred-round budget each time, and row 20,001 is never read, however
-                        // many times a replay runs (round 37 Codex I1). Draining first means the
-                        // rows behind them are committed before the cohort is retried.
+                        // many times a replay runs (round 37 Codex I1). Draining first means all
+                        // non-deferred rows behind them are committed before the cohort is retried.
                         if (resumed) break
                         resumed = true
                         var putBack = 0
@@ -1282,8 +1282,18 @@ class CaptureCoordinator @Inject constructor(
                         if (putBack == 0) break
                         continue
                     }
+                    if (batch.deferredCount > 0) {
+                        deferredSettlements = true
+                    }
+                    if (batch.snapshots.isEmpty()) {
+                        // All rows on this raw page failed decode and were handled at raw level.
+                        // If raw rows advanced (filed FAILED or deferred), continue to next page;
+                        // if deferral failed too, progressed stays false for a clean bounded exit.
+                        progressed = batch.rawAdvanced
+                        continue
+                    }
                     progressed = false
-                    for ((generation, snapshot) in batch) {
+                    for ((generation, snapshot) in batch.snapshots) {
                         if (paused) break
                         // One event per lock acquisition so live capture is never starved; the
                         // PENDING re-check inside the lock prevents double processing.

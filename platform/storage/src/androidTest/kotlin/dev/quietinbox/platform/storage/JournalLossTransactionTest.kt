@@ -26,6 +26,8 @@ import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -957,6 +959,13 @@ class JournalLossTransactionTest {
         retry shouldBe JournalRetry.NOT_PENDING
         gapRecorded shouldBe false
         holder.db().journalDao().state("evt-policy-discard") shouldBe "DISCARDED"
+        holder.db().journalDao().payload("evt-policy-discard") shouldBe ""
+        val (fc, st) = holder.db().openHelper.writableDatabase.query("SELECT failureCode, state FROM event_journal WHERE eventId = 'evt-policy-discard'").use {
+            it.moveToFirst()
+            Pair(it.getString(0), it.getString(1))
+        }
+        st shouldBe "DISCARDED"
+        fc shouldBe "SOURCE_DISABLED"
         allGaps().none { it.reason == GapReason.PAYLOAD_UNREADABLE.name } shouldBe true
         Unit
     }
@@ -981,6 +990,90 @@ class JournalLossTransactionTest {
         second shouldBe JournalRetry.NOT_PENDING
         gapWrites shouldBe 1
         allGaps().count { it.reason == GapReason.PARSE_FAILED.name } shouldBe 1
+        Unit
+    }
+
+    @Test
+    fun concurrentCoroutinesCallingTerminalDoNotDuplicateGapsOrDeadlock() = runBlocking {
+        ready()
+        ingest.journal(snapshot("evt-concurrent-term"), "gen", 60_000) shouldBe true
+
+        val gapWrites = java.util.concurrent.atomic.AtomicInteger(0)
+        val d1 = async(Dispatchers.IO) {
+            ingest.markJournalTerminal("evt-concurrent-term", "PARSE_Crash") {
+                gapWrites.incrementAndGet()
+                health.recordGap(1_000, 2_000, GapReason.PARSE_FAILED, GapPrecision.BOUNDED, 2_000, pkg)
+            }
+        }
+        val d2 = async(Dispatchers.IO) {
+            ingest.markJournalTerminal("evt-concurrent-term", "PARSE_Crash") {
+                gapWrites.incrementAndGet()
+                health.recordGap(1_000, 2_000, GapReason.PARSE_FAILED, GapPrecision.BOUNDED, 2_000, pkg)
+            }
+        }
+        val r1 = d1.await()
+        val r2 = d2.await()
+
+        val results = setOf(r1, r2)
+        results shouldBe setOf(JournalRetry.FAILED_RECORDED, JournalRetry.NOT_PENDING)
+        gapWrites.get() shouldBe 1
+        allGaps().count { it.reason == GapReason.PARSE_FAILED.name } shouldBe 1
+        Unit
+    }
+
+    @Test
+    fun triggerFailureDuringTerminalUpdateRollsBackBothGapAndJournalRow() = runBlocking {
+        ready()
+        ingest.journal(snapshot("evt-trigger-fail"), "gen", 60_000) shouldBe true
+
+        val db = holder.db().openHelper.writableDatabase
+        db.execSQL("CREATE TRIGGER fail_journal_update BEFORE UPDATE ON event_journal BEGIN SELECT RAISE(ABORT, 'forced trigger failure'); END;")
+        try {
+            val retry = ingest.markJournalTerminal("evt-trigger-fail", "DECODE") {
+                health.recordGap(1_000, 2_000, GapReason.PAYLOAD_UNREADABLE, GapPrecision.BOUNDED, 2_000, pkg)
+            }
+            retry shouldBe JournalRetry.RETRYABLE
+
+            // Both gap and journal row must be rolled back
+            allGaps().none { it.reason == GapReason.PAYLOAD_UNREADABLE.name } shouldBe true
+            holder.db().journalDao().state("evt-trigger-fail") shouldBe "PENDING"
+            lossState("evt-trigger-fail") shouldBe LOSS_UNSETTLED
+        } finally {
+            db.execSQL("DROP TRIGGER IF EXISTS fail_journal_update")
+        }
+        Unit
+    }
+
+    @Test
+    fun lossBitsDeferAndResumePreservesSettledState() = runBlocking {
+        ready()
+        // Case A: unsettled (bit 0) row -> defer (+2) -> 2 -> resume (-2) -> 0
+        ingest.journal(snapshot("evt-loss-bit-0"), "gen", 60_000) shouldBe true
+        lossState("evt-loss-bit-0") shouldBe LOSS_UNSETTLED
+
+        val retry0 = ingest.markJournalTerminal("evt-loss-bit-0", "PARSE_FAIL") { error("gap fail") }
+        retry0 shouldBe JournalRetry.FAILED_DEFERRED
+        lossState("evt-loss-bit-0") shouldBe LOSS_DEFERRED
+        ingest.isReplayCandidate("evt-loss-bit-0") shouldBe false
+
+        ingest.resumeDeferredSettlements() shouldBe 1
+        lossState("evt-loss-bit-0") shouldBe LOSS_UNSETTLED
+        ingest.isReplayCandidate("evt-loss-bit-0") shouldBe true
+
+        // Case B: settled (bit 1) row -> defer (+2) -> 3 -> resume (-2) -> 1
+        ingest.journal(snapshot("evt-loss-bit-1"), "gen", 60_000) shouldBe true
+        ingest.claimEventLoss("evt-loss-bit-1") { recordLoss() } shouldBe LossClaim.RECORDED
+        lossState("evt-loss-bit-1") shouldBe LOSS_SETTLED
+
+        // Terminal attempt with failing gap write on already-settled row defers it to 3
+        val retry1 = ingest.markJournalTerminal("evt-loss-bit-1", "COMMIT_FAIL") { error("gap fail") }
+        retry1 shouldBe JournalRetry.FAILED_DEFERRED
+        lossState("evt-loss-bit-1") shouldBe LOSS_DEFERRED_SETTLED
+        ingest.isReplayCandidate("evt-loss-bit-1") shouldBe false
+
+        ingest.resumeDeferredSettlements() shouldBe 1
+        lossState("evt-loss-bit-1") shouldBe LOSS_SETTLED
+        ingest.isReplayCandidate("evt-loss-bit-1") shouldBe true
         Unit
     }
 
@@ -1031,13 +1124,21 @@ class JournalLossTransactionTest {
         val goodSnapshot = snapshot("evt-good-201")
         ingest.journal(goodSnapshot, "gen", 60_000) shouldBe true
 
-        // First pass processes the 200 bad rows (marking them terminal FAILED)
-        val firstPass = ingest.pendingJournal()
-        firstPass.isEmpty() shouldBe true
+        // Replay drain loop: continues through rawAdvanced pages without manual two-step calls
+        val recovered = mutableListOf<String>()
+        var rounds = 0
+        var progressed = true
+        while (progressed && rounds++ < 10) {
+            val batch = ingest.pendingJournal(limit = 200)
+            if (batch.isEof) break
+            for ((_, snap) in batch.snapshots) {
+                recovered += snap.eventId
+                holder.db().journalDao().setState(snap.eventId, "COMMITTED", null)
+            }
+            progressed = if (batch.snapshots.isEmpty()) batch.rawAdvanced else true
+        }
 
-        // Bad rows left PENDING state, so second pass yields row 201 without starvation
-        val secondPass = ingest.pendingJournal()
-        secondPass.any { it.second.eventId == "evt-good-201" } shouldBe true
+        recovered shouldBe listOf("evt-good-201")
         Unit
     }
 }

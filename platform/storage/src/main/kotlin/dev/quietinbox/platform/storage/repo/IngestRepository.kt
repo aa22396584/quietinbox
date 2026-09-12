@@ -233,13 +233,25 @@ class IngestRepository @Inject constructor(
 
     suspend fun isJournalPending(eventId: String): Boolean = holder.db().journalDao().state(eventId) == "PENDING"
 
-    suspend fun pendingJournal(limit: Int = 200, excludingPackages: Collection<String> = emptyList()): List<Pair<String, NotificationSnapshot>> {
+    suspend fun pendingJournal(
+        limit: Int = 200,
+        excludingPackages: Collection<String> = emptyList(),
+    ): PendingJournalBatch {
         val db = holder.db()
-        val rows = if (excludingPackages.isEmpty()) db.journalDao().pending(limit) else db.journalDao().pendingExcluding(limit, excludingPackages.toList())
-        return rows.mapNotNull { row ->
+        val rows = if (excludingPackages.isEmpty()) {
+            db.journalDao().pending(limit)
+        } else {
+            db.journalDao().pendingExcluding(limit, excludingPackages.toList())
+        }
+        if (rows.isEmpty()) {
+            return PendingJournalBatch.EMPTY
+        }
+        var rawAdvanced = false
+        var newlyDeferred = 0
+        val snapshots = rows.mapNotNull { row ->
             runCatching { row.generation to json.decodeFromString(NotificationSnapshot.serializer(), row.payload) }
                 .getOrElse {
-                    markJournalTerminal(
+                    val terminalRetry = markJournalTerminal(
                         eventId = row.eventId,
                         failure = "DECODE",
                         lossOnTerminal = {
@@ -255,9 +267,27 @@ class IngestRepository @Inject constructor(
                             )
                         },
                     )
+                    when (terminalRetry) {
+                        JournalRetry.FAILED_RECORDED, JournalRetry.NOT_PENDING -> {
+                            rawAdvanced = true
+                        }
+                        JournalRetry.FAILED_DEFERRED -> {
+                            rawAdvanced = true
+                            newlyDeferred++
+                        }
+                        JournalRetry.RETRYABLE -> {
+                            // Deferral also failed: row retains payload and attempts, holds place on page.
+                        }
+                    }
                     null
                 }
         }
+        return PendingJournalBatch(
+            snapshots = snapshots,
+            rawCount = rows.size,
+            rawAdvanced = rawAdvanced || snapshots.isNotEmpty(),
+            deferredCount = newlyDeferred,
+        )
     }
 
     suspend fun markJournal(eventId: String, state: String, failure: String? = null) {
@@ -716,3 +746,31 @@ data class JournalCursor(val receivedAtEpochMs: Long, val eventId: String) {
  * so. Null is the confirmed end (round 36 Codex M3).
  */
 data class JournalPage(val snapshots: List<NotificationSnapshot>, val next: JournalCursor?)
+
+/**
+ * Result of reading a page of pending journal entries for replay.
+ *
+ * Decoded snapshots are available via [snapshots] and the [List] delegation.
+ * [rawCount] is the total number of candidate rows read by the query; 0 indicates true EOF.
+ * [rawAdvanced] is true if any raw row made progress (decoded, filed FAILED, or deferred).
+ * [deferredCount] is the number of rows newly parked as deferred during this page.
+ */
+data class PendingJournalBatch(
+    val snapshots: List<Pair<String, NotificationSnapshot>>,
+    val rawCount: Int,
+    val rawAdvanced: Boolean,
+    val deferredCount: Int = 0,
+) : List<Pair<String, NotificationSnapshot>> by snapshots {
+    val isEof: Boolean get() = rawCount == 0
+
+    companion object {
+        val EMPTY = PendingJournalBatch(emptyList(), 0, false, 0)
+        fun of(
+            snapshots: List<Pair<String, NotificationSnapshot>>,
+            rawCount: Int = snapshots.size,
+            rawAdvanced: Boolean = snapshots.isNotEmpty(),
+            deferredCount: Int = 0,
+        ) = PendingJournalBatch(snapshots, rawCount, rawAdvanced, deferredCount)
+    }
+}
+

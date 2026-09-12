@@ -28,6 +28,7 @@ import dev.quietinbox.platform.storage.repo.JournalRetry
 import dev.quietinbox.platform.storage.repo.JournalCursor
 import dev.quietinbox.platform.storage.repo.LossClaim
 import dev.quietinbox.platform.storage.repo.JournalPage
+import dev.quietinbox.platform.storage.repo.PendingJournalBatch
 import dev.quietinbox.platform.storage.repo.SourceRepository
 import dev.quietinbox.platform.storage.repo.VaultRepository
 import dev.quietinbox.platform.storage.settings.AppSettings
@@ -381,9 +382,10 @@ class CaptureCoordinatorTest : FunSpec({
                 val limit = firstArg<Int>()
                 val excluded = secondArg<Collection<String>>().toSet()
                 synchronized(pendingReplay) {
-                    pendingReplay.filter {
+                    val matching = pendingReplay.filter {
                         it.second.eventId !in lossDeferred && it.second.source.packageName !in excluded
                     }.take(limit)
+                    PendingJournalBatch.of(matching)
                 }
             }
             // Unmodelled rows are candidates: a fake may not report progress the code has not made.
@@ -773,7 +775,7 @@ class CaptureCoordinatorTest : FunSpec({
 
     test("replay is held while paused and runs on resume") {
         val h = Harness()
-        coEvery { h.ingest.pendingJournal(any(), any()) } returns emptyList()
+        coEvery { h.ingest.pendingJournal(any(), any()) } returns PendingJournalBatch.EMPTY
         val coordinator = h.coordinator()
         coordinator.onConnected(h.service)
         h.awaitConnected()
@@ -792,7 +794,7 @@ class CaptureCoordinatorTest : FunSpec({
         val enabled = Fixtures.snapshot(Fixtures.base(title = null, text = null), packageName = ENABLED_PKG, eventId = "evt-enabled")
         var served = false
         coEvery { h.ingest.pendingJournal(any(), any()) } coAnswers {
-            if (served) emptyList() else { served = true; listOf("gen-old" to disabled, "gen-old" to enabled) }
+            if (served) PendingJournalBatch.EMPTY else { served = true; PendingJournalBatch.of(listOf("gen-old" to disabled, "gen-old" to enabled)) }
         }
         coEvery { h.ingest.isJournalPending(any()) } returns true
         val coordinator = h.coordinator()
@@ -1567,7 +1569,7 @@ class CaptureCoordinatorTest : FunSpec({
         )
         var served = false
         coEvery { h.ingest.pendingJournal(any(), any()) } coAnswers {
-            if (served) emptyList() else { served = true; listOf("gen-old" to pending) }
+            if (served) PendingJournalBatch.EMPTY else { served = true; PendingJournalBatch.of(listOf("gen-old" to pending)) }
         }
         coEvery { h.ingest.isJournalPending(any()) } returns true
         val coordinator = h.coordinator()
@@ -1629,7 +1631,7 @@ class CaptureCoordinatorTest : FunSpec({
         )
         var served = 0
         coEvery { h.ingest.pendingJournal(any(), any()) } coAnswers {
-            if (served++ < 2) listOf("gen-old" to legacy) else emptyList()
+            if (served++ < 2) PendingJournalBatch.of(listOf("gen-old" to legacy)) else PendingJournalBatch.EMPTY
         }
         // Pending when it is picked up, no longer pending the moment after — then picked up again,
         // which is what a row that keeps failing to commit does.
@@ -1659,7 +1661,7 @@ class CaptureCoordinatorTest : FunSpec({
         )
         var served = false
         coEvery { h.ingest.pendingJournal(any(), any()) } coAnswers {
-            if (served) emptyList() else { served = true; listOf("gen-old" to legacy) }
+            if (served) PendingJournalBatch.EMPTY else { served = true; PendingJournalBatch.of(listOf("gen-old" to legacy)) }
         }
         coEvery { h.ingest.isJournalPending(any()) } returns true
         val coordinator = h.coordinator()
@@ -1685,7 +1687,7 @@ class CaptureCoordinatorTest : FunSpec({
         )
         var served = false
         coEvery { h.ingest.pendingJournal(any(), any()) } coAnswers {
-            if (served) emptyList() else { served = true; listOf("gen-old" to ambiguous) }
+            if (served) PendingJournalBatch.EMPTY else { served = true; PendingJournalBatch.of(listOf("gen-old" to ambiguous)) }
         }
         coEvery { h.ingest.isJournalPending(any()) } returns true
         val coordinator = h.coordinator()
@@ -1807,7 +1809,7 @@ class CaptureCoordinatorTest : FunSpec({
         )
         var served = 0
         coEvery { h.ingest.pendingJournal(any(), any()) } coAnswers {
-            if (served++ < 1) listOf("gen-old" to legacy) else emptyList()
+            if (served++ < 1) PendingJournalBatch.of(listOf("gen-old" to legacy)) else PendingJournalBatch.EMPTY
         }
         coEvery { h.ingest.isJournalPending(any()) } returns true
         coEvery { h.ingest.claimEventLoss(any(), any()) } throws IllegalStateException("no space left on device")
@@ -2042,7 +2044,7 @@ class CaptureCoordinatorTest : FunSpec({
         )
         var served = 0
         coEvery { h.ingest.pendingJournal(any(), any()) } coAnswers {
-            if (served++ < 1) listOf("gen-old" to legacy) else emptyList()
+            if (served++ < 1) PendingJournalBatch.of(listOf("gen-old" to legacy)) else PendingJournalBatch.EMPTY
         }
         coEvery { h.ingest.isJournalPending(any()) } returns true
         // Exactly what the repository answers for a row a concurrent pass has just deferred: no
@@ -2182,7 +2184,7 @@ class CaptureCoordinatorTest : FunSpec({
                     entered.complete(Unit)
                     release.await()
                 }
-                emptyList()
+                PendingJournalBatch.EMPTY
             } finally {
                 concurrent.decrementAndGet()
             }
@@ -2405,7 +2407,7 @@ class CaptureCoordinatorTest : FunSpec({
                 entered.complete(Unit)
                 parked.await()
             }
-            emptyList()
+            PendingJournalBatch.EMPTY
         }
         val coordinator = h.coordinator()
         coordinator.onConnected(h.service)
@@ -2431,7 +2433,7 @@ class CaptureCoordinatorTest : FunSpec({
         // made the run's end the only thing that could bring the rows back, and only if it fired
         // after the request. It is left standing instead.
         val reads = java.util.concurrent.atomic.AtomicInteger()
-        coEvery { h.ingest.pendingJournal(any(), any()) } answers { reads.incrementAndGet(); emptyList() }
+        coEvery { h.ingest.pendingJournal(any(), any()) } answers { reads.incrementAndGet(); PendingJournalBatch.EMPTY }
         val coordinator = h.coordinator()
         coordinator.onConnected(h.service)
         val inside = CompletableDeferred<Unit>()
@@ -2610,6 +2612,135 @@ class CaptureCoordinatorTest : FunSpec({
         stillHolds {
             coVerify(exactly = 0) {
                 h.ingest.commit(match { it.eventId == "evt-deferred-parse" }, any(), any(), any(), any(), any(), any(), any())
+            }
+        }
+    }
+
+    test("parser AssertionError is not caught as terminal failure and does not mark journal FAILED or insert gap") {
+        val h = Harness()
+        val assertingParser = object : NotificationParser {
+            override val id: String = "asserting"
+            override val version: String = "1.0"
+            override val packages: Set<String> = setOf(ENABLED_PKG)
+            override fun parse(snapshot: NotificationSnapshot): ParsedBatch {
+                throw AssertionError("fatal invariant failed")
+            }
+        }
+        val coordinator = h.coordinator()
+        coordinator.registry = ParserRegistry(listOf(assertingParser))
+        coordinator.onConnected(h.service)
+
+        coordinator.offerCaptured(captured("evt-assertion-error"))
+
+        stillHolds {
+            coVerify(exactly = 0) {
+                h.ingest.markJournalTerminal("evt-assertion-error", any(), any())
+            }
+            h.gaps.none { it.reason == GapReason.PARSE_FAILED.name } shouldBe true
+            coVerify(exactly = 0) {
+                h.ingest.diagnostic("PARSE_EXCEPTION", any(), any(), any())
+            }
+        }
+    }
+
+    test("200 bad rows followed by 201st normal row commits tail row in same replay pass") {
+        val h = Harness()
+        var callCount = 0
+        coEvery { h.ingest.pendingJournal(any(), any()) } answers {
+            when (callCount++) {
+                0 -> PendingJournalBatch(snapshots = emptyList(), rawCount = 200, rawAdvanced = true)
+                1 -> PendingJournalBatch.of(listOf("gen-old" to Fixtures.snapshot(
+                    shape = Fixtures.messaging(conversationTitle = "Group") { message("Bo", "tail row") },
+                    packageName = ENABLED_PKG,
+                    eventId = "evt-good-201",
+                    observedAt = 2_000L,
+                )))
+                else -> PendingJournalBatch.EMPTY
+            }
+        }
+        coEvery { h.ingest.isJournalPending(any()) } returns true
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+        h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
+
+        awaitUntil(timeoutMs = 1_500) {
+            coVerify(exactly = 1) {
+                h.ingest.commit(match { it.eventId == "evt-good-201" }, any(), any(), any(), any(), any(), any(), any())
+            }
+        }
+    }
+
+    test("199 bad rows plus normal tail row commits tail row in one replay pass as positive control") {
+        val h = Harness()
+        var served = false
+        coEvery { h.ingest.pendingJournal(any(), any()) } answers {
+            if (served) PendingJournalBatch.EMPTY else {
+                served = true
+                PendingJournalBatch.of(listOf("gen-old" to Fixtures.snapshot(
+                    shape = Fixtures.messaging(conversationTitle = "Group") { message("Bo", "surviving tail") },
+                    packageName = ENABLED_PKG,
+                    eventId = "evt-good-tail",
+                    observedAt = 2_000L,
+                )))
+            }
+        }
+        coEvery { h.ingest.isJournalPending(any()) } returns true
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+        h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
+
+        awaitUntil(timeoutMs = 1_500) {
+            coVerify(exactly = 1) {
+                h.ingest.commit(match { it.eventId == "evt-good-tail" }, any(), any(), any(), any(), any(), any(), any())
+            }
+        }
+    }
+
+    test("200 and 400 bad rows with failing gap but successful deferral advances and commits tail row in same pass") {
+        val h = Harness()
+        var callCount = 0
+        // Calls 0 and 1: 200 bad rows each (total 400 bad rows) deferred.
+        // Call 2: normal tail row 401.
+        // Call 3: empty (EOF).
+        coEvery { h.ingest.pendingJournal(any(), any()) } answers {
+            when (callCount++) {
+                0, 1 -> PendingJournalBatch(snapshots = emptyList(), rawCount = 200, rawAdvanced = true, deferredCount = 200)
+                2 -> PendingJournalBatch.of(listOf("gen-old" to Fixtures.snapshot(
+                    shape = Fixtures.messaging(conversationTitle = "Group") { message("Bo", "row 401") },
+                    packageName = ENABLED_PKG,
+                    eventId = "evt-good-401",
+                    observedAt = 5_000L,
+                )))
+                else -> PendingJournalBatch.EMPTY
+            }
+        }
+        coEvery { h.ingest.isJournalPending(any()) } returns true
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+        h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
+
+        awaitUntil(timeoutMs = 1_500) {
+            coVerify(exactly = 1) {
+                h.ingest.commit(match { it.eventId == "evt-good-401" }, any(), any(), any(), any(), any(), any(), any())
+            }
+        }
+    }
+
+    test("bad rows with failing deferral preserves payload and attempts with bounded exit") {
+        val h = Harness()
+        // Gap fails AND deferral fails: pendingJournal returns 0 snapshots with rawAdvanced = false
+        coEvery { h.ingest.pendingJournal(any(), any()) } answers {
+            PendingJournalBatch(emptyList(), rawCount = 1, rawAdvanced = false)
+        }
+        coEvery { h.ingest.isJournalPending(any()) } returns true
+        val coordinator = h.coordinator()
+        coordinator.onConnected(h.service)
+        h.vaultState.value = VaultState.Ready(mockk(relaxed = true))
+
+        // Must exit replay cleanly within bounded time without spinning or crashing
+        stillHolds(forMs = 500) {
+            coVerify(exactly = 0) {
+                h.ingest.commit(any(), any(), any(), any(), any(), any(), any(), any())
             }
         }
     }

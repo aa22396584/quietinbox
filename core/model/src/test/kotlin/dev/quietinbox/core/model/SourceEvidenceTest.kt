@@ -133,6 +133,40 @@ class SourceEvidenceTest : FunSpec({
         resolved shouldBe SourceVerificationTier.UNTESTED
     }
 
+    test("evidence cohort missing language cannot act as universal wildcard") {
+        val noLanguageRecord = SourceEvidenceRecord(
+            packageName = "com.test.messaging",
+            tier = SourceVerificationTier.REAL_DEVICE_PASSED,
+            cohort = SourceCohort(
+                packageName = "com.test.messaging",
+                sourceVersionCode = 100L,
+                adapterId = "test",
+                osApiLevel = 36,
+                deviceModel = "SM-S9280",
+                language = null,
+            ),
+            evidenceSummary = "Evidence lacking language",
+        )
+        val customCatalog = listOf(noLanguageRecord)
+
+        val realCohort = SourceCohort(
+            packageName = "com.test.messaging",
+            sourceVersionCode = 100L,
+            adapterId = "test",
+            osApiLevel = 36,
+            deviceModel = "SM-S9280",
+            language = "zh-Hant",
+        )
+
+        val resolved = SourceEvidenceResolver.resolveTier(
+            packageName = "com.test.messaging",
+            hasAdapter = true,
+            currentCohort = realCohort,
+            catalog = customCatalog,
+        )
+        resolved shouldBe SourceVerificationTier.UNTESTED
+    }
+
     test("source version mismatch does not inherit REAL_DEVICE_PASSED") {
         val verifiedRecord = SourceEvidenceRecord(
             packageName = "com.test.messaging",

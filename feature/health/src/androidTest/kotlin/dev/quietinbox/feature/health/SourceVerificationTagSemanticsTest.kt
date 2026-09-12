@@ -75,7 +75,6 @@ class SourceVerificationTagSemanticsTest {
                 packageName = "com.whatsapp",
                 label = "WhatsApp",
                 hasAdapter = true,
-                tier = SourceVerificationTier.SYNTHETIC_ONLY,
             ),
             InstalledApp(
                 packageName = "dev.quietinbox.app.debug",

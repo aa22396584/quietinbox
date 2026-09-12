@@ -166,10 +166,11 @@ object SourceEvidenceResolver {
                 return false
             }
             // Evidence cohort cannot be a universal wildcard: must specify version, device/OS, and language
-            val hasVersion = evidence.sourceVersionCode != null || evidence.sourceVersionName != null
+            val hasVersion = evidence.sourceVersionCode != null || !evidence.sourceVersionName.isNullOrBlank()
             if (!hasVersion) return false
-            if (evidence.osApiLevel == null && evidence.deviceModel == null) return false
-            if (evidence.language == null && current.language != null) return false
+            val hasDevice = evidence.osApiLevel != null || !evidence.deviceModel.isNullOrBlank()
+            if (!hasDevice) return false
+            if (evidence.language.isNullOrBlank()) return false
         } else {
             if (evidence.adapterId != null && evidence.adapterId != current.adapterId) return false
         }

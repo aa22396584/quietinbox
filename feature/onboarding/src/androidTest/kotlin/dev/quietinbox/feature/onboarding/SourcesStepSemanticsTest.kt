@@ -33,7 +33,6 @@ class SourcesStepSemanticsTest {
                 label = "WhatsApp",
                 installed = true,
                 hasAdapter = true,
-                tier = SourceVerificationTier.SYNTHETIC_ONLY,
             ),
             SourceChoice(
                 packageName = "dev.quietinbox.app.debug",
@@ -47,7 +46,6 @@ class SourcesStepSemanticsTest {
                 label = "Custom App",
                 installed = true,
                 hasAdapter = false,
-                tier = SourceVerificationTier.UNTESTED,
             ),
         )
 

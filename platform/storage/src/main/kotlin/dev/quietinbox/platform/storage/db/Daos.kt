@@ -331,6 +331,13 @@ interface ConversationDao {
     )
     suspend fun rebuildProjection(ids: List<Long>, now: Long)
 
+    /**
+     * Returns IDs of conversations that have no message rows and were created before [before].
+     *
+     * WARNING: Do NOT iterate over the returned IDs and call [delete]! A new message committed
+     * after this scan but before [delete] would be cascade-deleted. Use [deleteEmptyOlderThan]
+     * for atomic set-deletion, or [deleteIfEmptyAndOlderThan] if operating on specific IDs.
+     */
     @Query(
         """
         SELECT id FROM conversation
@@ -354,6 +361,10 @@ interface ConversationDao {
     )
     suspend fun deleteEmptyOlderThan(before: Long): Int
 
+    /**
+     * Deletes conversation [id] only if it still has no message rows and was created before [before].
+     * Returns 1 if deleted, 0 if skipped because a message was committed or it is not old enough.
+     */
     @Query(
         """
         DELETE FROM conversation

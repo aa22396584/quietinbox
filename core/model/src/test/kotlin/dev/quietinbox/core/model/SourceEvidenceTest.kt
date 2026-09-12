@@ -393,4 +393,12 @@ class SourceEvidenceTest : FunSpec({
             tier = SourceVerificationTier.SYNTHETIC_ONLY,
         ) shouldBe SourceVerificationTier.UNTESTED
     }
+
+    test("catalog with unversioned synthetic evidence cannot be inherited by current versioned parser v2") {
+        resolveReview(
+            evidence = reviewFull.copy(adapterVersion = null),
+            current = reviewFull.copy(adapterVersion = "2.0"),
+            tier = SourceVerificationTier.SYNTHETIC_ONLY,
+        ) shouldBe SourceVerificationTier.UNTESTED
+    }
 })

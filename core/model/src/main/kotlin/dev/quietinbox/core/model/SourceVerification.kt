@@ -189,7 +189,7 @@ object SourceEvidenceResolver {
             if (evidence.adapterId.isNullOrBlank() || current.adapterId.isNullOrBlank() || evidence.adapterId != current.adapterId) {
                 return false
             }
-            if (evidence.adapterVersion != null && evidence.adapterVersion != current.adapterVersion) {
+            if (evidence.adapterVersion != current.adapterVersion) {
                 return false
             }
             return true

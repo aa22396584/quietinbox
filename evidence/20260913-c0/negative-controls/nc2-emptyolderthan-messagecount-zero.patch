@@ -1,0 +1,19 @@
+diff --git a/platform/storage/src/main/kotlin/dev/quietinbox/platform/storage/db/Daos.kt b/platform/storage/src/main/kotlin/dev/quietinbox/platform/storage/db/Daos.kt
+index f6731e3..bcccf4f 100644
+--- a/platform/storage/src/main/kotlin/dev/quietinbox/platform/storage/db/Daos.kt
++++ b/platform/storage/src/main/kotlin/dev/quietinbox/platform/storage/db/Daos.kt
+@@ -338,13 +338,7 @@ interface ConversationDao {
+      * after this scan but before [delete] would be cascade-deleted. Use [deleteEmptyOlderThan]
+      * for atomic set-deletion, or [deleteIfEmptyAndOlderThan] if operating on specific IDs.
+      */
+-    @Query(
+-        """
+-        SELECT id FROM conversation
+-        WHERE createdAtEpochMs < :before
+-          AND NOT EXISTS (SELECT 1 FROM message m WHERE m.conversationId = conversation.id)
+-        """,
+-    )
++    @Query("SELECT id FROM conversation WHERE messageCount = 0 AND createdAtEpochMs < :before")
+     suspend fun emptyOlderThan(before: Long): List<Long>
+ 
+     /**

@@ -1,0 +1,13 @@
+diff --git a/platform/storage/src/main/kotlin/dev/quietinbox/platform/storage/db/Daos.kt b/platform/storage/src/main/kotlin/dev/quietinbox/platform/storage/db/Daos.kt
+index f6731e3..1eabb76 100644
+--- a/platform/storage/src/main/kotlin/dev/quietinbox/platform/storage/db/Daos.kt
++++ b/platform/storage/src/main/kotlin/dev/quietinbox/platform/storage/db/Daos.kt
+@@ -356,7 +356,7 @@ interface ConversationDao {
+         """
+         DELETE FROM conversation
+         WHERE createdAtEpochMs < :before
+-          AND NOT EXISTS (SELECT 1 FROM message m WHERE m.conversationId = conversation.id)
++          AND messageCount = 0
+         """,
+     )
+     suspend fun deleteEmptyOlderThan(before: Long): Int

@@ -3,6 +3,7 @@ package dev.quietinbox.platform.storage
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.quietinbox.core.identity.IdentityResolver
+import dev.quietinbox.core.model.DedupState
 import dev.quietinbox.core.model.KnownSources
 import dev.quietinbox.core.model.MediaState
 import dev.quietinbox.core.model.NotificationSnapshot
@@ -32,6 +33,8 @@ import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.types.shouldBeInstanceOf
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -249,6 +252,150 @@ class DeletionGraphTest {
         // ...and the ciphertext made before the reset no longer authenticates under the new key.
         oldFile.writeBytes(oldCiphertext)
         freshProcess.decryptFile(oldFile).shouldBeInstanceOf<KeyResult.Failed>().failure shouldBe KeyFailure.Tampered
+        Unit
+    }
+
+    private suspend fun ageConversation(id: Long) {
+        val dao = holder.db().conversationDao()
+        val row = dao.get(id)!!
+        dao.update(row.copy(createdAtEpochMs = System.currentTimeMillis() - 8L * RetentionService.DAY_MS))
+    }
+
+    @Test
+    fun emptyConversationSweepKeepsAnUnexpiredAmbiguousRepeat() = runBlocking {
+        ready()
+        val stored = commit(bigText("Alice", "maybe a repeat", "a1", "t1"))
+        val conversationId = stored.conversationId!!
+        val messageId = stored.newMessageIds.single()
+        val db = holder.db()
+        db.messageDao().setDedupState(messageId, DedupState.AMBIGUOUS_REPEAT.name)
+        db.conversationDao().rebuildProjection(listOf(conversationId), System.currentTimeMillis())
+        val row = db.conversationDao().get(conversationId)!!
+        row.messageCount shouldBe 0
+        row.ambiguousCount shouldBe 1
+        ageConversation(conversationId)
+        val report = RetentionService(holder, settings, mediaDir, maintenance).runOnce(System.currentTimeMillis())
+        report?.deletedEmptyConversations shouldBe 0
+        report?.deletedMessages shouldBe 0
+        db.messageDao().get(messageId) shouldNotBe null
+        db.conversationDao().get(conversationId) shouldNotBe null
+        Unit
+    }
+
+    @Test
+    fun emptyOlderThanDoesNotReturnConversationWithUnexpiredAmbiguousRepeat() = runBlocking {
+        ready()
+        val stored = commit(bigText("Alice", "maybe a repeat 2", "a2", "t2"))
+        val conversationId = stored.conversationId!!
+        val messageId = stored.newMessageIds.single()
+        val db = holder.db()
+        db.messageDao().setDedupState(messageId, DedupState.AMBIGUOUS_REPEAT.name)
+        db.conversationDao().rebuildProjection(listOf(conversationId), System.currentTimeMillis())
+        ageConversation(conversationId)
+        val cutoff = System.currentTimeMillis() - 7L * RetentionService.DAY_MS
+        val scanned = db.conversationDao().emptyOlderThan(cutoff)
+        scanned.contains(conversationId) shouldBe false
+        Unit
+    }
+
+    @Test
+    fun emptyConversationSweepDoesNotDeleteACopyCommittedAfterTheEmptyScan() = runBlocking {
+        ready()
+        val first = commit(bigText("Alice", "going", "s1", "t1"))
+        val conversationId = first.conversationId!!
+        inbox.deleteMessages(first.newMessageIds, System.currentTimeMillis(), 86_400_000)
+        val db = holder.db()
+        db.messageDao().forConversation(conversationId) shouldBe emptyList()
+        ageConversation(conversationId)
+        val cutoff = System.currentTimeMillis() - 7L * RetentionService.DAY_MS
+        val scanned = db.conversationDao().emptyOlderThan(cutoff)
+        scanned.contains(conversationId) shouldBe true
+        val again = commit(bigText("Alice", "arrived after the scan", "s2", "t1"))
+        again.conversationId shouldBe conversationId
+        val newId = again.newMessageIds.single()
+        var deletedCount = 0
+        for (id in scanned) deletedCount += db.conversationDao().deleteIfEmptyAndOlderThan(id, cutoff)
+        deletedCount shouldBe 0
+        val report = RetentionService(holder, settings, mediaDir, maintenance).runOnce(System.currentTimeMillis())
+        report?.deletedEmptyConversations shouldBe 0
+        db.messageDao().get(newId) shouldNotBe null
+        db.conversationDao().get(conversationId) shouldNotBe null
+        Unit
+    }
+
+    @Test
+    fun emptyConversationSweepStillRemovesATrulyEmptyOldConversation() = runBlocking {
+        ready()
+        val stored = commit(bigText("Alice", "gone", "e1", "t1"))
+        val conversationId = stored.conversationId!!
+        inbox.deleteMessages(stored.newMessageIds, System.currentTimeMillis(), 86_400_000)
+        holder.db().messageDao().forConversation(conversationId) shouldBe emptyList()
+        ageConversation(conversationId)
+        val report = RetentionService(holder, settings, mediaDir, maintenance).runOnce(System.currentTimeMillis())
+        report?.deletedEmptyConversations shouldBe 1
+        holder.db().conversationDao().get(conversationId) shouldBe null
+        Unit
+    }
+
+    @Test
+    fun emptyConversationSweepPreservesYoungEmptyConversation() = runBlocking {
+        ready()
+        val now = System.currentTimeMillis()
+        val stored = commit(bigText("Alice", "young empty", "y1", "t1", observedAt = now))
+        val conversationId = stored.conversationId!!
+        inbox.deleteMessages(stored.newMessageIds, now, 86_400_000)
+        holder.db().messageDao().forConversation(conversationId) shouldBe emptyList()
+        // Conversation was created at `now` (< 7 days old)
+        val report = RetentionService(holder, settings, mediaDir, maintenance).runOnce(now)
+        report?.deletedEmptyConversations shouldBe 0
+        holder.db().conversationDao().get(conversationId) shouldNotBe null
+        Unit
+    }
+
+    @Test
+    fun retentionSweepDeletesExpiredAmbiguousRepeatAndThenRemovesEmptyConversation() = runBlocking {
+        ready()
+        val now = System.currentTimeMillis()
+        // Message expires 10 seconds from now
+        val stored = commit(bigText("Alice", "expiring ambiguous repeat", "ea1", "t1"), retentionMs = 10_000L)
+        val conversationId = stored.conversationId!!
+        val messageId = stored.newMessageIds.single()
+        val db = holder.db()
+        db.messageDao().setDedupState(messageId, DedupState.AMBIGUOUS_REPEAT.name)
+        db.conversationDao().rebuildProjection(listOf(conversationId), now)
+        ageConversation(conversationId)
+        // Run retention 20 seconds later (after expiry)
+        val report = RetentionService(holder, settings, mediaDir, maintenance).runOnce(now + 20_000L)
+        report?.deletedMessages shouldBe 1
+        report?.deletedEmptyConversations shouldBe 1
+        db.messageDao().get(messageId) shouldBe null
+        db.conversationDao().get(conversationId) shouldBe null
+        Unit
+    }
+
+    @Test
+    fun concurrentCommitDuringEmptyConversationSweepDoesNotDropMessages() = runBlocking {
+        ready()
+        val first = commit(bigText("Alice", "first", "c1", "t1"))
+        val conversationId = first.conversationId!!
+        inbox.deleteMessages(first.newMessageIds, System.currentTimeMillis(), 86_400_000)
+        holder.db().messageDao().forConversation(conversationId) shouldBe emptyList()
+        ageConversation(conversationId)
+
+        val commitDeferred = async(Dispatchers.IO) {
+            commit(bigText("Alice", "concurrent copy", "c2", "t1"))
+        }
+        val sweepDeferred = async(Dispatchers.IO) {
+            RetentionService(holder, settings, mediaDir, maintenance).runOnce(System.currentTimeMillis())
+        }
+        val committed = commitDeferred.await()
+        sweepDeferred.await()
+
+        val newId = committed.newMessageIds.single()
+        // The newly committed message must NEVER be lost or cascade-deleted
+        holder.db().messageDao().get(newId) shouldNotBe null
+        val targetConvId = committed.conversationId ?: conversationId
+        holder.db().conversationDao().get(targetConvId) shouldNotBe null
         Unit
     }
 }

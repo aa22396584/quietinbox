@@ -220,6 +220,8 @@
     <string name="gap_reason_messages_dropped">該則通知帶的訊息多到讀不完</string>
     <string name="gap_reason_unknown">原因不明</string>
     <string name="gap_reason_commit_failed">多次嘗試後仍無法儲存</string>
+    <string name="gap_reason_parse_failed">無法解析通知內容</string>
+    <string name="gap_reason_payload_unreadable">無法讀取通知酬載</string>
     <string name="health_diagnostics_title">本機診斷（最近 7 天）</string>
     <string name="health_diagnostics_empty">沒有診斷事件。任何內容都不會被上傳。</string>
     <string name="diag_parse_warnings">解析時有內容被迫截斷</string>

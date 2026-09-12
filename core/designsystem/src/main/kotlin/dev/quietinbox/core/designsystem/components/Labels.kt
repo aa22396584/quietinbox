@@ -80,6 +80,8 @@ fun gapReasonLabel(reason: GapReason): String = when (reason) {
     GapReason.SOURCE_PAUSED_BY_USER -> stringResource(R.string.gap_reason_source_paused)
     GapReason.MESSAGES_DROPPED -> stringResource(R.string.gap_reason_messages_dropped)
     GapReason.COMMIT_FAILED -> stringResource(R.string.gap_reason_commit_failed)
+    GapReason.PARSE_FAILED -> stringResource(R.string.gap_reason_parse_failed)
+    GapReason.PAYLOAD_UNREADABLE -> stringResource(R.string.gap_reason_payload_unreadable)
     GapReason.UNKNOWN -> stringResource(R.string.gap_reason_unknown)
 }
 

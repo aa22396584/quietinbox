@@ -43,6 +43,20 @@ enum class GapReason {
      * have said that content was lost — a gap hidden inside a success.
      */
     MESSAGES_DROPPED,
+
+    /**
+     * An accepted event whose parser threw an unexpected exception. The row is filed FAILED and
+     * its payload cleared, so this bounded interval is the only record that the event existed (issue #33).
+     * Written in the same transaction that files the row.
+     */
+    PARSE_FAILED,
+
+    /**
+     * An accepted event whose JSON payload could not be deserialized by the snapshot serializer.
+     * The row is filed FAILED and its payload cleared, so this bounded interval is the only record
+     * that the event existed (issue #33). Written in the same transaction that files the row.
+     */
+    PAYLOAD_UNREADABLE,
     UNKNOWN,
 }
 

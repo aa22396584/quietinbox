@@ -27,6 +27,9 @@ import dev.quietinbox.platform.storage.db.LOSS_SETTLED
 import dev.quietinbox.platform.storage.db.LOSS_UNSETTLED
 import dev.quietinbox.platform.storage.db.MessageEntity
 import dev.quietinbox.platform.storage.db.MessageRevisionEntity
+import dev.quietinbox.core.model.GapPrecision
+import dev.quietinbox.core.model.GapReason
+import dev.quietinbox.platform.storage.db.GapIntervalEntity
 import dev.quietinbox.platform.storage.db.ObservationLinkEntity
 import dev.quietinbox.platform.storage.db.SearchTokenEntity
 import dev.quietinbox.platform.storage.db.SummaryObservationEntity
@@ -236,7 +239,22 @@ class IngestRepository @Inject constructor(
         return rows.mapNotNull { row ->
             runCatching { row.generation to json.decodeFromString(NotificationSnapshot.serializer(), row.payload) }
                 .getOrElse {
-                    db.journalDao().setState(row.eventId, "FAILED", "DECODE")
+                    markJournalTerminal(
+                        eventId = row.eventId,
+                        failure = "DECODE",
+                        lossOnTerminal = {
+                            db.healthDao().insertGap(
+                                GapIntervalEntity(
+                                    startEpochMs = row.receivedAtEpochMs,
+                                    endEpochMs = row.receivedAtEpochMs,
+                                    reason = GapReason.PAYLOAD_UNREADABLE.name,
+                                    precision = GapPrecision.BOUNDED.name,
+                                    createdAtEpochMs = row.receivedAtEpochMs,
+                                    packageName = row.packageName,
+                                ),
+                            )
+                        },
+                    )
                     null
                 }
         }
@@ -244,6 +262,49 @@ class IngestRepository @Inject constructor(
 
     suspend fun markJournal(eventId: String, state: String, failure: String? = null) {
         holder.db().journalDao().setState(eventId, state, failure)
+    }
+
+    /**
+     * Files an accepted event FAILED with an atomic bounded gap, exactly once (issue #33).
+     *
+     * Used when an accepted event reaches a terminal failure before commit — specifically when its
+     * JSON payload cannot be deserialized (DECODE) or when its parser throws an unexpected exception
+     * (PARSE_).
+     *
+     * In both cases, the event was previously accepted into the journal. Before leaving PENDING,
+     * [lossOnTerminal] writes the bounded gap representing the loss of this accepted event in the
+     * same Room transaction. If the transaction rolls back (e.g. gap write fails), the row's
+     * PENDING state, attempts, and payload remain untouched. The row is then deferred (parked) via
+     * [JournalDao.deferLoss] so it does not starve subsequent pending journal rows from being processed.
+     *
+     * A row that is no longer PENDING (for instance, already filed or discarded by a concurrent
+     * source-policy transaction) is never overwritten.
+     */
+    suspend fun markJournalTerminal(
+        eventId: String,
+        failure: String,
+        lossOnTerminal: suspend () -> Unit,
+    ): JournalRetry {
+        val db = holder.db()
+        var filing = false
+        try {
+            return db.withTransaction {
+                if (db.journalDao().state(eventId) != "PENDING") return@withTransaction JournalRetry.NOT_PENDING
+                filing = true
+                lossOnTerminal()
+                check(db.journalDao().fileFailed(eventId, failure) == 1) {
+                    "journal row $eventId left PENDING under terminal transaction"
+                }
+                JournalRetry.FAILED_RECORDED
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            if (!filing) throw e
+            val parked = runCatching { db.journalDao().deferLoss(eventId) }
+                .onFailure { if (it is CancellationException) throw it }
+                .getOrDefault(0)
+            return if (parked == 1) JournalRetry.FAILED_DEFERRED else JournalRetry.RETRYABLE
+        }
     }
 
     /**

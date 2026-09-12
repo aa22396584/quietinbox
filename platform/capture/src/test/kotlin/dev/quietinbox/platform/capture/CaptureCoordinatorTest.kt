@@ -10,7 +10,10 @@ import dev.quietinbox.core.model.KnownSources
 import dev.quietinbox.core.model.TruncationFlag
 import dev.quietinbox.core.model.ListenerState
 import dev.quietinbox.core.model.NotificationSnapshot
+import dev.quietinbox.core.model.ParsedBatch
 import dev.quietinbox.core.model.SourceConfiguration
+import dev.quietinbox.core.parser.NotificationParser
+import dev.quietinbox.core.parser.ParserRegistry
 import dev.quietinbox.core.testing.Fixtures
 import dev.quietinbox.platform.media.MediaCopier
 import dev.quietinbox.platform.storage.db.VaultMaintenance
@@ -168,6 +171,7 @@ class CaptureCoordinatorTest : FunSpec({
             installGapStore()
             installLossClaim()
             installRetry()
+            installTerminal()
         }
 
         /**
@@ -332,6 +336,28 @@ class CaptureCoordinatorTest : FunSpec({
                         } else {
                             JournalRetry.RETRYABLE
                         }
+                    }
+                }
+            }
+        }
+
+        private fun installTerminal() {
+            coEvery { ingest.markJournalTerminal(any(), any(), any()) } coAnswers {
+                val id = firstArg<String>()
+                val failure = secondArg<String>()
+                val loss = thirdArg<suspend () -> Unit>()
+                try {
+                    loss()
+                    attempts.remove(id)
+                    exhausted += id
+                    synchronized(pendingReplay) { pendingReplay.removeAll { it.second.eventId == id } }
+                    JournalRetry.FAILED_RECORDED
+                } catch (e: Throwable) {
+                    if (!deferralsFail) {
+                        lossDeferred += id
+                        JournalRetry.FAILED_DEFERRED
+                    } else {
+                        JournalRetry.RETRYABLE
                     }
                 }
             }
@@ -2493,5 +2519,98 @@ class CaptureCoordinatorTest : FunSpec({
         // Nothing was deferred since, so the second success arms nothing: no third pass.
         awaitUntil { h.gaps.count { it.reason == GapReason.MESSAGES_DROPPED.name } shouldBe 3 }
         stillHolds { coVerify(exactly = 0) { h.ingest.commit(match { it.eventId == "evt-late" }, any(), any(), any(), any(), any(), any(), any()) } }
+    }
+
+    test("parser unexpected exception records bounded PARSE_FAILED gap and marks journal FAILED without committing") {
+        val h = Harness()
+        val throwingParser = object : NotificationParser {
+            override val id: String = "throwing"
+            override val version: String = "1.0"
+            override val packages: Set<String> = setOf(ENABLED_PKG)
+            override fun parse(snapshot: NotificationSnapshot): ParsedBatch {
+                throw IllegalStateException("parser failure")
+            }
+        }
+        val coordinator = h.coordinator()
+        coordinator.registry = ParserRegistry(listOf(throwingParser))
+        coordinator.onConnected(h.service)
+
+        coordinator.offerCaptured(captured("evt-parse-fail"))
+
+        awaitUntil {
+            coVerify(exactly = 1) {
+                h.ingest.markJournalTerminal("evt-parse-fail", "PARSE_IllegalStateException", any())
+            }
+        }
+        awaitUntil {
+            h.gaps.any {
+                it.reason == GapReason.PARSE_FAILED.name &&
+                    it.precision == GapPrecision.BOUNDED.name &&
+                    it.packageName == ENABLED_PKG
+            } shouldBe true
+        }
+        awaitUntil {
+            coVerify(exactly = 1) {
+                h.ingest.diagnostic("PARSE_EXCEPTION", "throwing@1.0:IllegalStateException", ENABLED_PKG, any())
+            }
+        }
+        stillHolds {
+            coVerify(exactly = 0) {
+                h.ingest.commit(match { it.eventId == "evt-parse-fail" }, any(), any(), any(), any(), any(), any(), any())
+            }
+        }
+    }
+
+    test("parser cancellation exception propagates and does not mark journal FAILED or record gap") {
+        val h = Harness()
+        val cancellingParser = object : NotificationParser {
+            override val id: String = "cancelling"
+            override val version: String = "1.0"
+            override val packages: Set<String> = setOf(ENABLED_PKG)
+            override fun parse(snapshot: NotificationSnapshot): ParsedBatch {
+                throw CancellationException("parser cancelled")
+            }
+        }
+        val coordinator = h.coordinator()
+        coordinator.registry = ParserRegistry(listOf(cancellingParser))
+        coordinator.onConnected(h.service)
+
+        coordinator.offerCaptured(captured("evt-cancelled"))
+
+        stillHolds {
+            coVerify(exactly = 0) {
+                h.ingest.markJournalTerminal("evt-cancelled", any(), any())
+            }
+            h.gaps.none { it.reason == GapReason.PARSE_FAILED.name } shouldBe true
+            coVerify(exactly = 0) {
+                h.ingest.diagnostic("PARSE_EXCEPTION", any(), any(), any())
+            }
+        }
+    }
+
+    test("parser exception with failing gap write defers the journal row without filing FAILED") {
+        val h = Harness()
+        val throwingParser = object : NotificationParser {
+            override val id: String = "throwing"
+            override val version: String = "1.0"
+            override val packages: Set<String> = setOf(ENABLED_PKG)
+            override fun parse(snapshot: NotificationSnapshot): ParsedBatch {
+                throw IllegalStateException("parser error")
+            }
+        }
+        h.gapWritesFail = true
+        val coordinator = h.coordinator()
+        coordinator.registry = ParserRegistry(listOf(throwingParser))
+        coordinator.onConnected(h.service)
+
+        coordinator.offerCaptured(captured("evt-deferred-parse"))
+
+        awaitUntil { h.lossDeferred shouldBe setOf("evt-deferred-parse") }
+        h.exhausted.contains("evt-deferred-parse") shouldBe false
+        stillHolds {
+            coVerify(exactly = 0) {
+                h.ingest.commit(match { it.eventId == "evt-deferred-parse" }, any(), any(), any(), any(), any(), any(), any())
+            }
+        }
     }
 })

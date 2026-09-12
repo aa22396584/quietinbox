@@ -18,6 +18,7 @@ import dev.quietinbox.platform.storage.repo.JournalCursor
 import dev.quietinbox.platform.storage.repo.LossClaim
 import dev.quietinbox.platform.storage.db.LOSS_UNSETTLED
 import dev.quietinbox.platform.storage.db.LOSS_SETTLED
+import dev.quietinbox.platform.storage.db.EventJournalEntity
 import dev.quietinbox.platform.storage.db.LOSS_DEFERRED_SETTLED
 import dev.quietinbox.platform.storage.db.LOSS_DEFERRED
 import dev.quietinbox.platform.storage.repo.JournalRetry
@@ -847,6 +848,92 @@ class JournalLossTransactionTest {
 
         failCommit("evt-gone") shouldBe JournalRetry.NOT_PENDING
         allGaps().isEmpty() shouldBe true
+        Unit
+    }
+
+    // ---- Issue #33: atomic terminal gap on DECODE and PARSE failure ----
+
+    @Test
+    fun unreadablePayloadFailsTerminalWithBoundedPayloadUnreadableGap() = runBlocking {
+        ready()
+        // Insert a row directly into event_journal with malformed JSON payload
+        holder.db().journalDao().insert(
+            EventJournalEntity(
+                eventId = "evt-bad-json",
+                generation = "gen",
+                receivedAtEpochMs = 5_000L,
+                expiresAtEpochMs = 65_000L,
+                state = "PENDING",
+                attempts = 0,
+                failureCode = null,
+                payload = "{ malformed json",
+                packageName = pkg,
+                lossRecorded = LOSS_UNSETTLED,
+            ),
+        )
+
+        // pendingJournal attempts to decode, catches error, and calls markJournalTerminal
+        val pending = ingest.pendingJournal()
+        pending.none { it.second.eventId == "evt-bad-json" } shouldBe true
+
+        ingest.isJournalPending("evt-bad-json") shouldBe false
+        val row = holder.db().journalDao().state("evt-bad-json")
+        row shouldBe "FAILED"
+        holder.db().journalDao().payload("evt-bad-json") shouldBe ""
+
+        val record = allGaps().single { it.reason == GapReason.PAYLOAD_UNREADABLE.name }
+        record.precision shouldBe GapPrecision.BOUNDED.name
+        record.startEpochMs shouldBe 5_000L
+        record.endEpochMs shouldBe 5_000L
+        record.packageName shouldBe pkg
+        Unit
+    }
+
+    @Test
+    fun parseFailureFailsTerminalWithBoundedParseFailedGap() = runBlocking {
+        ready()
+        ingest.journal(snapshot("evt-parse-fail"), "gen", 60_000) shouldBe true
+
+        val retry = ingest.markJournalTerminal("evt-parse-fail", "PARSE_IllegalArgumentException") {
+            health.recordGap(1_000, 2_000, GapReason.PARSE_FAILED, GapPrecision.BOUNDED, 2_000, pkg)
+        }
+        retry shouldBe JournalRetry.FAILED_RECORDED
+
+        ingest.isJournalPending("evt-parse-fail") shouldBe false
+        holder.db().journalDao().state("evt-parse-fail") shouldBe "FAILED"
+        holder.db().journalDao().payload("evt-parse-fail") shouldBe ""
+
+        val record = allGaps().single { it.reason == GapReason.PARSE_FAILED.name }
+        record.precision shouldBe GapPrecision.BOUNDED.name
+        record.packageName shouldBe pkg
+
+        // Terminal row is not pending: subsequent call returns NOT_PENDING
+        val second = ingest.markJournalTerminal("evt-parse-fail", "PARSE_Other") {
+            error("should not be called")
+        }
+        second shouldBe JournalRetry.NOT_PENDING
+        Unit
+    }
+
+    @Test
+    fun terminalFailureRollsBackOnGapFailureAndParksTheRow() = runBlocking {
+        ready()
+        ingest.journal(snapshot("evt-terminal-park"), "gen", 60_000) shouldBe true
+
+        val retry = ingest.markJournalTerminal("evt-terminal-park", "PARSE_Crash") {
+            error("gap write fails")
+        }
+        retry shouldBe JournalRetry.FAILED_DEFERRED
+
+        // Row is still pending, payload intact, but lossRecorded is now LOSS_DEFERRED
+        ingest.isJournalPending("evt-terminal-park") shouldBe true
+        holder.db().journalDao().state("evt-terminal-park") shouldBe "PENDING"
+        holder.db().journalDao().payload("evt-terminal-park") shouldNotBe ""
+        lossState("evt-terminal-park") shouldBe LOSS_DEFERRED
+
+        // Candidate query filters it out
+        ingest.isReplayCandidate("evt-terminal-park") shouldBe false
+        pendingIds() shouldBe emptyList()
         Unit
     }
 }

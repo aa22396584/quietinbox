@@ -140,7 +140,8 @@ class CaptureCoordinator @Inject constructor(
     /** How long a cold start waits for the vault before the held buffer is dropped; a test seam. */
     @androidx.annotation.VisibleForTesting(otherwise = androidx.annotation.VisibleForTesting.PRIVATE)
     internal var coldStartTimeoutMs: Long = COLD_START_TIMEOUT_MS
-    private val registry = ParserRegistry(AppParsers.all())
+    @androidx.annotation.VisibleForTesting(otherwise = androidx.annotation.VisibleForTesting.PRIVATE)
+    internal var registry: ParserRegistry = ParserRegistry(AppParsers.all())
     private val identity = IdentityResolver()
     private val reconciler = Reconciler()
     private val queue = Channel<Queued>(capacity = Limits.MAX_QUEUE_DEPTH)
@@ -1107,8 +1108,20 @@ class CaptureCoordinator @Inject constructor(
         val parser = registry.parserFor(snapshot)
         val batch = try {
             parser.parse(snapshot)
-        } catch (e: Exception) {
-            ingest.markJournal(snapshot.eventId, "FAILED", "PARSE_${e::class.java.simpleName}")
+        } catch (e: Throwable) {
+            if (e is CancellationException) throw e
+            guarded {
+                ingest.markJournalTerminal(snapshot.eventId, "PARSE_${e::class.java.simpleName}") {
+                    health.recordGap(
+                        snapshot.postedAtEpochMs ?: snapshot.observedAtEpochMs,
+                        snapshot.observedAtEpochMs,
+                        GapReason.PARSE_FAILED,
+                        GapPrecision.BOUNDED,
+                        now,
+                        snapshot.source.packageName,
+                    )
+                }
+            }
             ingest.diagnostic("PARSE_EXCEPTION", "${parser.id}@${parser.version}:${e::class.java.simpleName}", snapshot.source.packageName, now)
             return false
         }

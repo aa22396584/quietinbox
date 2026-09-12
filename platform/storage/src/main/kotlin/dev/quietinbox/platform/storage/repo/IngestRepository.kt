@@ -68,7 +68,7 @@ private data class WindowItemJson(val fp: String, val sid: String? = null, val m
  * lookups and the single-transaction projection commit (plan section 5).
  */
 @Singleton
-class IngestRepository @Inject constructor(
+open class IngestRepository @Inject constructor(
     private val holder: DatabaseHolder,
 ) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
@@ -233,7 +233,7 @@ class IngestRepository @Inject constructor(
 
     suspend fun isJournalPending(eventId: String): Boolean = holder.db().journalDao().state(eventId) == "PENDING"
 
-    suspend fun pendingJournal(
+    open suspend fun pendingJournal(
         limit: Int = 200,
         excludingPackages: Collection<String> = emptyList(),
     ): PendingJournalBatch {

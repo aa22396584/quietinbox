@@ -39,9 +39,14 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import dev.quietinbox.platform.capture.CaptureCoordinator
 import dev.quietinbox.platform.capture.ListenerAccess
+import dev.quietinbox.platform.storage.repo.PendingJournalBatch
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.coroutineScope
 import dev.quietinbox.platform.storage.db.VaultMaintenance
 import dev.quietinbox.platform.storage.retention.MediaDirectory
 import dev.quietinbox.platform.storage.settings.SettingsRepository
@@ -114,7 +119,7 @@ class JournalLossTransactionTest {
             eventId = eventId,
         )
 
-    private fun createCoordinator(): CaptureCoordinator {
+    private fun createCoordinator(customIngest: IngestRepository = ingest): CaptureCoordinator {
         val mediaDir = MediaDirectory(context)
         val sources = SourceRepository(holder, mediaDir)
         val settings = SettingsRepository(context)
@@ -131,7 +136,7 @@ class JournalLossTransactionTest {
         val listenerAccess = ListenerAccess(context)
         return CaptureCoordinator(
             context = context,
-            ingest = ingest,
+            ingest = customIngest,
             sources = sources,
             health = health,
             settings = settings,
@@ -1072,37 +1077,85 @@ class JournalLossTransactionTest {
         ready()
         ingest.journal(snapshot("evt-concurrent-term"), "gen", 60_000) shouldBe true
 
-        val startGate = CountDownLatch(1)
-        val readyGate = CountDownLatch(2)
+        val ready1 = CompletableDeferred<Unit>()
+        val ready2 = CompletableDeferred<Unit>()
+        val startGate = CompletableDeferred<Unit>()
         val gapWrites = AtomicInteger(0)
-        val d1 = async(Dispatchers.IO) {
-            readyGate.countDown()
-            startGate.await()
-            ingest.markJournalTerminal("evt-concurrent-term", "PARSE_Crash") {
-                gapWrites.incrementAndGet()
-                health.recordGap(1_000, 2_000, GapReason.PARSE_FAILED, GapPrecision.BOUNDED, 2_000, pkg)
-            }
-        }
-        val d2 = async(Dispatchers.IO) {
-            readyGate.countDown()
-            startGate.await()
-            ingest.markJournalTerminal("evt-concurrent-term", "PARSE_Crash") {
-                gapWrites.incrementAndGet()
-                health.recordGap(1_000, 2_000, GapReason.PARSE_FAILED, GapPrecision.BOUNDED, 2_000, pkg)
-            }
-        }
 
         withTimeout(10_000) {
-            readyGate.await()
-            startGate.countDown()
-            val r1 = d1.await()
-            val r2 = d2.await()
+            coroutineScope {
+                val d1 = async(Dispatchers.IO) {
+                    ready1.complete(Unit)
+                    startGate.await()
+                    ingest.markJournalTerminal("evt-concurrent-term", "PARSE_Crash") {
+                        gapWrites.incrementAndGet()
+                        health.recordGap(1_000, 2_000, GapReason.PARSE_FAILED, GapPrecision.BOUNDED, 2_000, pkg)
+                    }
+                }
+                val d2 = async(Dispatchers.IO) {
+                    ready2.complete(Unit)
+                    startGate.await()
+                    ingest.markJournalTerminal("evt-concurrent-term", "PARSE_Crash") {
+                        gapWrites.incrementAndGet()
+                        health.recordGap(1_000, 2_000, GapReason.PARSE_FAILED, GapPrecision.BOUNDED, 2_000, pkg)
+                    }
+                }
 
-            val results = setOf(r1, r2)
-            results shouldBe setOf(JournalRetry.FAILED_RECORDED, JournalRetry.NOT_PENDING)
-            gapWrites.get() shouldBe 1
-            allGaps().count { it.reason == GapReason.PARSE_FAILED.name } shouldBe 1
+                try {
+                    ready1.await()
+                    ready2.await()
+                    startGate.complete(Unit)
+                    val r1 = d1.await()
+                    val r2 = d2.await()
+
+                    val results = setOf(r1, r2)
+                    results shouldBe setOf(JournalRetry.FAILED_RECORDED, JournalRetry.NOT_PENDING)
+                    gapWrites.get() shouldBe 1
+                    allGaps().count { it.reason == GapReason.PARSE_FAILED.name } shouldBe 1
+                } finally {
+                    if (!startGate.isCompleted) {
+                        startGate.cancel()
+                    }
+                    d1.cancel()
+                    d2.cancel()
+                }
+            }
         }
+        Unit
+    }
+
+    @Test
+    fun missingReadySignalTimesOutAndCleansUpWorkersPromptly() = runBlocking {
+        ready()
+        val ready1 = CompletableDeferred<Unit>()
+        val startGate = CompletableDeferred<Unit>()
+        val workerRan = AtomicBoolean(false)
+
+        val failed = try {
+            withTimeout(1_000) {
+                coroutineScope {
+                    val d1 = async(Dispatchers.IO) {
+                        // intentionally does NOT complete ready1!
+                        startGate.await()
+                        workerRan.set(true)
+                    }
+                    try {
+                        ready1.await()
+                        startGate.complete(Unit)
+                        d1.await()
+                    } finally {
+                        if (!startGate.isCompleted) startGate.cancel()
+                        d1.cancel()
+                    }
+                }
+            }
+            false
+        } catch (e: TimeoutCancellationException) {
+            true
+        }
+
+        failed shouldBe true
+        workerRan.get() shouldBe false
         Unit
     }
 
@@ -1531,7 +1584,18 @@ class JournalLossTransactionTest {
         ready()
         val sources = SourceRepository(holder, MediaDirectory(context))
         sources.enable(pkg, "Chat", "standard", 1_000L)
-        val coordinator = createCoordinator()
+
+        val pageCallCount = AtomicInteger(0)
+        val countingIngest = object : IngestRepository(holder) {
+            override suspend fun pendingJournal(
+                limit: Int,
+                excludingPackages: Collection<String>,
+            ): PendingJournalBatch {
+                pageCallCount.incrementAndGet()
+                return super.pendingJournal(limit, excludingPackages)
+            }
+        }
+        val coordinator = createCoordinator(countingIngest)
 
         val db = holder.db().openHelper.writableDatabase
         db.execSQL("CREATE TRIGGER fail_gap_insert BEFORE INSERT ON gap_interval BEGIN SELECT RAISE(ABORT, 'forced gap failure'); END;")
@@ -1552,9 +1616,17 @@ class JournalLossTransactionTest {
                 ),
             )
 
-            // Must exit cleanly without infinite loop or hanging
-            val ran = coordinator.replayPassForTesting()
-            ran shouldBe true
+            // Reset call counter after initial coordinator setup, exactly as required by reviewer
+            pageCallCount.set(0)
+
+            // Must exit cleanly within bounded time (5s) without infinite loop or hanging
+            withTimeout(5_000) {
+                val ran = coordinator.replayPassForTesting()
+                ran shouldBe true
+            }
+
+            // Exactly 1 page call / query upper bound: failed raw batch deferral must stop immediately
+            pageCallCount.get() shouldBe 1
 
             // Exactly original payload, attempts, and state preserved intact
             val entity = journalEntity("evt-bad-nodefer-coord")

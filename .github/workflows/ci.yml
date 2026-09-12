@@ -31,6 +31,8 @@ jobs:
         # retires those. Stated at every call site rather than inherited: the default is `enhanced`.
         with:
           cache-provider: basic
+      - name: Tool regression tests
+        run: python3 -m unittest discover -s tools/tests -p 'test_*.py'
       - name: Unit tests
         # One aggregate so a module with src/test (including :platform:media) cannot be omitted
         # from a hand-maintained list. Root `test` schedules JVM `test` and Android

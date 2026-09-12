@@ -936,4 +936,108 @@ class JournalLossTransactionTest {
         pendingIds() shouldBe emptyList()
         Unit
     }
+
+    @Test
+    fun concurrentPolicyDiscardDoesNotGetOverwrittenByTerminalFailure() = runBlocking {
+        ready()
+        ingest.journal(snapshot("evt-policy-discard"), "gen", 60_000) shouldBe true
+
+        // User disables source: row becomes DISCARDED with SOURCE_DISABLED
+        holder.db().journalDao().discardPending(pkg) shouldBe 1
+        holder.db().journalDao().state("evt-policy-discard") shouldBe "DISCARDED"
+
+        // Stale terminal call attempts to file FAILED with gap
+        var gapRecorded = false
+        val retry = ingest.markJournalTerminal("evt-policy-discard", "DECODE") {
+            gapRecorded = true
+            health.recordGap(1_000, 2_000, GapReason.PAYLOAD_UNREADABLE, GapPrecision.BOUNDED, 2_000, pkg)
+        }
+
+        // Must NOT overwrite DISCARDED state or failureCode, and must NOT record a gap
+        retry shouldBe JournalRetry.NOT_PENDING
+        gapRecorded shouldBe false
+        holder.db().journalDao().state("evt-policy-discard") shouldBe "DISCARDED"
+        allGaps().none { it.reason == GapReason.PAYLOAD_UNREADABLE.name } shouldBe true
+        Unit
+    }
+
+    @Test
+    fun repeatedOrConcurrentTerminalCallDoesNotDuplicateGaps() = runBlocking {
+        ready()
+        ingest.journal(snapshot("evt-no-dup"), "gen", 60_000) shouldBe true
+
+        var gapWrites = 0
+        val first = ingest.markJournalTerminal("evt-no-dup", "PARSE_Bad") {
+            gapWrites++
+            health.recordGap(1_000, 2_000, GapReason.PARSE_FAILED, GapPrecision.BOUNDED, 2_000, pkg)
+        }
+        first shouldBe JournalRetry.FAILED_RECORDED
+        gapWrites shouldBe 1
+
+        val second = ingest.markJournalTerminal("evt-no-dup", "PARSE_Bad") {
+            gapWrites++
+            health.recordGap(1_000, 2_000, GapReason.PARSE_FAILED, GapPrecision.BOUNDED, 2_000, pkg)
+        }
+        second shouldBe JournalRetry.NOT_PENDING
+        gapWrites shouldBe 1
+        allGaps().count { it.reason == GapReason.PARSE_FAILED.name } shouldBe 1
+        Unit
+    }
+
+    @Test
+    fun deferLossPreservesSourceIsolation() = runBlocking {
+        ready()
+        val pkgOther = "dev.quietinbox.other"
+        ingest.journal(snapshot("evt-source-a"), "gen", 60_000) shouldBe true
+        ingest.journal(snapshotAt("evt-source-b", 1_000L, pkgOther), "gen", 60_000) shouldBe true
+
+        // Row A fails with failing gap write and gets parked
+        val retryA = ingest.markJournalTerminal("evt-source-a", "PARSE_Crash") {
+            error("gap write failure")
+        }
+        retryA shouldBe JournalRetry.FAILED_DEFERRED
+        lossState("evt-source-a") shouldBe LOSS_DEFERRED
+        ingest.isReplayCandidate("evt-source-a") shouldBe false
+
+        // Row B must remain untouched and still be a replay candidate
+        lossState("evt-source-b") shouldBe LOSS_UNSETTLED
+        ingest.isReplayCandidate("evt-source-b") shouldBe true
+        pendingIds() shouldBe listOf("evt-source-b")
+        Unit
+    }
+
+    @Test
+    fun twoHundredDeferredBadRowsDoNotStarveReplayOfTailRows() = runBlocking {
+        ready()
+        // Insert 200 bad rows
+        for (i in 1..200) {
+            val id = "evt-bad-$i"
+            holder.db().journalDao().insert(
+                EventJournalEntity(
+                    eventId = id,
+                    generation = "gen",
+                    receivedAtEpochMs = 1_000L + i,
+                    expiresAtEpochMs = 60_000L + i,
+                    state = "PENDING",
+                    attempts = 0,
+                    failureCode = null,
+                    payload = "{ bad json",
+                    packageName = pkg,
+                    lossRecorded = LOSS_UNSETTLED,
+                ),
+            )
+        }
+        // Insert the 201st row with valid payload
+        val goodSnapshot = snapshot("evt-good-201")
+        ingest.journal(goodSnapshot, "gen", 60_000) shouldBe true
+
+        // First pass processes the 200 bad rows (marking them terminal FAILED)
+        val firstPass = ingest.pendingJournal()
+        firstPass.isEmpty() shouldBe true
+
+        // Bad rows left PENDING state, so second pass yields row 201 without starvation
+        val secondPass = ingest.pendingJournal()
+        secondPass.any { it.second.eventId == "evt-good-201" } shouldBe true
+        Unit
+    }
 }

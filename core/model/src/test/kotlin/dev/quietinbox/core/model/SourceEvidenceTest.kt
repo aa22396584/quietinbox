@@ -383,23 +383,23 @@ class SourceEvidenceTest : FunSpec({
     }
 
     test("evidence missing deviceModel with API retained cannot resolve to REAL_DEVICE_PASSED") {
-        resolveReview(reviewFull.copy(deviceModel = null)) shouldNotBe SourceVerificationTier.REAL_DEVICE_PASSED
+        resolveReview(reviewFull.copy(deviceModel = null)) shouldBe SourceVerificationTier.UNTESTED
     }
 
     test("evidence missing osApiLevel with model retained cannot resolve to REAL_DEVICE_PASSED") {
-        resolveReview(reviewFull.copy(osApiLevel = null)) shouldNotBe SourceVerificationTier.REAL_DEVICE_PASSED
+        resolveReview(reviewFull.copy(osApiLevel = null)) shouldBe SourceVerificationTier.UNTESTED
     }
 
     test("evidence missing adapterVersion cannot resolve to REAL_DEVICE_PASSED") {
-        resolveReview(reviewFull.copy(adapterVersion = null)) shouldNotBe SourceVerificationTier.REAL_DEVICE_PASSED
+        resolveReview(reviewFull.copy(adapterVersion = null)) shouldBe SourceVerificationTier.UNTESTED
     }
 
     test("evidence missing OEM cannot resolve to REAL_DEVICE_PASSED") {
-        resolveReview(reviewFull.copy(oem = null)) shouldNotBe SourceVerificationTier.REAL_DEVICE_PASSED
+        resolveReview(reviewFull.copy(oem = null)) shouldBe SourceVerificationTier.UNTESTED
     }
 
     test("evidence and current adapterId both blank cannot resolve to REAL_DEVICE_PASSED") {
-        resolveReview(reviewFull.copy(adapterId = ""), reviewFull.copy(adapterId = "")) shouldNotBe SourceVerificationTier.REAL_DEVICE_PASSED
+        resolveReview(reviewFull.copy(adapterId = ""), reviewFull.copy(adapterId = "")) shouldBe SourceVerificationTier.UNTESTED
     }
 
     test("catalog with only parser v1 synthetic evidence cannot be inherited by current parser v2") {
@@ -428,7 +428,11 @@ class SourceEvidenceTest : FunSpec({
                 cohort = cohort,
                 evidenceSummary = "synthetic-only test fixture",
             )
+            // Tested with matching cohort
             SourceEvidenceResolver.resolveTier(pkg, true, cohort, listOf(record)) shouldBe
+                SourceVerificationTier.UNTESTED
+            // Also tested without current device cohort: unversioned synthetic evidence cannot be accepted
+            SourceEvidenceResolver.resolveTier(pkg, true, null, listOf(record)) shouldBe
                 SourceVerificationTier.UNTESTED
         }
     }

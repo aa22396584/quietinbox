@@ -147,14 +147,21 @@ object SourceEvidenceResolver {
             return matchingSynthetic?.tier ?: SourceVerificationTier.UNTESTED
         }
 
-        // Without device cohort, check if there is an explicit non-device tier (e.g. SYNTHETIC_ONLY)
-        val nonDeviceRecord = matches.firstOrNull { it.tier == SourceVerificationTier.SYNTHETIC_ONLY }
+        // Without device cohort, check if there is an explicit non-device tier (e.g. SYNTHETIC_ONLY) with valid parser identity & version
+        val nonDeviceRecord = matches.firstOrNull {
+            it.tier == SourceVerificationTier.SYNTHETIC_ONLY &&
+                !it.cohort.adapterId.isNullOrBlank() &&
+                !it.cohort.adapterVersion.isNullOrBlank()
+        }
         if (nonDeviceRecord != null) {
             return SourceVerificationTier.SYNTHETIC_ONLY
         }
         val firstRecord = matches.first()
-        if (firstRecord.tier == SourceVerificationTier.REAL_DEVICE_PASSED) {
-            // Unconfirmed device cohort cannot inherit REAL_DEVICE_PASSED
+        if (firstRecord.tier == SourceVerificationTier.REAL_DEVICE_PASSED ||
+            firstRecord.tier == SourceVerificationTier.SYNTHETIC_ONLY
+        ) {
+            // Unconfirmed device cohort cannot inherit REAL_DEVICE_PASSED,
+            // and synthetic evidence without valid adapterVersion/adapterId cannot resolve to SYNTHETIC_ONLY.
             return SourceVerificationTier.UNTESTED
         }
         return firstRecord.tier

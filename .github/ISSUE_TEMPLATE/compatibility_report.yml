@@ -1,52 +1,126 @@
 name: Source compatibility report / 來源相容性回報
-description: A messaging app whose notifications are captured wrongly, partially or not at all. 某通訊 App 的通知被錯誤、部分或完全沒有擷取。
+description: Report one synthetic real-device scenario for one exact source-app version. 回報一個來源 App 精確版本的一個合成實機情境。
 labels: [capture]
 body:
   - type: markdown
     attributes:
       value: |
-        This is how a row in docs/COMPATIBILITY.md moves from SYNTHETIC_ONLY to REAL_DEVICE_PASSED. Only anonymised, synthetic-content fixtures are accepted: send yourself messages such as "T001 alpha" from a second test account, never real conversations. See "Submitting an anonymised fixture" in docs/COMPATIBILITY.md.
-        docs/COMPATIBILITY.md 的列要從 SYNTHETIC_ONLY 升到 REAL_DEVICE_PASSED 就靠這裡。只接受匿名、合成內容的 fixture：用第二個測試帳號傳「T001 alpha」這類訊息給自己，絕不要真實對話。流程見 docs/COMPATIBILITY.md「提交匿名 fixture」。
+        Submit one docs/TEST_MATRIX.md scenario per report. Use two consenting test accounts and synthetic markers only. No real names, chat text, conversation screenshots, extras values, account identifiers or real notification contents (synthetic markers are permitted).
+        每張回報只填 docs/TEST_MATRIX.md 的一個情境。只能使用兩個知情同意的測試帳號與合成標記。不得提供真實姓名、聊天文字、對話截圖、extras 值、帳號識別碼或真實通知內容（允許合成標記）。
   - type: input
     id: source
     attributes:
-      label: Source app, package name and versionCode / 來源 App、套件名稱、versionCode
-      placeholder: LINE, jp.naver.line.android, 150200
+      label: Source app and package / 來源 App 與套件名稱
+      placeholder: LINE, jp.naver.line.android
     validations:
       required: true
   - type: input
-    id: device
+    id: source_version
     attributes:
-      label: Device, Android version, OEM, system language / 裝置、Android 版本、OEM、系統語言
+      label: Source app versionCode / 來源 App versionCode
+      placeholder: "150200"
+    validations:
+      required: true
+  - type: input
+    id: adapter
+    attributes:
+      label: Adapter and version / Adapter 與版本
+      placeholder: line 0.1.0
     validations:
       required: true
   - type: input
     id: quietinbox
     attributes:
-      label: QuietInbox version / commit
+      label: QuietInbox commit
+      placeholder: Full commit SHA / 完整 commit SHA
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Android version, OEM and device model / Android 版本、OEM 與裝置型號
+      placeholder: Android 16, Samsung, SM-S9280
+    validations:
+      required: true
+  - type: input
+    id: language
+    attributes:
+      label: Android system language / Android 系統語言
+      placeholder: zh-TW
+    validations:
+      required: true
+  - type: dropdown
+    id: scenario
+    attributes:
+      label: Scenario / 情境
+      description: Run exactly the selected protocol from docs/TEST_MATRIX.md. 請完全依照 docs/TEST_MATRIX.md 的所選流程執行。
+      options:
+        - T001 — direct message / 私訊
+        - T004 — sticker and media / 貼圖與媒體
+        - T016 — group and stacked notifications / 群組與堆疊通知
+        - T017 — identical repeated text / 相同重複文字
+        - T045 — preview off / 關閉預覽
     validations:
       required: true
   - type: dropdown
     id: shape
     attributes:
       label: Notification shape / 通知形狀
-      options: [MessagingStyle, BigTextStyle, InboxStyle, Group summary only, Other]
+      options:
+        - MessagingStyle
+        - BigTextStyle
+        - InboxStyle
+        - Group summary only
+        - Other or unknown / 其他或未知
     validations:
       required: true
   - type: textarea
     id: expected
     attributes:
-      label: What the notification showed vs. what QuietInbox stored (synthetic text only) / 通知顯示什麼、靜讀存了什麼（僅合成文字）
+      label: Expected outcome and known uncertainty / 預期結果與已知不確定性
+      description: Copy the relevant protocol expectation, including UNKNOWN or UNVERIFIED boundaries. 請帶入流程的預期結果，包括 UNKNOWN 或 UNVERIFIED 邊界。
     validations:
       required: true
   - type: textarea
-    id: fixture
+    id: observed
     attributes:
-      label: Anonymised extras dump (key names, template, shapes; no real names or bodies) / 匿名 extras 摘要
+      label: Observed outcome, using synthetic markers only / 觀察結果，僅限合成標記
+      description: State what the shade exposed and what QuietInbox stored; do not paste a real notification. 寫出通知列暴露了什麼、靜讀存了什麼；不要貼真實通知。
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: Scenario result / 情境結果
+      options:
+        - REAL_DEVICE_PASSED — requires read-state PASS / 需要已讀狀態 PASS
+        - PARTIAL
+        - REGRESSED
+        - BLOCKED
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitised result evidence / 去識別化結果證據
+      description: Provide the body-free diagnostic summary, notification template/shape, extras key names (never values), and links to synthetic-only artifacts if any. 提供不含正文的診斷摘要、通知樣板／形狀、extras 鍵名（絕不是值），以及合成內容 artifact 的連結（若有）。
       render: text
-  - type: checkboxes
+    validations:
+      required: true
+  - type: dropdown
     id: readstate
     attributes:
-      label: Read-state check / 已讀狀態
+      label: Read-only source verification / 唯讀來源驗證
       options:
-        - label: I confirmed that reading the copy in QuietInbox did NOT mark the chat as read in the source app. 我確認在靜讀讀副本不會讓來源 App 標記已讀。
+        - PASS — no source-side action observed / 通過 — 未觀察到來源端動作
+        - FAIL — source was marked read or otherwise acted upon / 失敗 — 來源被標記已讀或發生其他動作
+        - UNKNOWN — read-only behavior could not be verified / 未知 — 無法驗證唯讀行為
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Synthetic-data confirmation / 合成資料確認
+      options:
+        - label: This report contains only synthetic markers and no real chat data or account identifiers. 本回報只含合成標記，不含真實聊天資料或帳號識別碼。
+          required: true

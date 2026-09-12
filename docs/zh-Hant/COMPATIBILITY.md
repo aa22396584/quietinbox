@@ -15,10 +15,25 @@
 | 其他任何 App | — | `standard` | 1.0.0 | SYNTHETIC_ONLY | HEAD | — | — | `core/parser/src/test/.../StandardParserTest.kt` |
 | QuietInbox 合成發布器 | `dev.quietinbox.app.debug` | `standard` | 1.0.0 | REAL_DEVICE_PASSED | afa7818 | 1 | Android 16／Samsung SM-S9280 | 引導流程步驟 4 擷取到 3/3 則訊息（2026-09-06） |
 
+上表保留為 adapter 層級的合成涵蓋摘要。歷史上的合成發布器觀察早於真實來源流程，不能作為任何來源 App 的證據。
+
+## 真實來源證據紀錄（Issue #22，RS-01）
+
+每一個精確的**來源 App 版本 × 情境**組合各記一列。結果不得沿用到其他 App 版本、情境、裝置、OS 或語言。
+「預期結果」來自 `TEST_MATRIX.md` 的流程；「觀察結果」只寫實際發生的事。只完成部分情境時，應在情境層級使用
+`PARTIAL`、`REGRESSED` 或 `BLOCKED`，不得把整個來源提升。已讀狀態查核為失敗或未知時不得標成
+`REAL_DEVICE_PASSED`，但仍可作為 `REGRESSED`、`PARTIAL` 或 `BLOCKED` 的有效證據。尚未執行任何真實來源流程，
+因此這份範本刻意沒有結果列。
+
+| 來源 | Package | 來源 versionCode | Adapter／版本 | QuietInbox commit | Android／OEM／裝置 | 系統語言 | 情境 | 預期結果 | 觀察結果 | 已讀狀態驗證 | 狀態 | 結果／證據 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+<!-- 只有以合成測試帳號內容跑完一個已定義流程後，才加入資料列。 -->
+
 目前沒有任何 adapter 以 `VERIFIED` 信心度輸出 `sourceMessageId` 或 `SOURCE_CHAT_ID` 證據，因為還沒有來自
-真實裝置的 fixture。要把某一列提升為 `REAL_DEVICE_PASSED`，必須以兩個知情同意的測試帳號、並在訊息內容中
-放入合成標記，完成 `TEST_MATRIX.md` 中的 T001／T004／T016／T017／T045 情境；真實的私人訊息絕不會進入這個
-repository。
+真實裝置的 fixture。每一筆真實來源情境列只有在指定流程成功、且已讀狀態為 `PASS` 時，才能標為
+`REAL_DEVICE_PASSED`。同一 adapter／來源版本群組只有在下方所述的同一份完整設定鍵下，T001／T004／T016／
+T017／T045 全部通過，才能摘要為通過。請使用兩個知情同意的測試帳號並在訊息內容放入合成標記；真實私人訊息
+絕不會進入 repository。
 
 正開在畫面上的聊天室可能完全不發通知：不少 App 在對話在前景時會抑制通知列，而 QuietInbox 無法把這種情況
 與靜音的聊天室區分開來。本矩陣不驗證這一點；哪些 App、哪些版本會這樣做，屬於 issue #17 的實機證據。
@@ -52,13 +67,17 @@ repository。
 
 ## 提交匿名 fixture（QI-PARSER-017）
 
-只接受合成內容的 fixture；真實對話永遠不會進入 repo。要把某個來源的列升級：
+只接受合成內容的 fixture；真實對話永遠不會進入 repo。要加入一筆情境證據紀錄：
 
 1. 用兩個你自己的測試帳號。傳送的訊息正文只能是測試標記（`T001 alpha`、`T004 sticker`……），對應
    `TEST_MATRIX.md` 的每個情境（T001 / T004 / T016 / T017 / T045）各一則。
 2. 在 debug 版，擷取 → 複製摘要 會給出不含正文的診斷摘要；parser 警告與通知樣板是重點。
-3. 記錄：來源 App versionCode、Android 版本、OEM、系統語言、通知設定（預覽開／關）、通知形狀
+3. 記錄：來源名稱與 package、來源 App versionCode、adapter／版本、QuietInbox commit、Android 版本、
+   OEM／裝置、系統語言、情境編號、預期與觀察結果、通知設定（預覽開／關）、通知形狀
    （MessagingStyle / BigText / Inbox / summary）與 extras 的**鍵名**（絕不要可能帶文字的值）。
-4. 確認在靜讀讀副本沒有讓來源端標記已讀。
+4. 把已讀狀態查核記為 `PASS`、`FAIL` 或 `UNKNOWN`；失敗與未知仍是有用的 regression 證據，但不能產生
+   `REAL_DEVICE_PASSED`。
 5. 開一張「來源相容性回報」issue（`.github/ISSUE_TEMPLATE/compatibility_report.yml`）。維護者會把它轉成
-   `parsers/apps/src/test/` 下同樣合成文字的 Kotest fixture，矩陣的列連同 commit、versionCode 與裝置升級為 `REAL_DEVICE_PASSED`。
+   `parsers/apps/src/test/` 下同樣合成文字的 Kotest fixture，並加入帶有結果與證據的情境紀錄。只有在完全相同的
+   QuietInbox commit、adapter／版本、來源 versionCode、Android／OEM／裝置與系統語言設定下，五個情境全數通過，
+   才能升為 `REAL_DEVICE_PASSED`；這只證明該設定，不代表來源 App 全域相容。

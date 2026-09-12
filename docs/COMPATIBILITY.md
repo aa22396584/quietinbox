@@ -15,10 +15,29 @@ A new source-app version never inherits an older row's status.
 | Any other app | — | `standard` | 1.0.0 | SYNTHETIC_ONLY | HEAD | — | — | `core/parser/src/test/.../StandardParserTest.kt` |
 | QuietInbox synthetic publisher | `dev.quietinbox.app.debug` | `standard` | 1.0.0 | REAL_DEVICE_PASSED | afa7818 | 1 | Android 16 / Samsung SM-S9280 | Onboarding step 4 captured 3/3 messages (2026-09-06) |
 
+The table above remains the adapter-level synthetic coverage summary. Its historical synthetic-
+publisher observation predates the real-source protocols and is not evidence for any source app.
+
+## Real-source evidence records (Issue #22, RS-01)
+
+Record one row for each exact **source app version × scenario** combination. Never copy a result
+forward to another app version, scenario, device, OS or language. `Expected outcome` comes from the
+protocol in `TEST_MATRIX.md`; `Observed outcome` records only what happened. Use `PARTIAL`,
+`REGRESSED` or `BLOCKED` at scenario level rather than promoting an entire source from a subset.
+A failed or unknown read-state check cannot be `REAL_DEVICE_PASSED`, but it is still valid evidence
+for `REGRESSED`, `PARTIAL` or `BLOCKED`. No real-source protocol has been run yet, so this template
+deliberately contains no result rows.
+
+| Source | Package | Source versionCode | Adapter / version | QuietInbox commit | Android / OEM / device | System language | Scenario | Expected outcome | Observed outcome | Read-state verification | Status | Result / evidence |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+<!-- Add a row only after running one defined protocol with synthetic test-account content. -->
+
 No adapter emits `sourceMessageId` or `SOURCE_CHAT_ID` evidence at `VERIFIED` confidence, because no
-fixture from a real device exists yet. Promoting a row to `REAL_DEVICE_PASSED` requires the T001 /
-T004 / T016 / T017 / T045 scenarios from `TEST_MATRIX.md` with two consenting test accounts and
-synthetic markers in the message bodies; real private messages never enter the repository.
+fixture from a real device exists yet. Each real-source scenario row can be `REAL_DEVICE_PASSED`
+only after its named protocol succeeds and its read-state check is `PASS`. An adapter/source-version
+cohort can be summarised as passed only after T001 / T004 / T016 / T017 / T045 all pass under the
+same full configuration key described below. Use two consenting test accounts and synthetic markers
+in the message bodies; real private messages never enter the repository.
 
 A chat that is open on screen may post no notification at all: several apps suppress the shade
 while the conversation is in front, and QuietInbox cannot tell that case from a muted chat. The
@@ -62,17 +81,22 @@ rather than claiming to know which one applies.
 ## Submitting an anonymised fixture (QI-PARSER-017)
 
 Only fixtures with synthetic content are accepted; a real conversation never enters the
-repository. To promote a source row:
+repository. To add a scenario evidence record:
 
 1. Use two test accounts you own. Send messages whose bodies are test markers only
    (`T001 alpha`, `T004 sticker`, …), one per scenario of `TEST_MATRIX.md` (T001 / T004 / T016 /
    T017 / T045).
 2. On a debug build, Capture → Copy summary gives the body-free diagnostic summary; the parser
    warnings and the notification template are what matter.
-3. Record: source app versionCode, Android version, OEM, system language, notification settings
-   (preview on/off), the shape (MessagingStyle / BigText / Inbox / summary) and the extras **key
-   names** (never values that could carry text).
-4. Confirm that reading the copy in QuietInbox did not mark the chat as read on the source side.
+3. Record: source name and package, source app versionCode, adapter/version, QuietInbox commit,
+   Android version, OEM/device, system language, scenario id, expected and observed outcomes,
+   notification settings (preview on/off), the shape (MessagingStyle / BigText / Inbox / summary)
+   and extras **key names** (never values that could carry text).
+4. Record the read-state check as `PASS`, `FAIL` or `UNKNOWN`; failures and unknowns remain useful
+   regression evidence but cannot produce `REAL_DEVICE_PASSED`.
 5. Open a "Source compatibility report" issue (`.github/ISSUE_TEMPLATE/compatibility_report.yml`).
    A maintainer turns it into a Kotest fixture under `parsers/apps/src/test/` with the same synthetic
-   text, and the matrix row moves to `REAL_DEVICE_PASSED` with the commit, versionCode and device.
+   text and adds the scenario record with its result and evidence. Promotion requires all five
+   scenarios to pass under the same exact QuietInbox commit, adapter/version, source versionCode,
+   Android/OEM/device and system language; it is evidence for that configuration, not a global
+   source status.

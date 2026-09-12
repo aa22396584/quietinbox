@@ -1,0 +1,12 @@
+--- a/platform/storage/src/main/kotlin/dev/quietinbox/platform/storage/db/Daos.kt
++++ b/platform/storage/src/main/kotlin/dev/quietinbox/platform/storage/db/Daos.kt
+@@ -334,5 +334,1 @@ interface ConversationDao {
+-    @Query(
+-        """
+-        SELECT id FROM conversation
+-        WHERE createdAtEpochMs < :before
+-          AND NOT EXISTS (SELECT 1 FROM message m WHERE m.conversationId = conversation.id)
+-        """,
+-    )
++    @Query("SELECT id FROM conversation WHERE messageCount = 0 AND createdAtEpochMs < :before")
+     suspend fun emptyOlderThan(before: Long): List<Long>

@@ -1,0 +1,5 @@
+--- a/platform/storage/src/main/kotlin/dev/quietinbox/platform/storage/db/Daos.kt
++++ b/platform/storage/src/main/kotlin/dev/quietinbox/platform/storage/db/Daos.kt
+@@ -352,1 +352,1 @@ interface ConversationDao {
+-          AND NOT EXISTS (SELECT 1 FROM message m WHERE m.conversationId = conversation.id)
++          AND messageCount = 0

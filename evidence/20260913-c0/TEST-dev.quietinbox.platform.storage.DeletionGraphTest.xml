@@ -1,0 +1,17 @@
+<?xml version='1.0' encoding='UTF-8' ?>
+<testsuites tests="9" failures="0" errors="0" skipped="0" time="0.000" timestamp="2026-09-12T18:30:25" hostname="localhost">
+  <testsuite name="dev.quietinbox.platform.storage.DeletionGraphTest" tests="9" failures="0" errors="0" skipped="0" time="20.320" timestamp="2026-09-12T18:30:25" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554" />
+    </properties>
+    <testcase name="emptyConversationSweepDoesNotDeleteACopyCommittedAfterTheEmptyScan" classname="dev.quietinbox.platform.storage.DeletionGraphTest" time="2.438" />
+    <testcase name="deleteEverythingIsVerifiedAndNoCachedCipherOutlivesTheOldKey" classname="dev.quietinbox.platform.storage.DeletionGraphTest" time="3.386" />
+    <testcase name="emptyOlderThanDoesNotReturnConversationWithUnexpiredAmbiguousRepeat" classname="dev.quietinbox.platform.storage.DeletionGraphTest" time="1.626" />
+    <testcase name="emptyConversationSweepStillRemovesATrulyEmptyOldConversation" classname="dev.quietinbox.platform.storage.DeletionGraphTest" time="1.856" />
+    <testcase name="emptyConversationSweepKeepsAnUnexpiredAmbiguousRepeat" classname="dev.quietinbox.platform.storage.DeletionGraphTest" time="1.668" />
+    <testcase name="journalPayloadIsClearedTheMomentTheRowLeavesPending" classname="dev.quietinbox.platform.storage.DeletionGraphTest" time="1.568" />
+    <testcase name="removingASourceWithItsDataLeavesNothingBehind" classname="dev.quietinbox.platform.storage.DeletionGraphTest" time="1.733" />
+    <testcase name="expiredCopiesAreHiddenBeforeRetentionRunsAndRetentionRebuildsTheProjection" classname="dev.quietinbox.platform.storage.DeletionGraphTest" time="3.057" />
+    <testcase name="deletingTheNewestMessageRebuildsTheConversationProjection" classname="dev.quietinbox.platform.storage.DeletionGraphTest" time="2.988" />
+  </testsuite>
+</testsuites>

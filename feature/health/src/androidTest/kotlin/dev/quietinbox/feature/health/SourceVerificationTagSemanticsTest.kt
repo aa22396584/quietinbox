@@ -67,4 +67,39 @@ class SourceVerificationTagSemanticsTest {
         rule.onAllNodes(hasText(syntheticOnlyLabel)).assertCountEquals(0)
         rule.onAllNodes(hasText(verifiedLabel)).assertCountEquals(0)
     }
+
+    @Test
+    fun addSourceSheetRendersHonestTierForSyntheticAndVerifiedSources(): Unit {
+        val testApps = listOf(
+            InstalledApp(
+                packageName = "com.whatsapp",
+                label = "WhatsApp",
+                hasAdapter = true,
+                tier = SourceVerificationTier.SYNTHETIC_ONLY,
+            ),
+            InstalledApp(
+                packageName = "dev.quietinbox.app.debug",
+                label = "Synthetic Publisher",
+                hasAdapter = true,
+                tier = SourceVerificationTier.REAL_DEVICE_PASSED,
+            ),
+        )
+
+        rule.setContent {
+            QuietInboxTheme {
+                AddSourceSheet(
+                    onDismiss = {},
+                    search = { testApps },
+                    onAdd = {},
+                )
+            }
+        }
+
+        // WhatsApp has synthetic only label, NOT verified
+        rule.onAllNodes(hasText(syntheticOnlyLabel)).assertCountEquals(1)
+        // Synthetic publisher has verified label
+        rule.onAllNodes(hasText(verifiedLabel)).assertCountEquals(1)
+        // Neither renders old supported source label
+        rule.onAllNodes(hasText(knownSourceLabel)).assertCountEquals(0)
+    }
 }

@@ -187,8 +187,9 @@ private fun ScopeStep() {
     Point(Icons.Outlined.Lock, stringResource(R.string.ob_scope_point_4))
 }
 
+@androidx.annotation.VisibleForTesting(otherwise = androidx.annotation.VisibleForTesting.PRIVATE)
 @Composable
-private fun SourcesStep(state: OnboardingUiState, onToggle: (String) -> Unit) {
+internal fun SourcesStep(state: OnboardingUiState, onToggle: (String) -> Unit) {
     Illustration(Icons.Outlined.NotificationsActive, MaterialShapes.Pill.toShape())
     StepTitle(stringResource(R.string.ob_sources_title), stringResource(R.string.ob_sources_body))
     Column {

@@ -14,9 +14,14 @@ class SourceEvidenceTest : FunSpec({
         }
     }
 
-    test("hasAdapter true without real-device evidence never resolves to REAL_DEVICE_PASSED") {
+    test("empty catalog resolves to UNTESTED even if hasAdapter is true") {
+        val tier = SourceEvidenceResolver.resolveTier(KnownSources.LINE, hasAdapter = true, catalog = emptyList())
+        tier shouldBe SourceVerificationTier.UNTESTED
+    }
+
+    test("hasAdapter true without any catalog evidence resolves to UNTESTED") {
         val tier = SourceEvidenceResolver.resolveTier("com.unknown.adapter", hasAdapter = true)
-        tier shouldBe SourceVerificationTier.SYNTHETIC_ONLY
+        tier shouldBe SourceVerificationTier.UNTESTED
         tier shouldNotBe SourceVerificationTier.REAL_DEVICE_PASSED
     }
 
@@ -61,6 +66,73 @@ class SourceEvidenceTest : FunSpec({
         resolved shouldBe SourceVerificationTier.REAL_DEVICE_PASSED
     }
 
+    test("switching adapterId does not inherit REAL_DEVICE_PASSED") {
+        val verifiedRecord = SourceEvidenceRecord(
+            packageName = "com.test.messaging",
+            tier = SourceVerificationTier.REAL_DEVICE_PASSED,
+            cohort = SourceCohort(
+                packageName = "com.test.messaging",
+                sourceVersionCode = 100L,
+                adapterId = "adapter_v1",
+                adapterVersion = "1.0.0",
+                osApiLevel = 36,
+                deviceModel = "SM-S9280",
+                language = "zh-Hant",
+            ),
+            evidenceSummary = "Verified on adapter_v1",
+        )
+        val customCatalog = listOf(verifiedRecord)
+
+        val switchedAdapterCohort = SourceCohort(
+            packageName = "com.test.messaging",
+            sourceVersionCode = 100L,
+            adapterId = "adapter_v2",
+            adapterVersion = "1.0.0",
+            osApiLevel = 36,
+            deviceModel = "SM-S9280",
+            language = "zh-Hant",
+        )
+
+        val resolved = SourceEvidenceResolver.resolveTier(
+            packageName = "com.test.messaging",
+            hasAdapter = true,
+            currentCohort = switchedAdapterCohort,
+            catalog = customCatalog,
+        )
+        resolved shouldBe SourceVerificationTier.UNTESTED
+    }
+
+    test("evidence cohort missing version or device cannot act as universal wildcard") {
+        val wildcardRecord = SourceEvidenceRecord(
+            packageName = "com.test.messaging",
+            tier = SourceVerificationTier.REAL_DEVICE_PASSED,
+            cohort = SourceCohort(
+                packageName = "com.test.messaging",
+                adapterId = "test",
+                // missing version, OS, and deviceModel
+            ),
+            evidenceSummary = "Incomplete evidence record",
+        )
+        val customCatalog = listOf(wildcardRecord)
+
+        val realCohort = SourceCohort(
+            packageName = "com.test.messaging",
+            sourceVersionCode = 100L,
+            adapterId = "test",
+            osApiLevel = 36,
+            deviceModel = "SM-S9280",
+            language = "zh-Hant",
+        )
+
+        val resolved = SourceEvidenceResolver.resolveTier(
+            packageName = "com.test.messaging",
+            hasAdapter = true,
+            currentCohort = realCohort,
+            catalog = customCatalog,
+        )
+        resolved shouldBe SourceVerificationTier.UNTESTED
+    }
+
     test("source version mismatch does not inherit REAL_DEVICE_PASSED") {
         val verifiedRecord = SourceEvidenceRecord(
             packageName = "com.test.messaging",
@@ -68,14 +140,28 @@ class SourceEvidenceTest : FunSpec({
             cohort = SourceCohort(
                 packageName = "com.test.messaging",
                 sourceVersionCode = 100L,
+                adapterId = "test",
+                osApiLevel = 36,
+                deviceModel = "SM-S9280",
+                language = "en",
             ),
             evidenceSummary = "Version 100 passed",
         )
-        val customCatalog = SourceEvidenceResolver.DEFAULT_CATALOG + verifiedRecord
+        val syntheticRecord = SourceEvidenceRecord(
+            packageName = "com.test.messaging",
+            tier = SourceVerificationTier.SYNTHETIC_ONLY,
+            cohort = SourceCohort(packageName = "com.test.messaging", adapterId = "test"),
+            evidenceSummary = "Synthetic tests passed",
+        )
+        val customCatalog = listOf(verifiedRecord, syntheticRecord)
 
         val newerVersionCohort = SourceCohort(
             packageName = "com.test.messaging",
             sourceVersionCode = 101L,
+            adapterId = "test",
+            osApiLevel = 36,
+            deviceModel = "SM-S9280",
+            language = "en",
         )
 
         val resolved = SourceEvidenceResolver.resolveTier(
@@ -93,15 +179,29 @@ class SourceEvidenceTest : FunSpec({
             tier = SourceVerificationTier.REAL_DEVICE_PASSED,
             cohort = SourceCohort(
                 packageName = "com.test.messaging",
+                sourceVersionCode = 100L,
+                adapterId = "test",
                 osApiLevel = 34,
+                deviceModel = "SM-S9280",
+                language = "en",
             ),
             evidenceSummary = "API 34 passed",
         )
-        val customCatalog = SourceEvidenceResolver.DEFAULT_CATALOG + verifiedRecord
+        val syntheticRecord = SourceEvidenceRecord(
+            packageName = "com.test.messaging",
+            tier = SourceVerificationTier.SYNTHETIC_ONLY,
+            cohort = SourceCohort(packageName = "com.test.messaging", adapterId = "test"),
+            evidenceSummary = "Synthetic tests passed",
+        )
+        val customCatalog = listOf(verifiedRecord, syntheticRecord)
 
         val api36Cohort = SourceCohort(
             packageName = "com.test.messaging",
+            sourceVersionCode = 100L,
+            adapterId = "test",
             osApiLevel = 36,
+            deviceModel = "SM-S9280",
+            language = "en",
         )
 
         val resolved = SourceEvidenceResolver.resolveTier(
@@ -119,15 +219,29 @@ class SourceEvidenceTest : FunSpec({
             tier = SourceVerificationTier.REAL_DEVICE_PASSED,
             cohort = SourceCohort(
                 packageName = "com.test.messaging",
+                sourceVersionCode = 100L,
+                adapterId = "test",
+                osApiLevel = 36,
                 deviceModel = "Pixel 8",
+                language = "en",
             ),
             evidenceSummary = "Pixel 8 passed",
         )
-        val customCatalog = SourceEvidenceResolver.DEFAULT_CATALOG + verifiedRecord
+        val syntheticRecord = SourceEvidenceRecord(
+            packageName = "com.test.messaging",
+            tier = SourceVerificationTier.SYNTHETIC_ONLY,
+            cohort = SourceCohort(packageName = "com.test.messaging", adapterId = "test"),
+            evidenceSummary = "Synthetic tests passed",
+        )
+        val customCatalog = listOf(verifiedRecord, syntheticRecord)
 
         val galaxyCohort = SourceCohort(
             packageName = "com.test.messaging",
+            sourceVersionCode = 100L,
+            adapterId = "test",
+            osApiLevel = 36,
             deviceModel = "SM-S9280",
+            language = "en",
         )
 
         val resolved = SourceEvidenceResolver.resolveTier(
@@ -145,14 +259,28 @@ class SourceEvidenceTest : FunSpec({
             tier = SourceVerificationTier.REAL_DEVICE_PASSED,
             cohort = SourceCohort(
                 packageName = "com.test.messaging",
+                sourceVersionCode = 100L,
+                adapterId = "test",
+                osApiLevel = 36,
+                deviceModel = "SM-S9280",
                 language = "en",
             ),
             evidenceSummary = "en passed",
         )
-        val customCatalog = SourceEvidenceResolver.DEFAULT_CATALOG + verifiedRecord
+        val syntheticRecord = SourceEvidenceRecord(
+            packageName = "com.test.messaging",
+            tier = SourceVerificationTier.SYNTHETIC_ONLY,
+            cohort = SourceCohort(packageName = "com.test.messaging", adapterId = "test"),
+            evidenceSummary = "Synthetic tests passed",
+        )
+        val customCatalog = listOf(verifiedRecord, syntheticRecord)
 
         val jaCohort = SourceCohort(
             packageName = "com.test.messaging",
+            sourceVersionCode = 100L,
+            adapterId = "test",
+            osApiLevel = 36,
+            deviceModel = "SM-S9280",
             language = "ja",
         )
 

@@ -437,8 +437,9 @@ private fun SourceRow(source: SourceConfiguration, onEnabled: (Boolean) -> Unit,
     )
 }
 
+@androidx.annotation.VisibleForTesting(otherwise = androidx.annotation.VisibleForTesting.PRIVATE)
 @Composable
-private fun AddSourceSheet(onDismiss: () -> Unit, search: suspend (String) -> List<InstalledApp>, onAdd: (InstalledApp) -> Unit) {
+internal fun AddSourceSheet(onDismiss: () -> Unit, search: suspend (String) -> List<InstalledApp>, onAdd: (InstalledApp) -> Unit) {
     var query by remember { mutableStateOf("") }
     var apps by remember { mutableStateOf<List<InstalledApp>>(emptyList()) }
     LaunchedEffect(query) { apps = search(query) }

@@ -106,6 +106,7 @@ object SourceEvidenceResolver {
                 adapterVersion = "1.0.0",
                 osApiLevel = 36,
                 deviceModel = "SM-S9280",
+                language = "zh-Hant",
             ),
             evidenceSummary = "Onboarding step 4 captured 3/3 messages",
             commitSha = "afa7818",
@@ -125,18 +126,21 @@ object SourceEvidenceResolver {
         // Check for matching evidence records in catalog
         val matches = catalog.filter { it.packageName == packageName }
         if (matches.isEmpty()) {
-            return if (hasAdapter) SourceVerificationTier.SYNTHETIC_ONLY else SourceVerificationTier.UNTESTED
+            // An empty catalog or unknown evidence never claims SYNTHETIC_ONLY merely because hasAdapter == true
+            return SourceVerificationTier.UNTESTED
         }
 
         if (currentCohort != null) {
             val matchingRecord = matches.firstOrNull { record ->
-                matchesCohort(record.cohort, currentCohort)
+                matchesCohort(record.cohort, currentCohort, record.tier)
             }
             if (matchingRecord != null) {
                 return matchingRecord.tier
             }
-            // Cohort mismatch: never inherits verified status of older/different cohort (plan §14)
-            return if (hasAdapter) SourceVerificationTier.SYNTHETIC_ONLY else SourceVerificationTier.UNTESTED
+            // Cohort mismatch: never inherits verified status of older/different cohort (plan §14).
+            // Falls back to SYNTHETIC_ONLY only if catalog contains synthetic evidence for this package.
+            val hasSynthetic = matches.any { it.tier == SourceVerificationTier.SYNTHETIC_ONLY }
+            return if (hasSynthetic) SourceVerificationTier.SYNTHETIC_ONLY else SourceVerificationTier.UNTESTED
         }
 
         // Without device cohort, check if there is an explicit non-device tier (e.g. SYNTHETIC_ONLY)
@@ -147,13 +151,29 @@ object SourceEvidenceResolver {
         val firstRecord = matches.first()
         if (firstRecord.tier == SourceVerificationTier.REAL_DEVICE_PASSED) {
             // Unconfirmed device cohort cannot inherit REAL_DEVICE_PASSED
-            return if (hasAdapter) SourceVerificationTier.SYNTHETIC_ONLY else SourceVerificationTier.UNTESTED
+            val hasSynthetic = matches.any { it.tier == SourceVerificationTier.SYNTHETIC_ONLY }
+            return if (hasSynthetic) SourceVerificationTier.SYNTHETIC_ONLY else SourceVerificationTier.UNTESTED
         }
         return firstRecord.tier
     }
 
-    private fun matchesCohort(evidence: SourceCohort, current: SourceCohort): Boolean {
+    private fun matchesCohort(evidence: SourceCohort, current: SourceCohort, tier: SourceVerificationTier): Boolean {
         if (evidence.packageName != current.packageName) return false
+
+        if (tier == SourceVerificationTier.REAL_DEVICE_PASSED) {
+            // Switching adapterId must not inherit REAL_DEVICE_PASSED; adapterId must strictly match
+            if (current.adapterId == null || evidence.adapterId == null || current.adapterId != evidence.adapterId) {
+                return false
+            }
+            // Evidence cohort cannot be a universal wildcard: must specify version, device/OS, and language
+            val hasVersion = evidence.sourceVersionCode != null || evidence.sourceVersionName != null
+            if (!hasVersion) return false
+            if (evidence.osApiLevel == null && evidence.deviceModel == null) return false
+            if (evidence.language == null && current.language != null) return false
+        } else {
+            if (evidence.adapterId != null && evidence.adapterId != current.adapterId) return false
+        }
+
         if (evidence.sourceVersionCode != null && evidence.sourceVersionCode != current.sourceVersionCode) return false
         if (evidence.sourceVersionName != null && evidence.sourceVersionName != current.sourceVersionName) return false
         if (evidence.adapterVersion != null && evidence.adapterVersion != current.adapterVersion) return false

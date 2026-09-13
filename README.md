@@ -8,6 +8,8 @@ https://github.com/aa22396584/quietinbox
 [Codeberg](https://codeberg.org/ImL1s/quietinbox)
 
 
+> **Why this GitHub home?** Public development moved here from [ImL1s/quietinbox](https://github.com/ImL1s/quietinbox) because that GitHub account is currently restricted (anonymous visitors get 404 on the profile and many assets). This is the same project. Please open Issues and Pull Requests here.
+
 > 使用者自主啟用、本機優先、對資料來源與缺口誠實的 Android 通知副本收件匣。
 > A user-enabled, local-first Android inbox that keeps encrypted copies of messaging notifications and is honest about what it could not observe.
 

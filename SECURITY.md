@@ -7,7 +7,7 @@
 Please do **not** open a public issue for security problems. Report privately through one of:
 
 - GitHub private vulnerability reporting (enabled on this repository):
-  <https://github.com/ImL1s/quietinbox/security/advisories/new>
+  <https://github.com/aa22396584/quietinbox/security/advisories/new>
 - Email: <aa22396584@gmail.com> with the subject prefix `[quietinbox security]`.
 
 You will get an acknowledgement within 7 days. Include reproduction steps and the QuietInbox commit.
